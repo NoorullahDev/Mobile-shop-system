@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mobile Shop Manager Pro</title>
+    <meta name="description" content="Professional offline desktop mobile shop management software" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Prevent browser zoom via keyboard (Ctrl + +/-/0)
+      document.addEventListener('keydown', function(event) {
+        if (event.ctrlKey && (event.key === '=' || event.key === '-' || event.key === '0')) {
+          event.preventDefault();
+        }
+      });
+      // Prevent browser zoom via mouse wheel (Ctrl + Wheel)
+      document.addEventListener('wheel', function(event) {
+        if (event.ctrlKey) {
+          event.preventDefault();
+        }
+      }, { passive: false });
+
+      // Counteract Windows Display Scaling (DPI)
+      function adjustZoom() {
+        const ratio = window.devicePixelRatio || 1;
+        // When devicePixelRatio > 1, this scales the app down so it's not huge
+        // Effectively forcing 100% scale visually
+        document.documentElement.style.zoom = 1 / ratio;
+      }
+      adjustZoom();
+      
+      // Re-adjust if the user moves the window to a different monitor or changes scale
+      window.addEventListener('resize', adjustZoom);
+      window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('change', adjustZoom);
+    </script>
+  </body>
+</html>
