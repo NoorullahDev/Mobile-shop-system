@@ -325,7 +325,9 @@ mod tests {
     fn sells_accessory_and_reduces_stock() {
         use crate::models::accessory::CreateAccessoryInput;
         use crate::services::accessory_service;
+        use crate::services::test_utils::seed_product_categories;
         let conn = in_memory_conn();
+        seed_product_categories(&conn);
         let aid = accessory_service::create(
             &conn,
             CreateAccessoryInput {

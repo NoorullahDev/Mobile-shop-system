@@ -31,6 +31,17 @@ pub fn find_by_username(conn: &Connection, username: &str) -> Result<Option<Stor
     Ok(row)
 }
 
+pub fn get_password_hash(conn: &Connection, id: i64) -> Result<Option<String>, AppError> {
+    let hash: Option<String> = conn
+        .query_row(
+            "SELECT password_hash FROM users WHERE id = ?1 AND is_deleted = 0",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(hash)
+}
+
 pub fn get_role_name(conn: &Connection, role_id: i64) -> Result<Option<String>, AppError> {
     let name = conn
         .query_row(

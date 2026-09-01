@@ -85,6 +85,7 @@ mod tests {
             "payments",
             "expenses",
             "categories",
+            "product_categories",
             "report_templates",
             "settings",
             "activity_logs",

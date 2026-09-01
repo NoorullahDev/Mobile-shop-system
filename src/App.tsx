@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { MainLayout } from "./layouts/MainLayout";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -23,16 +23,33 @@ import { NotificationsPage } from "./pages/NotificationsPage";
 import { BackupManagerPage } from "./pages/BackupManagerPage";
 import { Spinner } from "./components/Button";
 import { Toaster } from "./components/Toaster";
+import { LicenseGate } from "./components/LicenseGate";
 import { useSessionStore } from "./store/session";
+import { useSettingsStore } from "./store/settings";
+import * as licenseService from "./services/licenseService";
+import type { LicenseStatus } from "./types/license";
 
 export default function App() {
   const { user, checking, init } = useSessionStore();
+  const businessName = useSettingsStore((s) => s.businessName);
+  const [licenseLoading, setLicenseLoading] = useState(true);
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
 
   useEffect(() => {
     init();
+    useSettingsStore.getState().load().catch(() => {});
+    licenseService
+      .getLicenseStatus()
+      .then(setLicenseStatus)
+      .catch(() => setLicenseStatus(null))
+      .finally(() => setLicenseLoading(false));
   }, [init]);
 
-  if (checking) {
+  useEffect(() => {
+    if (businessName) document.title = businessName;
+  }, [businessName]);
+
+  if (checking || licenseLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center" style={{ background: "#F4F6FA" }}>
         <div className="flex items-center gap-2" style={{ color: "#64748B" }}>
@@ -42,14 +59,36 @@ export default function App() {
     );
   }
 
+  // ── License gate: block the ERP until the license is active ──
+  const pendingActivation = !licenseStatus?.activated;
+
   return (
     <Toaster>
       <HashRouter>
         <Routes>
-          <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
-
+          {/* License activation / expired screen — shown whenever the license is not active */}
           <Route
-            element={user ? <MainLayout /> : <Navigate to="/login" replace />}
+            path="/activation"
+            element={
+              pendingActivation ? (
+                <LicenseGate status={licenseStatus!} onActivated={setLicenseStatus} />
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+
+          <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+          <Route
+            element={
+              pendingActivation ? (
+                <Navigate to="/activation" replace />
+              ) : user ? (
+                <MainLayout />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
           >
             <Route index element={<DashboardPage />} />
             <Route path="members" element={<MembersPage />} />
@@ -60,11 +99,20 @@ export default function App() {
             <Route path="expenses" element={<ExpensesPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="license" element={<LicensePage />} />
           </Route>
 
           {/* Placeholder routes for planned modules (built in later phases) */}
           <Route
-            element={user ? <MainLayout /> : <Navigate to="/login" replace />}
+            element={
+              pendingActivation ? (
+                <Navigate to="/activation" replace />
+              ) : user ? (
+                <MainLayout />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
           >
             <Route path="sales/new" element={<POSPage />} />
             <Route path="accessories" element={<AccessoriesPage />} />
@@ -73,7 +121,6 @@ export default function App() {
             <Route path="reports/profit" element={<ProfitLossPage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="activity" element={<ActivityLogsPage />} />
-            <Route path="license" element={<LicensePage />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="backups" element={<BackupManagerPage />} />
           </Route>

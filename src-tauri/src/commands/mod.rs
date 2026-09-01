@@ -10,6 +10,7 @@ use crate::models::member::{CreateMemberInput, Member};
 use crate::models::notification::{AppNotification, CreateNotificationInput, NotificationCount};
 use crate::models::expense::{Category, CategoryTotal, CreateCategoryInput, CreateExpenseInput, Expense};
 use crate::models::payment::{CreatePaymentInput, MemberBalance, Payment};
+use crate::models::product_category::{CreateProductCategoryInput, ProductCategory};
 use crate::models::purchase::{
     CreatePurchaseInput, CreateSupplierPaymentInput, Purchase, SupplierBalance, SupplierPayment,
 };
@@ -23,10 +24,12 @@ use crate::models::user::{
     SessionUser, UpdateRoleInput, UpdateUserInput, UserDetail,
 };
 use crate::security::SessionState;
+use crate::repositories::user_repository;
 use crate::services::{
     accessory_service, auth_service, backup_service, expense_service, license_service,
-    member_service, notification_service, payment_service, phone_service, purchase_service,
-    report_service, sale_service, settings_service, supplier_service, user_admin_service,
+    member_service, notification_service, payment_service, phone_service,
+    product_category_service, purchase_service, report_service, sale_service,
+    settings_service, supplier_service, user_admin_service,
 };
 
 /// Helper: acquire the database connection or fail gracefully.
@@ -77,12 +80,30 @@ pub fn logout(session: State<SessionState>) {
 }
 
 #[tauri::command]
-pub fn get_current_user(session: State<SessionState>) -> Result<Option<SessionUser>, AppError> {
-    let guard = session
+pub fn get_current_user(
+    db: State<Database>,
+    session: State<SessionState>,
+) -> Result<Option<SessionUser>, AppError> {
+    let snapshot = session
         .0
         .lock()
-        .map_err(|_| AppError::Internal("Session lock poisoned".into()))?;
-    Ok(guard.clone())
+        .map_err(|_| AppError::Internal("Session lock poisoned".into()))?
+        .clone();
+
+    let Some(mut user) = snapshot else {
+        return Ok(None);
+    };
+
+    // The `default_password` flag must reflect the live database rather than
+    // the login-time snapshot, so the default-password warning disappears as
+    // soon as the signed-in user's password is actually changed.
+    let guard = conn(&db)?;
+    let password_hash = user_repository::get_password_hash(&guard, user.id)?;
+    user.default_password = password_hash
+        .map(|hash| crate::security::verify_password("admin123", &hash).unwrap_or(false))
+        .unwrap_or(false);
+
+    Ok(Some(user))
 }
 
 // ---- User & Role Management ----
@@ -641,6 +662,55 @@ pub fn delete_category(
 ) -> Result<(), AppError> {
     let guard = conn(&db)?;
     expense_service::delete_category(&guard, id, actor)
+}
+
+// ---- Product Categories (phones & accessories) ----
+
+#[tauri::command]
+pub fn create_product_category(
+    db: State<Database>,
+    _session: State<SessionState>,
+    input: CreateProductCategoryInput,
+    actor: Option<i64>,
+) -> Result<ProductCategory, AppError> {
+    let guard = conn(&db)?;
+    let id = product_category_service::create_category(&guard, &input, actor)?;
+    product_category_service::list_categories(&guard)?
+        .into_iter()
+        .find(|c| c.id == id)
+        .ok_or_else(|| AppError::validation("Category not found"))
+}
+
+#[tauri::command]
+pub fn list_product_categories(
+    db: State<Database>,
+    _session: State<SessionState>,
+) -> Result<Vec<ProductCategory>, AppError> {
+    let guard = conn(&db)?;
+    product_category_service::list_categories(&guard)
+}
+
+#[tauri::command]
+pub fn update_product_category(
+    db: State<Database>,
+    _session: State<SessionState>,
+    id: i64,
+    input: CreateProductCategoryInput,
+    actor: Option<i64>,
+) -> Result<ProductCategory, AppError> {
+    let guard = conn(&db)?;
+    product_category_service::update_category(&guard, id, &input, actor)
+}
+
+#[tauri::command]
+pub fn delete_product_category(
+    db: State<Database>,
+    _session: State<SessionState>,
+    id: i64,
+    actor: Option<i64>,
+) -> Result<(), AppError> {
+    let guard = conn(&db)?;
+    product_category_service::delete_category(&guard, id, actor)
 }
 
 #[tauri::command]

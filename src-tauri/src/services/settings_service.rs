@@ -20,9 +20,6 @@ pub fn update_setting(
     if key.is_empty() {
         return Err(AppError::validation("Setting key cannot be blank"));
     }
-    if value.is_empty() {
-        return Err(AppError::validation("Setting value cannot be blank"));
-    }
     let old = settings_repository::get(conn, key)?;
     settings_repository::set(conn, key, value)?;
     let action = if old.is_some() { "update" } else { "create" };
@@ -56,10 +53,13 @@ mod tests {
     }
 
     #[test]
-    fn blank_key_or_value_rejected() {
+    fn blank_key_rejected_empty_value_allowed() {
         let conn = in_memory_conn();
         assert!(update_setting(&conn, Some(1), "", "USD").is_err());
-        assert!(update_setting(&conn, Some(1), "currency", "  ").is_err());
-        assert!(get_all(&conn).unwrap().is_empty());
+        update_setting(&conn, Some(1), "phone", "").unwrap();
+        let all = get_all(&conn).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].key, "phone");
+        assert_eq!(all[0].value.as_deref(), Some(""));
     }
 }

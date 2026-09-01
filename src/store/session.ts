@@ -9,6 +9,7 @@ interface SessionState {
   init: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  clearDefaultPassword: (userId: number) => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -44,4 +45,9 @@ export const useSessionStore = create<SessionState>((set) => ({
       set({ user: null, error: null });
     }
   },
+
+  clearDefaultPassword: (userId: number) =>
+    set((s) => ({
+      user: s.user && s.user.id === userId ? { ...s.user, default_password: false } : s.user,
+    })),
 }));

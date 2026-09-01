@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useSessionStore } from "../store/session";
+import { useSettingsStore } from "../store/settings";
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -133,14 +134,25 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
   const user = useSessionStore((s) => s.user);
   const displayName = username || user?.username || "User";
   const displayRole = role || user?.role || "Staff";
+  const shopName = useSettingsStore((s) => s.businessName);
+  const shopLogo = useSettingsStore((s) => s.logo);
   return (
     <aside className="flex w-64 shrink-0 flex-col" style={{ background: "#0F1B32", borderRight: "1px solid #1E2E4F" }}>
       {/* Brand */}
       <div className="flex h-16 shrink-0 items-center gap-3 px-5" style={{ borderBottom: "1px solid #1E2E4F" }}>
-        <SideLogo />
+        {shopLogo ? (
+          <img
+            src={shopLogo}
+            alt={shopName || "Shop logo"}
+            className="h-8 w-8 shrink-0 rounded-md object-cover"
+            style={{ background: "#FFFFFF" }}
+          />
+        ) : (
+          <SideLogo />
+        )}
         <div className="min-w-0 leading-tight">
           <div className="truncate text-[15px] font-bold tracking-tight text-white">
-            Mobile Shop <span style={{ color: "#5B8FE8" }}>Pro</span>
+            {shopName || "Mobile Shop Pro"}
           </div>
           <div className="text-[10px] font-medium uppercase tracking-widest" style={{ color: "#5A6B8C" }}>
             ERP · Offline

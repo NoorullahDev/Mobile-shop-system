@@ -16,6 +16,7 @@ fn phone_from_row(r: &rusqlite::Row) -> rusqlite::Result<Phone> {
         network_type: r.get("network_type")?,
         battery_capacity: r.get("battery_capacity")?,
         imei: r.get("imei")?,
+        category: r.get("category")?,
         cost_price: r.get("cost_price")?,
         sale_price: r.get("sale_price")?,
         quantity: r.get("quantity")?,
@@ -40,18 +41,19 @@ fn imei_from_row(r: &rusqlite::Row) -> rusqlite::Result<PhoneImei> {
 }
 
 const COLS: &str = "p.id, p.brand, p.model, p.color, p.storage, p.ram, p.processor, \
-     p.chipset, p.network_type, p.battery_capacity, p.imei, p.cost_price, p.sale_price, \
+     p.chipset, p.network_type, p.battery_capacity, p.imei, p.category, p.cost_price, p.sale_price, \
      p.quantity, p.supplier_id, s.name AS supplier_name, p.low_stock_threshold, p.is_deleted, \
      p.created_at, p.updated_at";
 
 pub fn insert(conn: &Connection, input: &CreatePhoneInput) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO phones (brand, model, color, storage, ram, processor, chipset, network_type, battery_capacity, imei, cost_price, sale_price, quantity, supplier_id, low_stock_threshold)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        "INSERT INTO phones (brand, model, color, storage, ram, processor, chipset, network_type, battery_capacity, imei, category, cost_price, sale_price, quantity, supplier_id, low_stock_threshold)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             input.brand, input.model, input.color, input.storage, input.ram, input.processor,
-            input.chipset, input.network_type, input.battery_capacity, input.imei, input.cost_price,
-            input.sale_price, input.quantity, input.supplier_id, input.low_stock_threshold
+            input.chipset, input.network_type, input.battery_capacity, input.imei, input.category,
+            input.cost_price, input.sale_price, input.quantity, input.supplier_id,
+            input.low_stock_threshold
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -114,13 +116,13 @@ pub fn update(
     input: &CreatePhoneInput,
 ) -> Result<bool, AppError> {
     let affected = conn.execute(
-        "UPDATE phones SET brand=?1, model=?2, color=?3, storage=?4, ram=?5, processor=?6, chipset=?7, network_type=?8, battery_capacity=?9, imei=?10,
-         cost_price=?11, sale_price=?12, supplier_id=?13, low_stock_threshold=?14, updated_at=CURRENT_TIMESTAMP
-         WHERE id=?15 AND is_deleted=0",
+        "UPDATE phones SET brand=?1, model=?2, color=?3, storage=?4, ram=?5, processor=?6, chipset=?7, network_type=?8, battery_capacity=?9, imei=?10, category=?11,
+         cost_price=?12, sale_price=?13, supplier_id=?14, low_stock_threshold=?15, updated_at=CURRENT_TIMESTAMP
+         WHERE id=?16 AND is_deleted=0",
         params![
             input.brand, input.model, input.color, input.storage, input.ram, input.processor,
-            input.chipset, input.network_type, input.battery_capacity, input.imei, input.cost_price,
-            input.sale_price, input.supplier_id, input.low_stock_threshold, id
+            input.chipset, input.network_type, input.battery_capacity, input.imei, input.category,
+            input.cost_price, input.sale_price, input.supplier_id, input.low_stock_threshold, id
         ],
     )?;
     Ok(affected > 0)

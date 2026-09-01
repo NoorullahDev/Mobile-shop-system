@@ -3,17 +3,22 @@ import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
-import { ACCESSORY_TYPES } from "../types/inventory";
-import type { Accessory, CreateAccessoryInput, Supplier } from "../types/inventory";
+import type {
+  Accessory,
+  CreateAccessoryInput,
+  ProductCategory,
+  Supplier,
+} from "../types/inventory";
 
 interface AccessoryFormProps {
   onSubmit: (input: CreateAccessoryInput) => Promise<void>;
   onCancel: () => void;
   initial?: Accessory | null;
   suppliers: Supplier[];
+  categories: ProductCategory[];
 }
 
-export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: AccessoryFormProps) {
+export function AccessoryForm({ onSubmit, onCancel, initial, suppliers, categories }: AccessoryFormProps) {
   const [form, setForm] = useState<CreateAccessoryInput>({
     accessory_type: initial?.accessory_type ?? "",
     brand: initial?.brand ?? "",
@@ -39,8 +44,8 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
     ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
   ];
   const typeOptions = [
-    { value: "", label: "— Select type —" },
-    ...ACCESSORY_TYPES.map((t) => ({ value: t, label: t })),
+    { value: "", label: "— Select category —" },
+    ...categories.map((c) => ({ value: c.name, label: c.name })),
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -86,7 +91,7 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
           name="accessory_type"
           label="Category"
           required
-          placeholder="— Select type —"
+          placeholder="— Select category —"
           options={typeOptions}
           value={form.accessory_type ?? ""}
           onChange={(e) => set("accessory_type", e.target.value)}

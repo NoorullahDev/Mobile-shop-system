@@ -35,6 +35,7 @@ export function AccessoriesPage() {
       description="Manage your mobile accessories, from chargers to covers"
       addLabel="Add Accessory"
       icon={Headphones}
+      showCategoryManager
     />
   );
 }

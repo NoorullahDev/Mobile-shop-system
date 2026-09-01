@@ -8,9 +8,10 @@ interface CategoryFormProps {
   onSubmit: (input: CreateCategoryInput) => Promise<void>;
   onCancel: () => void;
   initial?: { id: number; name: string } | null;
+  categoryType?: string | null;
 }
 
-export function CategoryForm({ onSubmit, onCancel, initial }: CategoryFormProps) {
+export function CategoryForm({ onSubmit, onCancel, initial, categoryType = "expense" }: CategoryFormProps) {
   const [name, setName] = useState(initial?.name ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +25,10 @@ export function CategoryForm({ onSubmit, onCancel, initial }: CategoryFormProps)
     setSaving(true);
     setError(null);
     try {
-      await onSubmit({ name: name.trim(), type: "expense" });
+      await onSubmit({
+        name: name.trim(),
+        ...(categoryType ? { type: categoryType } : {}),
+      });
     } catch (err) {
       setError(String(err));
     } finally {

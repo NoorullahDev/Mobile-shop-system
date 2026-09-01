@@ -21,6 +21,8 @@ pub struct Phone {
     pub battery_capacity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub imei: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
     pub cost_price: f64,
     pub sale_price: f64,
     pub quantity: i64,
@@ -46,6 +48,7 @@ pub struct CreatePhoneInput {
     pub network_type: Option<String>,
     pub battery_capacity: Option<String>,
     pub imei: Option<String>,
+    pub category: Option<String>,
     pub cost_price: f64,
     pub sale_price: f64,
     pub quantity: i64,

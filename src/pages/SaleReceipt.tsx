@@ -1,5 +1,6 @@
 import { Printer, Building2 } from "lucide-react";
 import { Button } from "../components/Button";
+import { useSettingsStore } from "../store/settings";
 import type { Sale } from "../types/sale";
 
 const methodLabels: Record<string, string> = {
@@ -19,9 +20,16 @@ interface SaleReceiptProps {
 }
 
 export function SaleReceipt({ sale, onClose }: SaleReceiptProps) {
+  const shopName = useSettingsStore((s) => s.businessName);
+  const shopLogo = useSettingsStore((s) => s.logo);
+  const phone = useSettingsStore((s) => s.phone);
+  const email = useSettingsStore((s) => s.email);
+  const address = useSettingsStore((s) => s.address);
   const handlePrint = () => {
     window.print();
   };
+
+  const contacts = [phone, email].filter(Boolean).join(" · ");
 
   return (
     <div>
@@ -40,15 +48,30 @@ export function SaleReceipt({ sale, onClose }: SaleReceiptProps) {
       >
         {/* Receipt Header */}
         <div className="mb-5 flex flex-col items-center text-center">
-          <div
-            className="flex h-12 w-12 items-center justify-center rounded-full mb-3"
-            style={{ background: "#2E4B8F", color: "#FFFFFF" }}
-          >
-            <Building2 className="h-6 w-6" />
-          </div>
+          {shopLogo ? (
+            <img
+              src={shopLogo}
+              alt={shopName || "Shop logo"}
+              className="mb-3 h-12 w-12 rounded-full object-cover"
+              style={{ background: "#FFFFFF" }}
+            />
+          ) : (
+            <div
+              className="flex h-12 w-12 items-center justify-center rounded-full mb-3"
+              style={{ background: "#2E4B8F", color: "#FFFFFF" }}
+            >
+              <Building2 className="h-6 w-6" />
+            </div>
+          )}
           <h2 className="text-[18px] font-bold tracking-tight" style={{ color: "#0F172A" }}>
-            Mobile Shop System
+            {shopName || "Mobile Shop System"}
           </h2>
+          {(contacts || address) && (
+            <div className="mt-1 text-[11px] leading-snug" style={{ color: "#64748B" }}>
+              {contacts && <div>{contacts}</div>}
+              {address && <div>{address}</div>}
+            </div>
+          )}
           <p className="text-[12px] mt-1" style={{ color: "#64748B" }}>Sales Invoice / Receipt</p>
         </div>
 

@@ -16,6 +16,22 @@ export interface CreateSupplierInput {
 }
 
 // ===========================================================================
+// Dynamic product categories (phones & accessories)
+// Stored in the database and managed by the Owner/Admin. The former
+// hard-coded ACCESSORY_TYPES list was removed in favour of these rows.
+// ===========================================================================
+
+export interface ProductCategory {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export interface CreateProductCategoryInput {
+  name: string;
+}
+
+// ===========================================================================
 // Mobile Phones
 // ===========================================================================
 
@@ -31,6 +47,7 @@ export interface Phone {
   network_type?: string | null;
   battery_capacity?: string | null;
   imei?: string | null;
+  category?: string | null;
   cost_price: number;
   sale_price: number;
   quantity: number;
@@ -53,6 +70,7 @@ export interface CreatePhoneInput {
   network_type?: string | null;
   battery_capacity?: string | null;
   imei?: string | null;
+  category?: string | null;
   cost_price: number;
   sale_price: number;
   quantity: number;
@@ -112,17 +130,6 @@ export interface CreateAccessoryInput {
 // ===========================================================================
 // Shared constants
 // ===========================================================================
-
-export const ACCESSORY_TYPES = [
-  "Charger",
-  "Cover",
-  "Cable",
-  "Earphones",
-  "Power Bank",
-  "Screen Protector",
-  "Holder",
-  "Other",
-] as const;
 
 export const NETWORK_TYPES = ["4G", "5G", "3G", "Dual SIM 4G", "Dual SIM 5G"] as const;
 

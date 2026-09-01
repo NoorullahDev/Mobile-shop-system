@@ -4,13 +4,14 @@ import { Input } from "../components/Input";
 import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
 import { NETWORK_TYPES } from "../types/inventory";
-import type { CreatePhoneInput, Phone, Supplier } from "../types/inventory";
+import type { CreatePhoneInput, Phone, ProductCategory, Supplier } from "../types/inventory";
 
 interface PhoneFormProps {
   onSubmit: (input: CreatePhoneInput) => Promise<void>;
   onCancel: () => void;
   initial?: Phone | null;
   suppliers: Supplier[];
+  categories: ProductCategory[];
 }
 
 const BRAND_PRESETS = ["Samsung", "Apple", "Xiaomi", "Oppo", "Vivo", "Realme", "Infinix", "Techno", "Nokia", "Other"];
@@ -25,10 +26,11 @@ const ramOptions = [
   ...["3GB", "4GB", "6GB", "8GB", "12GB", "16GB"].map((r) => ({ value: r, label: r })),
 ];
 
-export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormProps) {
+export function PhoneForm({ onSubmit, onCancel, initial, suppliers, categories }: PhoneFormProps) {
   const [form, setForm] = useState<CreatePhoneInput>({
     brand: initial?.brand ?? "",
     model: initial?.model ?? "",
+    category: initial?.category ?? "",
     ram: initial?.ram ?? "",
     storage: initial?.storage ?? "",
     color: initial?.color ?? "",
@@ -59,6 +61,10 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
   const brandOptions = [
     { value: "", label: "— Select brand —" },
     ...BRAND_PRESETS.map((b) => ({ value: b, label: b })),
+  ];
+  const categoryOptions = [
+    { value: "", label: "— No category —" },
+    ...categories.map((c) => ({ value: c.name, label: c.name })),
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -93,6 +99,7 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
         network_type: form.network_type ? form.network_type.trim() : "",
         battery_capacity: form.battery_capacity ? form.battery_capacity.trim() : "",
         imei: imei || "",
+        category: form.category ? form.category.trim() : "",
         cost_price: Number(form.cost_price) || 0,
         sale_price: Number(form.sale_price) || 0,
         quantity: Number(form.quantity) || 0,
@@ -110,7 +117,17 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       {error && <Alert message={error} />}
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
+        <Select
+          name="category"
+          label="Category"
+          hint="From your categories"
+          placeholder="— No category —"
+          options={categoryOptions}
+          value={form.category ?? ""}
+          onChange={(e) => set("category", e.target.value)}
+          disabled={saving}
+        />
         <Select
           name="brand"
           label="Brand"

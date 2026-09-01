@@ -576,6 +576,7 @@ function ResetPasswordModal({
     try {
       await userService.resetUserPassword(target.id, password, actor);
       toast(`Password reset for ${target.username}`, { title: "Success" });
+      useSessionStore.getState().clearDefaultPassword(target.id);
       onClose();
     } catch (e) {
       setError(String(e));

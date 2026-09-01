@@ -12,6 +12,7 @@ import {
   Boxes,
   Package,
   Coins,
+  Tags,
   X,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
@@ -24,9 +25,12 @@ import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Button";
 import { StatusBadge } from "../components/StatusBadge";
 import { RestockForm } from "./RestockForm";
+import { ManageProductCategoriesModal } from "./ManageProductCategoriesModal";
 import { useSupplierStore } from "../store/suppliers";
+import { useProductCategoryStore } from "../store/productCategories";
+import { useSessionStore } from "../store/session";
 import { formatMoneyCompact } from "../lib/format";
-import type { PhoneImei, Supplier } from "../types/inventory";
+import type { PhoneImei, ProductCategory, Supplier } from "../types/inventory";
 
 function formatPKR(n: number) {
   return `Rs. ${n.toLocaleString("en-PK")}`;
@@ -70,12 +74,14 @@ interface InventoryProductPageProps<T extends InventoryRow, I> {
     onCancel: () => void;
     initial?: T | null;
     suppliers: Supplier[];
+    categories: ProductCategory[];
   }>;
   typeName: string;
   itemName: string;
   description: string;
   addLabel: string;
   icon: typeof Smartphone | typeof Headphones;
+  showCategoryManager?: boolean;
   showImeiCol?: boolean;
   showImeiButton?: boolean;
 }
@@ -99,10 +105,13 @@ export function InventoryProductPage<T extends InventoryRow, I>({
   description,
   addLabel,
   icon,
+  showCategoryManager,
   showImeiCol,
   showImeiButton,
 }: InventoryProductPageProps<T, I>) {
   const { suppliers, load: loadSuppliers } = useSupplierStore();
+  const { categories, load: loadProductCategories } = useProductCategoryStore();
+  const user = useSessionStore((s) => s.user);
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<T | null>(null);
@@ -112,13 +121,19 @@ export function InventoryProductPage<T extends InventoryRow, I>({
   const [imeis, setImeis] = useState<PhoneImei[]>([]);
   const [imeiLoading, setImeiLoading] = useState(false);
   const [stockFilter, setStockFilter] = useState<"all" | "in" | "low" | "out">("all");
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const imeiReq = useRef(0);
+  const canManageCategories = user !== null && (user.role === "Admin" || user.role === "Owner");
 
   useEffect(() => {
     onLoad("");
     loadSuppliers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    loadProductCategories();
+  }, [loadProductCategories]);
 
   const doSearch = () => onLoad(search);
 
@@ -186,9 +201,20 @@ export function InventoryProductPage<T extends InventoryRow, I>({
         breadcrumb={[{ label: "Inventory" }, { label: typeName }]}
         meta={`${totalItems} items`}
         actions={
-          <Button onClick={openCreate} icon={<Plus className="h-3.5 w-3.5" />}>
-            {addLabel}
-          </Button>
+          <div className="flex items-center gap-2">
+            {showCategoryManager && canManageCategories && (
+              <Button
+                variant="secondary"
+                onClick={() => setCategoryManagerOpen(true)}
+                icon={<Tags className="h-3.5 w-3.5" />}
+              >
+                Manage Categories
+              </Button>
+            )}
+            <Button onClick={openCreate} icon={<Plus className="h-3.5 w-3.5" />}>
+              {addLabel}
+            </Button>
+          </div>
         }
       />
 
@@ -504,6 +530,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
           onCancel={() => setModalOpen(false)}
           initial={editing}
           suppliers={suppliers}
+          categories={categories}
         />
       </Modal>
 
@@ -602,6 +629,12 @@ export function InventoryProductPage<T extends InventoryRow, I>({
           </p>
         </div>
       </Modal>
+
+      {/* Manage Product Categories */}
+      <ManageProductCategoriesModal
+        open={categoryManagerOpen}
+        onClose={() => setCategoryManagerOpen(false)}
+      />
     </div>
   );
 }

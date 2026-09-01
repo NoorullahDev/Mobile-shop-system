@@ -7,6 +7,9 @@ mod security;
 mod services;
 mod utils;
 
+pub use security::get_hardware_id;
+pub use services::license_service::generate_key;
+
 use database::Database;
 use security::SessionState;
 use tauri::Manager;
@@ -87,6 +90,10 @@ pub fn run() {
             commands::list_categories,
             commands::update_category,
             commands::delete_category,
+            commands::create_product_category,
+            commands::list_product_categories,
+            commands::update_product_category,
+            commands::delete_product_category,
             commands::create_expense,
             commands::list_expenses,
             commands::get_expense,

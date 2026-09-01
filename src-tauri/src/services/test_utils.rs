@@ -42,6 +42,10 @@ CREATE TABLE payments (
 CREATE TABLE categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, type TEXT NOT NULL DEFAULT 'expense'
 );
+CREATE TABLE product_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, amount REAL NOT NULL,
     description TEXT, receipt_path TEXT, expense_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -68,7 +72,7 @@ CREATE TABLE suppliers (
 CREATE TABLE phones (
     id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT NOT NULL, model TEXT NOT NULL,
     color TEXT, storage TEXT, ram TEXT, processor TEXT, chipset TEXT, network_type TEXT,
-    battery_capacity TEXT, imei TEXT,
+    battery_capacity TEXT, imei TEXT, category TEXT,
     cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0,
     quantity INTEGER NOT NULL DEFAULT 0, supplier_id INTEGER,
     low_stock_threshold INTEGER NOT NULL DEFAULT 0,
@@ -141,4 +145,26 @@ pub fn in_memory_conn() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(SCHEMA).unwrap();
     conn
+}
+
+/// Seeds the default product categories (the values that replaced the former
+/// hard-coded ACCESSORY_TYPES list). Tests only need to call this when they
+/// create accessories or phones with a category.
+pub fn seed_product_categories(conn: &Connection) {
+    for name in [
+        "Charger",
+        "Cover",
+        "Cable",
+        "Earphones",
+        "Power Bank",
+        "Screen Protector",
+        "Holder",
+        "Other",
+    ] {
+        conn.execute(
+            "INSERT OR IGNORE INTO product_categories (name) VALUES (?1)",
+            [name],
+        )
+        .unwrap();
+    }
 }

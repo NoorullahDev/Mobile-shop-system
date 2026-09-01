@@ -7,6 +7,7 @@ pub mod phone;
 pub mod member;
 pub mod notification;
 pub mod payment;
+pub mod product_category;
 pub mod purchase;
 pub mod report;
 pub mod sale;

@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { formatMoney, formatDate } from "../lib/format";
+import { useSettingsStore } from "../store/settings";
 import type { PeriodSummary, PaymentBreakdown, TopSeller } from "../types/report";
 import type { CategoryTotal, Expense } from "../types/expense";
 
@@ -36,8 +37,47 @@ export const PrintReport = memo(function PrintReport({
   customerDues,
   supplierDues,
 }: PrintReportProps) {
+  const shopName = useSettingsStore((s) => s.businessName);
+  const shopLogo = useSettingsStore((s) => s.logo);
+  const phone = useSettingsStore((s) => s.phone);
+  const email = useSettingsStore((s) => s.email);
+  const address = useSettingsStore((s) => s.address);
+  const contacts = [phone, email].filter(Boolean).join(" · ");
+
   return (
     <div className="print-report">
+      <div
+        className="shop-header"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          marginBottom: "10px",
+          paddingBottom: "8px",
+          borderBottom: "2px solid #cbd5e1",
+        }}
+      >
+        {shopLogo && (
+          <img
+            src={shopLogo}
+            alt=""
+            style={{ height: "40px", width: "40px", objectFit: "contain", flexShrink: 0 }}
+          />
+        )}
+        <div>
+          <div style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+            {shopName || "Mobile Shop System"}
+          </div>
+          {(contacts || address) && (
+            <div style={{ fontSize: "10px", color: "#475569" }}>
+              {contacts && <span>{contacts}</span>}
+              {contacts && address ? " · " : ""}
+              {address}
+            </div>
+          )}
+        </div>
+      </div>
+
       <h1>Sales &amp; Financial Report</h1>
       <div className="print-sub">
         Period: {formatDate(from)} — {formatDate(to)}

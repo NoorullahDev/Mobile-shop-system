@@ -4,6 +4,16 @@ use crate::errors::AppError;
 use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
 use crate::repositories::phone_repository;
 use crate::services;
+use crate::services::product_category_service;
+
+fn validate_category(conn: &Connection, category: &str) -> Result<(), AppError> {
+    if !product_category_service::category_exists(conn, category)? {
+        return Err(AppError::validation(
+            "Selected category does not exist. Add it under 'Manage Categories'.",
+        ));
+    }
+    Ok(())
+}
 
 fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
     let brand = input.brand.trim().to_string();
@@ -38,6 +48,7 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
         network_type: trim(input.network_type),
         battery_capacity: trim(input.battery_capacity),
         imei,
+        category: trim(input.category),
         cost_price: input.cost_price,
         sale_price: input.sale_price,
         quantity: input.quantity,
@@ -48,6 +59,9 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
 
 pub fn create(conn: &Connection, input: CreatePhoneInput) -> Result<Phone, AppError> {
     let normalized = normalize(input)?;
+    if let Some(cat) = normalized.category.as_deref() {
+        validate_category(conn, cat)?;
+    }
     if let Some(imei) = &normalized.imei {
         if phone_repository::imei_taken(conn, imei, None)? {
             return Err(AppError::validation(format!("IMEI {imei} is already in use")));
@@ -70,6 +84,9 @@ pub fn get(conn: &Connection, id: i64) -> Result<Phone, AppError> {
 
 pub fn update(conn: &Connection, id: i64, input: CreatePhoneInput) -> Result<Phone, AppError> {
     let normalized = normalize(input)?;
+    if let Some(cat) = normalized.category.as_deref() {
+        validate_category(conn, cat)?;
+    }
     if let Some(imei) = &normalized.imei {
         if phone_repository::imei_taken(conn, imei, Some(id))? {
             return Err(AppError::validation(format!("IMEI {imei} is already in use")));
@@ -269,5 +286,21 @@ mod tests {
         let mut input = sample();
         input.imei = Some("12345".into());
         assert!(matches!(create(&conn, input).unwrap_err(), AppError::Validation(_)));
+    }
+
+    #[test]
+    fn unknown_category_rejected_and_valid_category_persisted() {
+        use crate::services::test_utils::seed_product_categories;
+        let conn = in_memory_conn();
+        seed_product_categories(&conn);
+
+        let mut bad = sample();
+        bad.category = Some("Not Real".into());
+        assert!(matches!(create(&conn, bad).unwrap_err(), AppError::Validation(_)));
+
+        let mut good = sample();
+        good.category = Some("Charger".into());
+        let p = create(&conn, good).unwrap();
+        assert_eq!(get(&conn, p.id).unwrap().category.as_deref(), Some("Charger"));
     }
 }

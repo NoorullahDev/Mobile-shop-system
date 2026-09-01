@@ -4,7 +4,6 @@ import {
   Check,
   RefreshCw,
   ShieldCheck,
-  ShieldOff,
   KeyRound,
   Calendar,
   Clock,
@@ -299,7 +298,6 @@ export function LicensePage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showRenew, setShowRenew] = useState(false);
-  const [deactivateBusy, setDeactivateBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -323,26 +321,7 @@ export function LicensePage() {
     setMessage(`License activated successfully for ${s.customer ?? "your shop"}.`);
   };
 
-  const handleDeactivate = async () => {
-    if (!window.confirm("Remove the current license? You will need a new key to reactivate.")) return;
-    setDeactivateBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const s = await licenseService.deactivateLicense(actor);
-      setStatus(s);
-      setMessage("License deactivated. The app is now unlicensed.");
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setDeactivateBusy(false);
-    }
-  };
-
   const hwId = status?.hardware_id ?? "";
-  const licenseKey = status?.activated || status?.expired
-    ? /* we don't store the raw key in status, show masked placeholder */ "••••••••••••••••...••••••••"
-    : "";
   const lastRenewed = formatDate(status?.activated_at);
   const expiryDate = formatDate(status?.activated_until);
 
@@ -532,33 +511,6 @@ export function LicensePage() {
             />
           </div>
 
-          {/* ── Advanced: Deactivate ── */}
-          {(status?.activated || status?.expired) && (
-            <div
-              className="rounded-xl bg-white p-5"
-              style={{ border: "1px solid #E2E8F0", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-[14px] font-semibold" style={{ color: "#0F172A" }}>
-                    Advanced
-                  </h3>
-                  <p className="mt-0.5 text-[12px]" style={{ color: "#64748B" }}>
-                    Deactivating removes the stored key. You will need a valid key to reactivate.
-                  </p>
-                </div>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={handleDeactivate}
-                  loading={deactivateBusy}
-                  icon={<ShieldOff className="h-3.5 w-3.5" />}
-                >
-                  Deactivate License
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 

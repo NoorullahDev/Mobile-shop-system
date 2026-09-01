@@ -545,6 +545,38 @@ const MIGRATIONS: &[(&str, &str)] = &[
         PRAGMA foreign_keys = ON;
         "#,
     ),
+    (
+        "0012_product_categories",
+        r#"
+        -- =====================================================================
+        -- Dynamic product categories for phones + accessories. Replaces the
+        -- hard-coded ACCESSORY_TYPES list: categories now live in the database
+        -- and are managed by the Owner/Admin (add / edit / delete).
+        -- =====================================================================
+        CREATE TABLE IF NOT EXISTS product_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Seed the categories that used to be hard-coded so existing accessory
+        -- rows and first-run dropdowns stay coherent. They are ordinary rows:
+        -- fully editable and deletable by the Owner/Admin.
+        INSERT OR IGNORE INTO product_categories (name) VALUES
+            ('Charger'),
+            ('Cover'),
+            ('Cable'),
+            ('Earphones'),
+            ('Power Bank'),
+            ('Screen Protector'),
+            ('Holder'),
+            ('Other');
+
+        -- Phones previously had no category; add an optional one now.
+        ALTER TABLE phones ADD COLUMN category TEXT;
+        CREATE INDEX IF NOT EXISTS idx_phones_category ON phones(category);
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { History, Save, DatabaseBackup, ArrowRight } from "lucide-react";
+import { History, Save, DatabaseBackup, ArrowRight, Store, ImagePlus, Trash2 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
@@ -11,7 +11,43 @@ import { EmptyState } from "../components/EmptyState";
 import * as settingsService from "../services/settingsService";
 import { setCurrency as setActiveCurrency } from "../lib/format";
 import { useSessionStore } from "../store/session";
+import { useSettingsStore } from "../store/settings";
 import type { ActivityLog } from "../types/settings";
+
+function resizeLogo(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("Please choose an image file (PNG, JPG)"))
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the selected file"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not decode the selected image"));
+      img.onload = () => {
+        const MAX = 256;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Could not process the selected image"));
+          return;
+        }
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export function SettingsPage() {
   const user = useSessionStore((s) => s.user);
@@ -22,6 +58,9 @@ export function SettingsPage() {
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [logo, setLogo] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,6 +82,7 @@ export function SettingsPage() {
         setAddress(map.get("address") ?? "");
         setPhone(map.get("phone") ?? "");
         setEmail(map.get("email") ?? "");
+        setLogo(map.get("shop_logo") || null);
         setError(null);
       } catch (e) {
         setError(String(e));
@@ -63,6 +103,18 @@ export function SettingsPage() {
 
   useEffect(() => { loadLogs(); }, []);
 
+  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setLogoError(null);
+    try {
+      setLogo(await resizeLogo(file));
+    } catch (err) {
+      setLogoError(String(err));
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setError(null);
@@ -74,10 +126,19 @@ export function SettingsPage() {
       if (address.trim()) entries.push(["address", address]);
       if (phone.trim()) entries.push(["phone", phone]);
       if (email.trim()) entries.push(["email", email]);
+      entries.push(["shop_logo", logo ?? ""]);
       for (const [k, v] of entries) {
         await settingsService.updateSetting(k, v, actor);
       }
       if (currency.trim()) setActiveCurrency(currency as "PKR" | "USD");
+      useSettingsStore.getState().applyChanges({
+        businessName: businessName.trim(),
+        currency: (currency.trim() || "PKR") as "PKR" | "USD",
+        address: address.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        logo,
+      });
       setMessage("Settings saved successfully.");
       await loadLogs();
     } catch (e) {
@@ -120,6 +181,52 @@ export function SettingsPage() {
               </Button>
             }
           >
+            <div className="mb-4 flex items-center gap-4">
+              <div
+                className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg"
+                style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}
+              >
+                {logo ? (
+                  <img src={logo} alt="Shop logo" className="h-full w-full object-cover" />
+                ) : (
+                  <Store className="h-7 w-7" style={{ color: "#94A3B8" }} />
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleLogoChange}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => logoInputRef.current?.click()}
+                    icon={<ImagePlus className="h-3.5 w-3.5" />}
+                  >
+                    {logo ? "Change Logo" : "Upload Logo"}
+                  </Button>
+                  {logo && (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => { setLogo(null); setLogoError(null); }}
+                      icon={<Trash2 className="h-3.5 w-3.5" />}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                {logoError && <span className="text-[11px]" style={{ color: "#DC2626" }}>{logoError}</span>}
+                <span className="text-[11px]" style={{ color: "#94A3B8" }}>
+                  PNG or JPG. Used in the sidebar, invoices and printed receipts.
+                </span>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Input
                 label="Business Name"
