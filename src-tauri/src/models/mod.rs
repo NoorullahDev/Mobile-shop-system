@@ -1,5 +1,6 @@
 pub mod accessory;
 pub mod backup;
+pub mod backup_config;
 pub mod expense;
 pub mod inventory;
 pub mod license;

@@ -9,6 +9,7 @@ use rusqlite::Connection;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
+    #[allow(dead_code)]
     pub backups_dir: PathBuf,
 }
 

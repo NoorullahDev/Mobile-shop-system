@@ -1,16 +1,72 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use chrono::Local;
 use rusqlite::{Connection, DatabaseName};
+use tauri::Manager;
 
 use crate::errors::AppError;
 use crate::models::backup::{Backup, BackupStatus, BackupType};
-use crate::repositories::backup_repository;
+use crate::models::backup_config::{BackupConfig, BackupStatusInfo, UpdateBackupConfigInput};
+use crate::repositories::{backup_repository, settings_repository};
 use crate::services;
+
+const SNAPSHOT_NAME: &str = "business_management.db";
+const MANIFEST_NAME: &str = "backup_info.json";
+
+const KEY_AUTO_ENABLED: &str = "auto_backup_enabled";
+const KEY_INTERVAL: &str = "auto_backup_interval_minutes";
+const KEY_FOLDER: &str = "backup_folder";
+const KEY_FREQUENCY: &str = "backup_frequency";
+
+const DEFAULT_INTERVAL_MINUTES: i64 = 30;
+
+/// Frequency preset keys exposed to the UI.
+pub const FREQ_EVERY_TIME: &str = "every_time";
+pub const FREQ_CUSTOM: &str = "custom";
+
+/// Minimum + maximum allowed custom interval in minutes.
+const MIN_INTERVAL: i64 = 1;
+const MAX_INTERVAL: i64 = 24 * 60;
 
 fn timestamp() -> String {
     Local::now().format("%Y%m%d_%H%M%S").to_string()
+}
+
+/// Returns a unique token for temp files/archives so concurrent backup calls
+/// (auto + manual, or parallel tests) never collide on the same path.
+fn unique_token() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{}_{}_{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed),
+        timestamp()
+    )
+}
+
+/// Human-friendly timestamp for the desktop backup file name, e.g. 2026-09-03_10-10.
+fn display_timestamp() -> String {
+    Local::now().format("%Y-%m-%d_%H-%M-%S").to_string()
+}
+
+const BACKUP_FOLDER: &str = "Software Backup";
+
+/// Resolves the backup directory on the user's Desktop: `Desktop/Software Backup`.
+/// Works in both development and the packaged EXE (USERPROFILE is always set).
+pub fn desktop_folder() -> Result<PathBuf, AppError> {
+    let profile = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| {
+            AppError::file("could not determine the user home directory for backups".to_string())
+        })?;
+    let desktop = std::path::PathBuf::from(&profile).join("Desktop");
+    let folder = desktop.join(BACKUP_FOLDER);
+    fs::create_dir_all(&folder)
+        .map_err(|e| AppError::file(format!("could not create backup folder: {e}")))?;
+    Ok(folder)
 }
 
 /// Writes an online backup of the live database to `destination` (consistent snapshot,
@@ -61,8 +117,137 @@ pub fn verify_backup(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Creates a managed backup inside `backups_dir`, records it in the `backups` table,
+/// Validates a stored backup entry. If it is an archive (.zip) the embedded
+/// SQLite snapshot is extracted first; otherwise the file is checked directly.
+pub fn verify_backup_entry(path: &Path) -> Result<(), AppError> {
+    if path.extension().map(|e| e.to_string_lossy().to_lowercase().as_bytes() == b"zip").unwrap_or(false) {
+        let temp = extract_snapshot(path)?;
+        let r = verify_backup(&temp);
+        let _ = std::fs::remove_file(&temp);
+        r
+    } else {
+        verify_backup(path)
+    }
+}
+
+/// Lightweight validation of a user-selected backup archive without restoring it:
+/// confirms the file exists, is a readable archive/database, and contains the
+/// expected snapshot. Used by the "Restore Backup" file-picker pre-check.
+pub fn validate_archive(path: &Path) -> Result<(), AppError> {
+    if !path.exists() {
+        return Err(AppError::validation(format!(
+            "Backup file not found: {}",
+            path.display()
+        )));
+    }
+    let is_zip = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase().as_bytes() == b"zip")
+        .unwrap_or(false);
+
+    if is_zip {
+        let file = std::fs::File::open(path)
+            .map_err(|e| AppError::validation(format!("Could not open backup file: {e}")))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|_| AppError::validation("The selected file is not a valid backup archive"))?;
+        let mut snap = archive.by_name(SNAPSHOT_NAME).map_err(|_| {
+            AppError::validation("The selected backup does not contain a database snapshot")
+        })?;
+        let mut tmp_dir = std::env::temp_dir();
+        tmp_dir.push(format!("bms_validate_{}.db", unique_token()));
+        let mut out = std::fs::File::create(&tmp_dir)
+            .map_err(|e| AppError::validation(format!("Could not prepare validation: {e}")))?;
+        let _ = std::io::copy(&mut snap, &mut out);
+        let res = verify_backup(&tmp_dir);
+        let _ = std::fs::remove_file(&tmp_dir);
+        res
+    } else {
+        verify_backup(path)
+    }
+}
+
+/// Extracts the SQLite snapshot from a backup archive into a fresh temp file and
+/// returns its path. The caller is responsible for removing the temp file.
+fn extract_snapshot(archive_path: &Path) -> Result<PathBuf, AppError> {
+    let file = fs::File::open(archive_path)
+        .map_err(|e| AppError::file(format!("could not open backup archive: {e}")))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| AppError::validation(format!("Invalid backup archive: {e}")))?;
+
+    let mut snap = archive
+        .by_name(SNAPSHOT_NAME)
+        .map_err(|_| AppError::validation("Backup archive does not contain a database snapshot"))?;
+
+    let temp_dir = std::env::temp_dir();
+    let temp = temp_dir.join(format!("bms_restore_{}.db", unique_token()));
+    let mut out = fs::File::create(&temp)
+        .map_err(|e| AppError::file(format!("could not create temp snapshot: {e}")))?;
+    std::io::copy(&mut snap, &mut out)
+        .map_err(|e| AppError::file(format!("could not extract snapshot: {e}")))?;
+    Ok(temp)
+}
+
+/// Packs the live SQLite snapshot plus a small JSON manifest into a `.zip`
+/// archive at `destination`. Returns the number of bytes written.
+fn write_zip(conn: &Connection, destination: &Path) -> Result<u64, AppError> {
+    if let Some(parent) = destination.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| {
+                AppError::file(format!("could not create backup directory: {e}"))
+            })?;
+        }
+    }
+
+    // Consistent online snapshot of the live database to a temp file.
+    let temp_dir = std::env::temp_dir();
+    let temp = temp_dir.join(format!("bms_snapshot_{}.db", unique_token()));
+    let _ = fs::remove_file(&temp);
+    write_backup(conn, &temp)?;
+
+    let file = fs::File::create(destination)
+        .map_err(|e| AppError::file(format!("failed to create backup archive: {e}")))?;
+    let mut writer = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default().compression_method(
+        zip::CompressionMethod::Deflated,
+    );
+
+    // 1) Database snapshot (contains settings, configuration, embedded images).
+    writer
+        .start_file(SNAPSHOT_NAME, options)
+        .map_err(|e| AppError::file(format!("failed to start snapshot entry: {e}")))?;
+    let db_bytes = fs::read(&temp)
+        .map_err(|e| AppError::file(format!("could not read snapshot: {e}")))?;
+    writer
+        .write_all(&db_bytes)
+        .map_err(|e| AppError::file(format!("failed to write snapshot entry: {e}")))?;
+
+    // 2) Manifest with app/backup metadata (software settings + config summary).
+    let manifest = serde_json::json!({
+        "app": "Mobile Shop Management System",
+        "backup_created_at": Local::now().to_rfc3339(),
+        "database": SNAPSHOT_NAME,
+    });
+    writer
+        .start_file(MANIFEST_NAME, options)
+        .map_err(|e| AppError::file(format!("failed to start manifest entry: {e}")))?;
+    writer
+        .write_all(manifest.to_string().as_bytes())
+        .map_err(|e| AppError::file(format!("failed to write manifest entry: {e}")))?;
+
+    let _ = fs::remove_file(&temp);
+
+    let zip_file = writer
+        .finish()
+        .map_err(|e| AppError::file(format!("failed to finalize backup archive: {e}")))?;
+    Ok(zip_file.metadata().map(|m| m.len()).unwrap_or(0))
+}
+
+/// Creates a managed backup in `backups_dir`, records it in the `backups` table,
 /// verifies the snapshot and logs the operation.
+///
+/// `backup_type` controls the on-disk file name prefix:
+///   - `BackupType::Full`   -> `Manual_Backup_<timestamp>.zip`
+///   - `BackupType::Database`-> `Auto_Backup_<timestamp>.zip`
 pub fn create_backup(
     conn: &Connection,
     backups_dir: &Path,
@@ -73,19 +258,23 @@ pub fn create_backup(
         AppError::file(format!("could not create backup directory: {e}"))
     })?;
 
-    let stamp = timestamp();
-    let mut file_name = format!("backup_{stamp}.db");
+    let prefix = match backup_type {
+        BackupType::Full => "Manual_Backup",
+        BackupType::Database => "Auto_Backup",
+    };
+    let stamp = display_timestamp();
+    let mut file_name = format!("{prefix}_{stamp}.zip");
     let mut destination = backups_dir.join(&file_name);
     let mut n = 1;
     while destination.exists() {
-        file_name = format!("backup_{stamp}_{n}.db");
+        file_name = format!("{prefix}_{stamp}_{n}.zip");
         destination = backups_dir.join(&file_name);
         n += 1;
     }
 
-    let size = write_backup(conn, &destination)? as i64;
+    let size = write_zip(conn, &destination)? as i64;
 
-    if let Err(e) = verify_backup(&destination) {
+    if let Err(e) = verify_backup_entry(&destination) {
         // A failed backup must still be recorded and surfaced to the user.
         let _ = backup_repository::insert(
             conn,
@@ -116,7 +305,7 @@ pub fn create_backup(
         "system",
         "normal",
         "Backup created",
-        &format!("A database backup was created: {file_name}"),
+        &format!("A backup was created: {file_name}"),
     )?;
 
     backup_repository::get_by_id(conn, id)?
@@ -156,17 +345,28 @@ pub fn delete_backup(conn: &Connection, actor: Option<i64>, id: i64) -> Result<(
     Ok(())
 }
 
-/// Restores the database contents from `source` into the live connection.
+/// Restores the database contents from a stored backup into the live connection.
 ///
-/// The backup is validated first, and an emergency safety copy of the current data is
-/// written to `backups_dir` before the restore touches anything (business rule 4).
+/// The backup (a `.zip` archive or a raw `.db` snapshot) is validated first, and an
+/// emergency safety copy of the current data is written to `backups_dir` before the
+/// restore touches anything (business rule 4).
 pub fn restore_backup(
     conn: &mut Connection,
     backups_dir: &Path,
     actor: Option<i64>,
     source: &Path,
 ) -> Result<(), AppError> {
-    verify_backup(source)?;
+    let snapshot = if source
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase().as_bytes() == b"zip")
+        .unwrap_or(false)
+    {
+        extract_snapshot(source)?
+    } else {
+        source.to_path_buf()
+    };
+
+    verify_backup(&snapshot)?;
 
     // Emergency safety backup (best-effort): never proceed without one if we can help it.
     fs::create_dir_all(backups_dir).map_err(|e| {
@@ -179,10 +379,15 @@ pub fn restore_backup(
 
     conn.restore(
         DatabaseName::Main,
-        source,
+        &snapshot,
         None::<fn(rusqlite::backup::Progress)>,
     )
     .map_err(|e| AppError::file(format!("failed to restore: {e}")))?;
+
+    // Clean up the extracted snapshot temp file if we created one.
+    if snapshot != source {
+        let _ = fs::remove_file(&snapshot);
+    }
 
     services::record_activity(conn, actor, "backup", "restore", None)?;
     services::notification_service::notify(
@@ -194,6 +399,174 @@ pub fn restore_backup(
         "The database was restored from a backup.",
     )?;
     Ok(())
+}
+
+const fn default_interval() -> i64 {
+    DEFAULT_INTERVAL_MINUTES
+}
+
+/// Loads the automatic-backup configuration. Missing keys fall back to defaults
+/// (enabled, 30 minutes, Desktop/Software Backup).
+pub fn get_config(conn: &Connection) -> Result<BackupConfig, AppError> {
+    let enabled = settings_repository::get(conn, KEY_AUTO_ENABLED)?
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(true);
+    let interval = settings_repository::get(conn, KEY_INTERVAL)?
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|v| *v >= 1)
+        .unwrap_or(default_interval());
+    let folder = match settings_repository::get(conn, KEY_FOLDER)? {
+        Some(f) if !f.trim().is_empty() => PathBuf::from(f),
+        _ => desktop_folder().unwrap_or_else(|_| std::env::temp_dir().join("Software Backup")),
+    };
+    let frequency = settings_repository::get(conn, KEY_FREQUENCY)?
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| {
+            if matches!(interval, 10 | 30 | 60 | 180) {
+                interval.to_string()
+            } else {
+                FREQ_CUSTOM.to_string()
+            }
+        });
+
+    Ok(BackupConfig {
+        auto_backup_enabled: enabled,
+        auto_backup_interval_minutes: interval,
+        backup_folder: folder.to_string_lossy().to_string(),
+        backup_frequency: frequency,
+    })
+}
+
+/// Saves the automatic-backup configuration.
+pub fn update_config(
+    conn: &Connection,
+    actor: Option<i64>,
+    input: UpdateBackupConfigInput,
+) -> Result<BackupConfig, AppError> {
+    let interval = input.auto_backup_interval_minutes.clamp(MIN_INTERVAL, MAX_INTERVAL);
+    settings_repository::set(
+        conn,
+        KEY_AUTO_ENABLED,
+        if input.auto_backup_enabled { "1" } else { "0" },
+    )?;
+    settings_repository::set(conn, KEY_INTERVAL, &interval.to_string())?;
+
+    if let Some(freq) = input.backup_frequency {
+        if !freq.trim().is_empty()
+            && [FREQ_EVERY_TIME, FREQ_CUSTOM, "10", "30", "60", "180"]
+                .contains(&freq.as_str())
+        {
+            settings_repository::set(conn, KEY_FREQUENCY, &freq)?;
+        }
+    }
+
+    let folder = input
+        .backup_folder
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| desktop_folder().unwrap_or_else(|_| std::env::temp_dir().join("Software Backup")));
+    fs::create_dir_all(&folder).map_err(|e| {
+        AppError::file(format!("could not create backup folder: {e}"))
+    })?;
+    settings_repository::set(conn, KEY_FOLDER, &folder.to_string_lossy())?;
+
+    services::record_activity(conn, actor, "backup", "update_config", None)?;
+    get_config(conn)
+}
+
+/// Resolves the effective backup directory for creating backups: the configured
+/// folder, defaulting to Desktop/Software Backup when not set.
+pub fn backup_dir(conn: &Connection) -> Result<PathBuf, AppError> {
+    get_config(conn).map(|c| PathBuf::from(&c.backup_folder))
+}
+
+/// Aggregate status info for the Backup UI.
+pub fn status_info(conn: &Connection) -> Result<BackupStatusInfo, AppError> {
+    let config = get_config(conn)?;
+    let total = backup_repository::count(conn)?;
+    let latest = backup_repository::latest(conn)?;
+    Ok(BackupStatusInfo {
+        config,
+        last_backup_at: latest.as_ref().map(|b| b.created_at.clone()),
+        total_backups: total,
+        last_backup_file: latest.map(|b| b.file_name),
+    })
+}
+
+/// Spawns the automatic backup background loop. Runs forever, re-reads the stored
+/// configuration every ~30s (so interval/enable changes apply without restart) and
+/// creates an `Auto_Backup_*.zip` on the configured folder. A single failed tick is
+/// logged and the loop continues so an unexpected error can never stop future backups.
+///
+/// Frequency handling:
+///   - `every_time` performs an immediate backup at startup and then idles (no periodic
+///     repeat); "every time" is event-driven (app launch + the existing exit backup).
+///   - any numeric interval (preset or custom) backs up on that schedule.
+pub fn spawn_auto_backup(handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut first_run = true;
+        loop {
+            let Some(db) = handle.try_state::<crate::database::Database>() else {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                continue;
+            };
+            let Ok(conn) = db.conn.lock() else {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                continue;
+            };
+            let cfg = match get_config(&conn) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    log::error!("auto-backup: could not read config: {e}");
+                    drop(conn);
+                    drop(db);
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    continue;
+                }
+            };
+            if !cfg.auto_backup_enabled {
+                drop(conn);
+                drop(db);
+                first_run = false;
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                continue;
+            }
+
+            let every_time = cfg.backup_frequency == FREQ_EVERY_TIME;
+            let do_now = first_run || !every_time;
+            drop(conn);
+            drop(db);
+
+            if do_now {
+                let result = (|| {
+                    let db = handle
+                        .try_state::<crate::database::Database>()
+                        .ok_or_else(|| AppError::Internal("database state unavailable".into()))?;
+                    let conn = db
+                        .conn
+                        .lock()
+                        .map_err(|_| AppError::Internal("database is locked".into()))?;
+                    let dir = backup_dir(&conn).or_else(|_| desktop_folder())?;
+                    let backup = create_backup(&conn, &dir, None, BackupType::Database)?;
+                    Ok::<Backup, AppError>(backup)
+                })();
+                match result {
+                    Ok(b) => log::info!("Auto backup created: {}", b.file_name),
+                    Err(e) => log::error!("Auto backup failed: {e}"),
+                }
+            }
+
+            first_run = false;
+
+            // Sleep the configured interval, or idle briefly in "every_time" mode.
+            let sleep = if every_time {
+                30
+            } else {
+                cfg.auto_backup_interval_minutes.max(1) as u64 * 60
+            };
+            std::thread::sleep(std::time::Duration::from_secs(sleep));
+        }
+    });
 }
 
 #[cfg(test)]
@@ -228,7 +601,8 @@ mod tests {
 
         let backup = create_backup(&conn, &dir, Some(7), BackupType::Database).expect("backup");
         assert!(backup.id > 0);
-        assert!(backup.file_name.ends_with(".db"));
+        assert!(backup.file_name.ends_with(".zip"));
+        assert!(backup.file_name.starts_with("Auto_Backup_"));
         assert_eq!(backup.status, BackupStatus::Success);
         assert_eq!(backup.created_by, Some(7));
 
@@ -242,7 +616,17 @@ mod tests {
         assert_eq!(list[0].file_name, backup.file_name);
         assert_eq!(backup_repository::count(&conn).unwrap(), 1);
 
-        verify_backup(dest).expect("valid backup verifies");
+        verify_backup_entry(dest).expect("valid backup verifies");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn manual_backup_uses_manual_prefix() {
+        let conn = test_utils::in_memory_conn();
+        let dir = temp_dir("manual_prefix");
+        let backup = create_backup(&conn, &dir, None, BackupType::Full).expect("backup");
+        assert!(backup.file_name.starts_with("Manual_Backup_"));
+        assert!(backup.file_name.ends_with(".zip"));
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -292,12 +676,28 @@ mod tests {
             "restore must reject a non-database file"
         );
 
-        // A truncated snapshot must also fail verification.
+        // A corrupted archive must fail verification.
         let backup = create_backup(&conn, &dir, None, BackupType::Database).expect("backup");
         let dest = Path::new(&backup.file_path);
+
+        // Overwrite the file start so the zip header/central directory is corrupt.
         let bytes = fs::read(dest).unwrap();
-        fs::write(dest, &bytes[..bytes.len() / 2]).unwrap();
-        assert!(verify_backup(dest).is_err(), "truncated file must fail verification");
+        let mut corrupted = bytes.clone();
+        if !corrupted.is_empty() {
+            let n = corrupted.len().min(10);
+            for b in corrupted[..n].iter_mut() {
+                *b = 0x00;
+            }
+        }
+        fs::write(dest, &corrupted).unwrap();
+        assert!(
+            verify_backup_entry(dest).is_err(),
+            "corrupted archive must fail verification"
+        );
+        assert!(
+            validate_archive(dest).is_err(),
+            "corrupted archive must fail validation"
+        );
 
         fs::remove_dir_all(dir).unwrap();
     }

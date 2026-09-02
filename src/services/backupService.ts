@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Backup } from "../types/backup";
+import type {
+  Backup,
+  BackupConfig,
+  BackupStatusInfo,
+  UpdateBackupConfigInput,
+} from "../types/backup";
 
 export async function createBackup(actor?: number | null): Promise<Backup> {
   return invoke<Backup>("create_backup", { actor: actor ?? null });
@@ -23,4 +28,36 @@ export async function deleteBackup(id: number, actor?: number | null): Promise<v
 
 export async function restoreBackup(id: number, actor?: number | null): Promise<void> {
   return invoke<void>("restore_backup", { id, actor: actor ?? null });
+}
+
+export async function pickBackupFile(): Promise<string | null> {
+  return invoke<string | null>("pick_backup_file");
+}
+
+export async function restoreBackupFromPath(
+  file_path: string,
+  actor?: number | null,
+): Promise<void> {
+  return invoke<void>("restore_backup_from_path", {
+    file_path,
+    actor: actor ?? null,
+  });
+}
+
+export async function getBackupConfig(): Promise<BackupConfig> {
+  return invoke<BackupConfig>("get_backup_config");
+}
+
+export async function updateBackupConfig(
+  input: UpdateBackupConfigInput,
+  actor?: number | null,
+): Promise<BackupConfig> {
+  return invoke<BackupConfig>("update_backup_config", {
+    input,
+    actor: actor ?? null,
+  });
+}
+
+export async function getBackupStatus(): Promise<BackupStatusInfo> {
+  return invoke<BackupStatusInfo>("get_backup_status");
 }

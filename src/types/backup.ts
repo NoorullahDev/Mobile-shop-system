@@ -12,6 +12,27 @@ export interface Backup {
   created_at: string;
 }
 
+export interface BackupConfig {
+  auto_backup_enabled: boolean;
+  auto_backup_interval_minutes: number;
+  backup_folder: string;
+  backup_frequency: string;
+}
+
+export interface UpdateBackupConfigInput {
+  auto_backup_enabled: boolean;
+  auto_backup_interval_minutes: number;
+  backup_folder?: string | null;
+  backup_frequency?: string | null;
+}
+
+export interface BackupStatusInfo {
+  config: BackupConfig;
+  last_backup_at: string | null;
+  total_backups: number;
+  last_backup_file: string | null;
+}
+
 export function parseBackupTime(input: string): Date {
   return new Date(input.replace(" ", "T") + "Z");
 }

@@ -8,6 +8,13 @@ import {
   UploadCloud,
   Archive,
   HardDrive,
+  CalendarClock,
+  Save,
+  FolderOpen,
+  ToggleLeft,
+  ToggleRight,
+  RefreshCcw,
+  FolderInput,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -17,13 +24,15 @@ import { Alert } from "../components/Alert";
 import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
+import { Select } from "../components/Select";
+import { Input } from "../components/Input";
 import * as backupService from "../services/backupService";
 import { useSessionStore } from "../store/session";
 import {
   parseBackupTime,
   formatBytes,
 } from "../types/backup";
-import type { Backup } from "../types/backup";
+import type { Backup, BackupStatusInfo } from "../types/backup";
 
 export function BackupManagerPage() {
   const actor = useSessionStore((s) => s.user?.id ?? null);
@@ -40,11 +49,30 @@ export function BackupManagerPage() {
   const [restoring, setRestoring] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  const [status, setStatus] = useState<BackupStatusInfo | null>(null);
+  const [autoEnabled, setAutoEnabled] = useState(true);
+  const [autoInterval, setAutoInterval] = useState<number>(30);
+  const [backupFrequency, setBackupFrequency] = useState<string>("30");
+  const [customInterval, setCustomInterval] = useState<number>(45);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  // File-picker restore path (chosen from Desktop/Software Backup)
+  const [fileRestoreTarget, setFileRestoreTarget] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setBackups(await backupService.listBackups());
+      const [list, info] = await Promise.all([
+        backupService.listBackups(),
+        backupService.getBackupStatus(),
+      ]);
+      setBackups(list);
+      setStatus(info);
+      setAutoEnabled(info.config.auto_backup_enabled);
+      setAutoInterval(info.config.auto_backup_interval_minutes);
+      setBackupFrequency(info.config.backup_frequency ?? "30");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -56,13 +84,42 @@ export function BackupManagerPage() {
     load();
   }, [load]);
 
+  const handleSaveConfig = async () => {
+    setSavingConfig(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const interval =
+        backupFrequency === "custom"
+          ? customInterval
+          : backupFrequency === "every_time"
+          ? autoInterval
+          : Number(backupFrequency);
+      const cfg = await backupService.updateBackupConfig(
+        {
+          auto_backup_enabled: autoEnabled,
+          auto_backup_interval_minutes: interval,
+          backup_frequency: backupFrequency,
+        },
+        actor,
+      );
+      setStatus((prev) => (prev ? { ...prev, config: cfg } : prev));
+      setAutoInterval(cfg.auto_backup_interval_minutes);
+      setMessage("Automatic backup settings saved.");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
   const handleCreate = async () => {
     setCreating(true);
     setError(null);
     setMessage(null);
     try {
       const created = await backupService.createBackup(actor);
-      setMessage(`Backup created: ${created.file_name}`);
+      setMessage(`Manual backup created: ${created.file_name}`);
       await load();
     } catch (e) {
       setError(String(e));
@@ -102,6 +159,40 @@ export function BackupManagerPage() {
     }
   };
 
+  const handlePickRestore = async () => {
+    setPicking(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const path = await backupService.pickBackupFile();
+      if (path) {
+        // Confirm before actually restoring (safety step).
+        setFileRestoreTarget(path);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const handleFileRestore = async () => {
+    if (!fileRestoreTarget) return;
+    setRestoring(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await backupService.restoreBackupFromPath(fileRestoreTarget, actor);
+      setMessage("Backup restored successfully.");
+      setFileRestoreTarget(null);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -119,16 +210,13 @@ export function BackupManagerPage() {
     }
   };
 
-  const totalSize = backups.reduce((s, b) => s + b.size, 0);
-  const lastBackup = backups[0] ?? null;
-
   return (
     <div>
       <PageHeader
         title="Backup Manager"
-        description="Protect your data with database backups and safe restore"
+        description="Protect your data with automatic and manual backups, plus safe restore"
         breadcrumb={[{ label: "System" }, { label: "Backups" }]}
-        meta={lastBackup ? `Last backup: ${lastBackup.file_name}` : undefined}
+        meta={status?.last_backup_at ? `Last backup: ${parseBackupTime(status.last_backup_at).toLocaleString("en-PK", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : undefined}
         actions={
           <div className="flex gap-2">
             <Button size="sm" variant="secondary" onClick={load} icon={<RefreshCw className="h-3.5 w-3.5" />}>
@@ -136,11 +224,20 @@ export function BackupManagerPage() {
             </Button>
             <Button
               size="sm"
+              variant="secondary"
+              onClick={handlePickRestore}
+              loading={picking}
+              icon={<FolderInput className="h-3.5 w-3.5" />}
+            >
+              Restore Backup
+            </Button>
+            <Button
+              size="sm"
               onClick={handleCreate}
               loading={creating}
               icon={<Plus className="h-3.5 w-3.5" />}
             >
-              {creating ? "Creating..." : "Create Backup"}
+              {creating ? "Creating..." : "Create Backup Now"}
             </Button>
           </div>
         }
@@ -152,41 +249,125 @@ export function BackupManagerPage() {
       <div className="mb-4">
         <Alert
           variant="info"
-          title="Restore safety"
-          message="Restoring replaces all current data. An automatic safety backup of your current data is made before every restore."
+          title="How backups work"
+          message="Backups are saved as .zip archives to your Desktop (Software Backup folder). They include your database, settings, configuration and embedded data. Automatic backups run on your chosen schedule; a backup is also taken automatically whenever you close the app."
         />
+      </div>
+
+      {/* Automatic backup settings */}
+      <div className="mb-4">
+        <Card title="Automatic Backup" subtitle="Schedule recurring backups while the app is running" noPadding>
+          <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
+            <div className="flex items-center justify-between rounded border p-4" style={{ borderColor: "#E2E8F0" }}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <CalendarClock className="h-4 w-4" style={{ color: "#3B6FD4" }} />
+                  <span className="font-semibold" style={{ fontSize: "13px", color: "#0F172A" }}>
+                    Enable automatic backups
+                  </span>
+                </div>
+                <p className="mt-1" style={{ fontSize: "12px", color: "#64748B" }}>
+                  {autoEnabled
+                    ? "Backups will run automatically on the selected schedule."
+                    : "Automatic backups are turned off. You can still create backups manually."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAutoEnabled((v) => !v)}
+                aria-label="Toggle automatic backups"
+                style={{ border: "none", background: "none", cursor: "pointer", color: autoEnabled ? "#16A34A" : "#94A3B8" }}
+              >
+                {autoEnabled ? <ToggleRight className="h-7 w-7" /> : <ToggleLeft className="h-7 w-7" />}
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <Select
+                label="Backup frequency"
+                value={backupFrequency}
+                onChange={(e) => setBackupFrequency(e.target.value)}
+                options={[
+                  { value: "every_time", label: "Every time" },
+                  { value: "10", label: "Every 10 minutes" },
+                  { value: "30", label: "Every 30 minutes" },
+                  { value: "60", label: "Every 1 hour" },
+                  { value: "180", label: "Every 3 hours" },
+                  { value: "custom", label: "Custom interval" },
+                ]}
+                hint="How often automatic backups run."
+              />
+              {backupFrequency === "custom" && (
+                <div>
+                  <Input
+                    label="Custom interval (minutes)"
+                    type="number"
+                    min={1}
+                    value={customInterval}
+                    onChange={(e) => setCustomInterval(Number(e.target.value))}
+                    hint={`Backup every ${customInterval} minute${customInterval === 1 ? "" : "s"}.`}
+                  />
+                </div>
+              )}
+              {backupFrequency === "every_time" && (
+                <p style={{ fontSize: "12px", color: "#64748B" }}>
+                  A backup is created automatically each time the app opens, and it is also
+                  created automatically whenever the app is closed.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between border-t p-4" style={{ borderColor: "#E2E8F0" }}>
+            <div className="flex items-center gap-2">
+              <FolderOpen className="h-4 w-4" style={{ color: "#64748B" }} />
+              <span style={{ fontSize: "12px", color: "#64748B" }}>
+                Backup folder:{" "}
+                <span style={{ fontFamily: "monospace", color: "#0F172A" }}>{status?.config.backup_folder ?? "Desktop\\Software Backup"}</span>
+              </span>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleSaveConfig}
+              loading={savingConfig}
+              icon={savingConfig ? <RefreshCcw className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+            >
+              Save Settings
+            </Button>
+          </div>
+        </Card>
       </div>
 
       {/* Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard
           title="Total Backups"
-          value={String(backups.length)}
+          value={String(status?.total_backups ?? backups.length)}
           icon={Archive}
           tone="primary"
           sub="stored on this device"
         />
         <KpiCard
           title="Storage Used"
-          value={formatBytes(totalSize)}
+          value={formatBytes(backups.reduce((s, b) => s + b.size, 0))}
           icon={HardDrive}
           tone="navy"
           sub="total backup size"
         />
         <KpiCard
           title="Last Backup"
-          value={lastBackup ? parseBackupTime(lastBackup.created_at).toLocaleString("en-PK", {
+          value={status?.last_backup_at ? parseBackupTime(status.last_backup_at).toLocaleString("en-PK", {
             day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
           }) : "—"}
           icon={DatabaseBackup}
-          tone={lastBackup?.status === "success" ? "green" : "amber"}
-          sub={lastBackup ? lastBackup.file_name : "no backups yet"}
+          tone={backups[0]?.status === "success" ? "green" : "amber"}
+          sub={status?.last_backup_file ?? "no backups yet"}
         />
       </div>
 
       {/* List */}
       <div className="mt-4">
-        <Card title="Saved Backups" subtitle={`${backups.length} stored`} noPadding>
+        <Card title="Saved Backups" subtitle={`${backups.length} stored in ${status?.config.backup_folder ?? "backup folder"}`} noPadding>
           {loading ? (
             <div className="py-16 text-center text-[13px]" style={{ color: "#64748B" }}>
               Loading backups...
@@ -225,7 +406,7 @@ export function BackupManagerPage() {
                       </span>
                     </td>
                     <td>
-                      <StatusBadge status={b.backup_type === "full" ? "full" : "database"} />
+                      <StatusBadge status={b.file_name.startsWith("Manual_Backup") ? "Manual" : "Automatic"} />
                     </td>
                     <td style={{ color: "#64748B", fontSize: "12px" }}>
                       {parseBackupTime(b.created_at).toLocaleString("en-PK", {
@@ -278,29 +459,53 @@ export function BackupManagerPage() {
         </Card>
       </div>
 
-      {/* Restore confirmation */}
+      {/* Restore confirmation (DB-row or file-picker restore) */}
       <Modal
-        open={restoreTarget !== null}
+        open={restoreTarget !== null || fileRestoreTarget !== null}
         title="Confirm Restore"
         subtitle="This action is irreversible"
-        onClose={() => setRestoreTarget(null)}
+        onClose={() => {
+          setRestoreTarget(null);
+          setFileRestoreTarget(null);
+        }}
         size="sm"
         footer={
           <>
-            <Button variant="secondary" size="sm" onClick={() => setRestoreTarget(null)}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setRestoreTarget(null);
+                setFileRestoreTarget(null);
+              }}
+            >
               Cancel
             </Button>
-            <Button variant="danger" size="sm" onClick={handleRestore} loading={restoring}>
-              {restoring ? "Restoring..." : "Yes, Restore"}
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={restoreTarget ? handleRestore : handleFileRestore}
+              loading={restoring}
+            >
+              {restoring ? "Restoring..." : "Restore"}
             </Button>
           </>
         }
       >
         <Alert
           variant="error"
-          title="All current data will be replaced"
-          message={`Your database will be overwritten with the backup "${restoreTarget?.file_name}". This cannot be undone. A safety backup of your current data is saved first.`}
+          title="Current data will be replaced"
+          message={
+            restoreTarget
+              ? `"${restoreTarget.file_name}" will overwrite all current data (database, files, settings and configuration). This cannot be undone. Do you want to continue?`
+              : "The selected backup will overwrite all current data (database, files, settings and configuration). This cannot be undone. Do you want to continue?"
+          }
         />
+        {fileRestoreTarget && (
+          <p className="mt-3" style={{ fontSize: "12px", color: "#475569", fontFamily: "monospace", wordBreak: "break-all" }}>
+            {fileRestoreTarget}
+          </p>
+        )}
       </Modal>
 
       {/* Delete confirmation */}

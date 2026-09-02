@@ -1,7 +1,9 @@
+use tauri::Emitter;
 use tauri::State;
 
 use crate::database::Database;
 use crate::errors::AppError;
+use crate::models::backup::BackupStatus;
 use crate::models::inventory::{CreateSupplierInput, Supplier};
 use crate::models::accessory::{Accessory, CreateAccessoryInput};
 use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
@@ -24,7 +26,7 @@ use crate::models::user::{
     SessionUser, UpdateRoleInput, UpdateUserInput, UserDetail,
 };
 use crate::security::SessionState;
-use crate::repositories::user_repository;
+use crate::repositories::{backup_repository, user_repository};
 use crate::services::{
     accessory_service, auth_service, backup_service, expense_service, license_service,
     member_service, notification_service, payment_service, phone_service,
@@ -1040,11 +1042,12 @@ pub fn create_backup(
     actor: Option<i64>,
 ) -> Result<crate::models::backup::Backup, AppError> {
     let guard = conn(&db)?;
+    let dir = backup_service::backup_dir(&guard)?;
     backup_service::create_backup(
         &guard,
-        &db.backups_dir.clone(),
+        &dir,
         actor,
-        crate::models::backup::BackupType::Database,
+        crate::models::backup::BackupType::Full,
     )
 }
 
@@ -1088,7 +1091,7 @@ pub fn verify_backup(
     let item = backup_service::get_backup(&guard, id)?.ok_or_else(|| {
         AppError::validation(format!("Backup #{id} not found"))
     })?;
-    backup_service::verify_backup(std::path::Path::new(&item.file_path))
+    backup_service::verify_backup_entry(std::path::Path::new(&item.file_path))
 }
 
 #[tauri::command]
@@ -1102,12 +1105,114 @@ pub fn restore_backup(
     let item = backup_service::get_backup(&guard, id)?.ok_or_else(|| {
         AppError::validation(format!("Backup #{id} not found"))
     })?;
+    let dir = backup_service::desktop_folder()?;
     backup_service::restore_backup(
         &mut guard,
-        &db.backups_dir.clone(),
+        &dir,
         actor,
         std::path::Path::new(&item.file_path),
     )
+}
+
+#[tauri::command]
+pub fn pick_backup_file(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let folder = backup_service::desktop_folder()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("Backup files", &["zip"])
+        .set_title("Select a Backup to Restore")
+        .set_directory(&folder)
+        .blocking_pick_file();
+
+    match picked {
+        Some(fp) => {
+            let p = fp
+                .into_path()
+                .map_err(|e| AppError::validation(format!("Invalid path: {e}")))?;
+            Ok(Some(p.to_string_lossy().to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub fn restore_backup_from_path(
+    db: State<Database>,
+    _session: State<SessionState>,
+    app: tauri::AppHandle,
+    actor: Option<i64>,
+    file_path: String,
+) -> Result<(), AppError> {
+    use std::path::PathBuf;
+
+    let source = PathBuf::from(&file_path);
+    let mut guard = conn(&db)?;
+    let dir = backup_service::desktop_folder()?;
+    let file_name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "restored_backup.zip".into());
+
+    // 1) Pre-flight validation before opening the confirmation flow would happen.
+    backup_service::validate_archive(&source)?;
+
+    // 2) Restore into the live database.
+    backup_service::restore_backup(&mut guard, &dir, actor, &source)?;
+
+    // 3) Record the restoration in the backups table so it appears in history.
+    let size = std::fs::metadata(&source)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
+    let bt = if file_name.starts_with("Manual_Backup") {
+        crate::models::backup::BackupType::Full
+    } else {
+        crate::models::backup::BackupType::Database
+    };
+    let _ = backup_repository::insert(
+        &guard,
+        &file_name,
+        bt,
+        &source.to_string_lossy(),
+        size,
+        BackupStatus::Success,
+        actor,
+    );
+
+    let _ = app.emit("database-restored", "");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_backup_config(
+    db: State<Database>,
+    _session: State<SessionState>,
+) -> Result<crate::models::backup_config::BackupConfig, AppError> {
+    let guard = conn(&db)?;
+    backup_service::get_config(&guard)
+}
+
+#[tauri::command]
+pub fn update_backup_config(
+    db: State<Database>,
+    _session: State<SessionState>,
+    actor: Option<i64>,
+    input: crate::models::backup_config::UpdateBackupConfigInput,
+) -> Result<crate::models::backup_config::BackupConfig, AppError> {
+    let guard = conn(&db)?;
+    backup_service::update_config(&guard, actor, input)
+}
+
+#[tauri::command]
+pub fn get_backup_status(
+    db: State<Database>,
+    _session: State<SessionState>,
+) -> Result<crate::models::backup_config::BackupStatusInfo, AppError> {
+    let guard = conn(&db)?;
+    backup_service::status_info(&guard)
 }
 
 // ---- Purchases ----
@@ -1260,6 +1365,56 @@ pub fn update_phone_option(
 
 #[tauri::command]
 pub fn delete_phone_option(
+    db: State<Database>,
+    _session: State<SessionState>,
+    id: i64,
+    _actor: Option<i64>,
+) -> Result<(), AppError> {
+    let guard = conn(&db)?;
+    crate::services::phone_option_service::delete(&guard, id)
+}
+
+// ---- Accessory Options (reuse the phone_options table) ----
+
+#[tauri::command]
+pub fn list_accessory_options(
+    db: State<Database>,
+    _session: State<SessionState>,
+    option_type: Option<String>,
+) -> Result<Vec<crate::models::phone::PhoneOption>, AppError> {
+    let guard = conn(&db)?;
+    if let Some(t) = option_type {
+        crate::services::phone_option_service::list_by_type(&guard, &t)
+    } else {
+        crate::services::phone_option_service::list_all(&guard)
+    }
+}
+
+#[tauri::command]
+pub fn create_accessory_option(
+    db: State<Database>,
+    _session: State<SessionState>,
+    input: crate::models::phone::CreatePhoneOptionInput,
+    _actor: Option<i64>,
+) -> Result<crate::models::phone::PhoneOption, AppError> {
+    let guard = conn(&db)?;
+    crate::services::phone_option_service::create(&guard, input)
+}
+
+#[tauri::command]
+pub fn update_accessory_option(
+    db: State<Database>,
+    _session: State<SessionState>,
+    id: i64,
+    input: crate::models::phone::CreatePhoneOptionInput,
+    _actor: Option<i64>,
+) -> Result<crate::models::phone::PhoneOption, AppError> {
+    let guard = conn(&db)?;
+    crate::services::phone_option_service::update(&guard, id, input)
+}
+
+#[tauri::command]
+pub fn delete_accessory_option(
     db: State<Database>,
     _session: State<SessionState>,
     id: i64,

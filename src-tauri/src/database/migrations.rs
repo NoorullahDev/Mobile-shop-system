@@ -765,6 +765,111 @@ const MIGRATIONS: &[(&str, &str)] = &[
             ('box_condition', 'Generic Box', 3);
         "#,
     ),
+    (
+        "0016_accessory_fields_and_options",
+        r#"
+        -- =====================================================================
+        -- Professional accessory form: new fields + DB-driven dropdown options.
+        -- Dropdown values reuse the existing phone_options table (generic
+        -- option store) with new option_type keys for accessories.
+        -- =====================================================================
+
+        -- New accessory fields
+        ALTER TABLE accessories ADD COLUMN condition TEXT;
+        ALTER TABLE accessories ADD COLUMN sku TEXT;
+        ALTER TABLE accessories ADD COLUMN connector_type TEXT;
+        ALTER TABLE accessories ADD COLUMN warranty TEXT;
+        ALTER TABLE accessories ADD COLUMN features TEXT;
+        ALTER TABLE accessories ADD COLUMN description TEXT;
+
+        -- Accessory categories (stored as accessory_category option_type)
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('accessory_category', 'Chargers', 1),
+            ('accessory_category', 'Handsfree', 2),
+            ('accessory_category', 'Earbuds', 3),
+            ('accessory_category', 'Cables', 4),
+            ('accessory_category', 'Covers', 5),
+            ('accessory_category', 'Screen Protectors', 6),
+            ('accessory_category', 'Power Banks', 7),
+            ('accessory_category', 'Smart Watches', 8),
+            ('accessory_category', 'Bluetooth Speakers', 9),
+            ('accessory_category', 'Memory Cards', 10),
+            ('accessory_category', 'Phone Holders', 11),
+            ('accessory_category', 'Other', 12);
+
+        -- Accessory-specific brands
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('accessory_brand', 'Anker', 1),
+            ('accessory_brand', 'Baseus', 2),
+            ('accessory_brand', 'UGREEN', 3),
+            ('accessory_brand', 'Audionic', 4),
+            ('accessory_brand', 'Belkin', 5),
+            ('accessory_brand', 'Spigen', 6),
+            ('accessory_brand', 'Eiger', 7),
+            ('accessory_brand', 'JBL', 8),
+            ('accessory_brand', 'Samsung', 9),
+            ('accessory_brand', 'Apple', 10),
+            ('accessory_brand', 'Xiaomi', 11),
+            ('accessory_brand', 'Generic', 12);
+
+        -- Connector types
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('connector_type', 'USB-C', 1),
+            ('connector_type', 'Micro USB', 2),
+            ('connector_type', 'Lightning', 3),
+            ('connector_type', '3.5mm Jack', 4),
+            ('connector_type', 'Bluetooth', 5),
+            ('connector_type', 'No Connector', 6),
+            ('connector_type', 'Type-C to Type-C', 7),
+            ('connector_type', 'Type-C to Lightning', 8);
+
+        -- Warranty options
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('warranty', 'No Warranty', 1),
+            ('warranty', '3 Months', 2),
+            ('warranty', '6 Months', 3),
+            ('warranty', '1 Year', 4),
+            ('warranty', '2 Years', 5);
+
+        -- Accessory-specific colors (extends the shared 'color' type)
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('color', 'Pink', 9),
+            ('color', 'Transparent', 10);
+
+        -- Sample accessory products (only if the table is empty)
+        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
+        SELECT 'Chargers', 'Anker', 'PowerIQ 3.0 Fast Charger', 'Universal', 'White', 'USB-C', '1 Year', 'New', 'ANK-CHG-001', 1200, 2500, 15, 3
+        WHERE NOT EXISTS (SELECT 1 FROM accessories LIMIT 1);
+
+        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
+        SELECT 'Cables', 'UGREEN', 'USB-C Fast Charging Cable 1m', 'Universal', 'Black', 'USB-C', '6 Months', 'New', 'UGR-CBL-001', 350, 800, 25, 5
+        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'USB-C Fast Charging Cable 1m');
+
+        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
+        SELECT 'Earbuds', 'Audionic', 'Air buds Pro', 'Universal', 'White', 'Bluetooth', '1 Year', 'New', 'AUD-EAR-001', 1800, 3500, 10, 2
+        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Air buds Pro');
+
+        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
+        SELECT 'Covers', 'Spigen', 'Rugged Armor Case', 'Samsung Galaxy S24', 'Black', 'No Connector', 'No Warranty', 'New', 'SPG-CVR-001', 800, 1800, 8, 2
+        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Rugged Armor Case');
+
+        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
+        SELECT 'Power Banks', 'Anker', 'PowerCore 10000mAh', 'Universal', 'Black', 'USB-C', '1 Year', 'New', 'ANK-PWR-001', 2500, 4500, 12, 3
+        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'PowerCore 10000mAh');
+
+        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
+        SELECT 'Screen Protectors', 'Eiger', 'Tempered Glass 9H', 'iPhone 15 Pro', 'Transparent', 'No Connector', 'No Warranty', 'New', 'EIG-SCR-001', 200, 600, 30, 10
+        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Tempered Glass 9H');
+
+        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
+        SELECT 'Bluetooth Speakers', 'JBL', 'Go 2 Portable Speaker', 'Universal', 'Blue', 'Bluetooth', '1 Year', 'New', 'JBL-SPK-001', 3500, 6500, 5, 2
+        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Go 2 Portable Speaker');
+
+        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
+        SELECT 'Handsfree', 'Baseus', 'Wired Earphone Type-C', 'Universal', 'White', 'Type-C to Type-C', '6 Months', 'New', 'BS-HF-001', 400, 900, 20, 5
+        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Wired Earphone Type-C');
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

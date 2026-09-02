@@ -10,6 +10,18 @@ pub struct Accessory {
     pub compatible_models: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub features: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sku: Option<String>,
     pub cost_price: f64,
     pub sale_price: f64,
     pub quantity: i64,
@@ -30,6 +42,12 @@ pub struct CreateAccessoryInput {
     pub product_name: String,
     pub compatible_models: Option<String>,
     pub color: Option<String>,
+    pub condition: Option<String>,
+    pub connector_type: Option<String>,
+    pub warranty: Option<String>,
+    pub features: Option<String>,
+    pub description: Option<String>,
+    pub sku: Option<String>,
     pub cost_price: f64,
     pub sale_price: f64,
     pub quantity: i64,

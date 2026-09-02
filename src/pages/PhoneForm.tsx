@@ -48,7 +48,7 @@ function Section({
   );
 }
 
-export function PhoneForm({ onSubmit, onCancel, initial, suppliers, categories }: PhoneFormProps) {
+export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormProps) {
   const { load: loadOptions, getOptionsByType } = usePhoneOptionStore();
   const [optionsModalOpen, setOptionsModalOpen] = useState(false);
 
@@ -75,7 +75,6 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers, categories }
   const [form, setForm] = useState<CreatePhoneInput>({
     brand: initial?.brand ?? "",
     model: initial?.model ?? "",
-    category: initial?.category ?? "",
     condition: initial?.condition ?? "",
     variant: initial?.variant ?? "",
     color: initial?.color ?? "",
@@ -118,10 +117,6 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers, categories }
     { value: "", label: "— No supplier —" },
     ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
   ];
-  const categoryOptions = [
-    { value: "", label: "— No category —" },
-    ...categories.map((c) => ({ value: c.name, label: c.name })),
-  ];
 
   const showConditionDetails = !!form.condition && form.condition.trim() !== "New";
 
@@ -158,7 +153,6 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers, categories }
       await onSubmit({
         brand: form.brand.trim(),
         model: form.model.trim(),
-        category: form.category ? form.category.trim() : "",
         condition: form.condition ? form.condition.trim() : "",
         variant: form.variant ? form.variant.trim() : "",
         color: form.color ? form.color.trim() : "",
@@ -212,15 +206,6 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers, categories }
         </div>
 
         <Section index="1" title="Basic Information">
-          <Select
-            name="category"
-            label="Category"
-            placeholder="— No category —"
-            options={categoryOptions}
-            value={form.category ?? ""}
-            onChange={(e) => set("category", e.target.value)}
-            disabled={saving}
-          />
           <Select
             name="brand"
             label="Brand"

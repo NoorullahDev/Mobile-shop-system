@@ -11,6 +11,12 @@ fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Accessory> {
         product_name: r.get("product_name")?,
         compatible_models: r.get("compatible_models")?,
         color: r.get("color")?,
+        condition: r.get("condition")?,
+        connector_type: r.get("connector_type")?,
+        warranty: r.get("warranty")?,
+        features: r.get("features")?,
+        description: r.get("description")?,
+        sku: r.get("sku")?,
         cost_price: r.get("cost_price")?,
         sale_price: r.get("sale_price")?,
         quantity: r.get("quantity")?,
@@ -24,16 +30,21 @@ fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Accessory> {
 }
 
 const COLS: &str = "a.id, a.accessory_type, a.brand, a.product_name, a.compatible_models, a.color, \
+     a.condition, a.connector_type, a.warranty, a.features, a.description, a.sku, \
      a.cost_price, a.sale_price, a.quantity, a.supplier_id, s.name AS supplier_name, \
      a.low_stock_threshold, a.is_deleted, a.created_at, a.updated_at";
 
 pub fn insert(conn: &Connection, input: &CreateAccessoryInput) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, cost_price, sale_price, quantity, supplier_id, low_stock_threshold)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, \
+         condition, connector_type, warranty, features, description, sku, \
+         cost_price, sale_price, quantity, supplier_id, low_stock_threshold) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             input.accessory_type, input.brand, input.product_name, input.compatible_models,
-            input.color, input.cost_price, input.sale_price, input.quantity, input.supplier_id,
+            input.color, input.condition, input.connector_type, input.warranty,
+            input.features, input.description, input.sku,
+            input.cost_price, input.sale_price, input.quantity, input.supplier_id,
             input.low_stock_threshold
         ],
     )?;
@@ -64,7 +75,8 @@ pub fn list(
         if !s.is_empty() {
             let p = format!("%{s}%");
             clauses.push(format!(
-                "(a.brand LIKE ?{} OR a.product_name LIKE ?{} OR a.accessory_type LIKE ?{} OR a.compatible_models LIKE ?{})",
+                "(a.brand LIKE ?{} OR a.product_name LIKE ?{} OR a.accessory_type LIKE ?{} OR a.compatible_models LIKE ?{} OR a.sku LIKE ?{})",
+                values.len() + 1,
                 values.len() + 1,
                 values.len() + 1,
                 values.len() + 1,
@@ -96,12 +108,15 @@ pub fn update(
     input: &CreateAccessoryInput,
 ) -> Result<bool, AppError> {
     let affected = conn.execute(
-        "UPDATE accessories SET accessory_type=?1, brand=?2, product_name=?3, compatible_models=?4, color=?5,
-         cost_price=?6, sale_price=?7, supplier_id=?8, low_stock_threshold=?9, updated_at=CURRENT_TIMESTAMP
-         WHERE id=?10 AND is_deleted=0",
+        "UPDATE accessories SET accessory_type=?1, brand=?2, product_name=?3, compatible_models=?4, color=?5, \
+         condition=?6, connector_type=?7, warranty=?8, features=?9, description=?10, sku=?11, \
+         cost_price=?12, sale_price=?13, supplier_id=?14, low_stock_threshold=?15, updated_at=CURRENT_TIMESTAMP \
+         WHERE id=?16 AND is_deleted=0",
         params![
             input.accessory_type, input.brand, input.product_name, input.compatible_models,
-            input.color, input.cost_price, input.sale_price, input.supplier_id,
+            input.color, input.condition, input.connector_type, input.warranty,
+            input.features, input.description, input.sku,
+            input.cost_price, input.sale_price, input.supplier_id,
             input.low_stock_threshold, id
         ],
     )?;

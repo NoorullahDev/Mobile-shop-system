@@ -84,6 +84,7 @@ interface InventoryProductPageProps<T extends InventoryRow, I> {
   showCategoryManager?: boolean;
   showImeiCol?: boolean;
   showImeiButton?: boolean;
+  extraAction?: React.ReactNode;
 }
 
 export function InventoryProductPage<T extends InventoryRow, I>({
@@ -108,6 +109,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
   showCategoryManager,
   showImeiCol,
   showImeiButton,
+  extraAction,
 }: InventoryProductPageProps<T, I>) {
   const { suppliers, load: loadSuppliers } = useSupplierStore();
   const { categories, load: loadProductCategories } = useProductCategoryStore();
@@ -202,6 +204,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
         meta={`${totalItems} items`}
         actions={
           <div className="flex items-center gap-2">
+            {extraAction}
             {showCategoryManager && canManageCategories && (
               <Button
                 variant="secondary"

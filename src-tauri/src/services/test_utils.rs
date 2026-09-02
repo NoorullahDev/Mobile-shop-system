@@ -94,6 +94,7 @@ CREATE TABLE phone_options (
 CREATE TABLE accessories (
     id INTEGER PRIMARY KEY AUTOINCREMENT, accessory_type TEXT NOT NULL DEFAULT 'other',
     brand TEXT NOT NULL, product_name TEXT NOT NULL, compatible_models TEXT, color TEXT,
+    condition TEXT, connector_type TEXT, warranty TEXT, features TEXT, description TEXT, sku TEXT,
     cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0,
     quantity INTEGER NOT NULL DEFAULT 0, supplier_id INTEGER,
     low_stock_threshold INTEGER NOT NULL DEFAULT 0,

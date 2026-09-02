@@ -69,6 +69,20 @@ pub fn delete(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(affected > 0)
 }
 
+/// Returns the most recently created backup, if any.
+pub fn latest(conn: &Connection) -> Result<Option<Backup>, AppError> {
+    conn.query_row(
+        "SELECT id, file_name, backup_type, file_path, size, status, created_by, created_at
+         FROM backups
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1",
+        [],
+        |r| from_row(r),
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
 // Used by tests; part of the public repository API.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn count(conn: &Connection) -> Result<i64, AppError> {

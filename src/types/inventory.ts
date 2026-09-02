@@ -131,6 +131,12 @@ export interface Accessory {
   product_name: string;
   compatible_models?: string | null;
   color?: string | null;
+  condition?: string | null;
+  connector_type?: string | null;
+  warranty?: string | null;
+  features?: string | null;
+  description?: string | null;
+  sku?: string | null;
   cost_price: number;
   sale_price: number;
   quantity: number;
@@ -148,6 +154,12 @@ export interface CreateAccessoryInput {
   product_name: string;
   compatible_models?: string | null;
   color?: string | null;
+  condition?: string | null;
+  connector_type?: string | null;
+  warranty?: string | null;
+  features?: string | null;
+  description?: string | null;
+  sku?: string | null;
   cost_price: number;
   sale_price: number;
   quantity: number;

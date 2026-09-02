@@ -42,7 +42,6 @@ export function InventoryPage() {
       description="Manage your smartphone stock, specs and inventory"
       addLabel="Add Mobile Phone"
       icon={Smartphone}
-      showCategoryManager
       showImeiCol
       showImeiButton
     />

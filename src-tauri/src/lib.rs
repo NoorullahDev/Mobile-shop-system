@@ -16,7 +16,7 @@ use tauri::Manager;
 use tauri::WindowEvent;
 use utils::logging;
 
-/// Creates a zip backup of the database file to Desktop/Software Backups/.
+/// Creates a zip backup of the database file to Desktop/Software Backup/.
 /// Returns Ok(()) on success, Err(message) on failure.
 fn create_exit_backup(db: &Database) -> Result<(), String> {
     use std::fs;
@@ -26,13 +26,13 @@ fn create_exit_backup(db: &Database) -> Result<(), String> {
     let user_profile = std::env::var("USERPROFILE")
         .map_err(|_| "Could not determine USERPROFILE".to_string())?;
     let desktop = std::path::PathBuf::from(&user_profile).join("Desktop");
-    let backup_dir = desktop.join("Software Backups");
+    let backup_dir = desktop.join("Software Backup");
     fs::create_dir_all(&backup_dir)
         .map_err(|e| format!("Could not create backup directory: {e}"))?;
 
-    // 2. Generate timestamped filename
+    // 2. Generate timestamped filename (same convention as the automatic backup)
     let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let zip_name = format!("Backup_{stamp}.zip");
+    let zip_name = format!("Auto_Backup_{stamp}.zip");
     let zip_path = backup_dir.join(&zip_name);
 
     // 3. Take a consistent snapshot of the live database to a temp file
@@ -77,6 +77,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             let db = Database::open(&app_data_dir)?;
@@ -88,6 +89,7 @@ pub fn run() {
             }
             app.manage(db);
             app.manage(SessionState::default());
+            services::backup_service::spawn_auto_backup(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -204,6 +206,11 @@ pub fn run() {
             commands::verify_backup,
             commands::delete_backup,
             commands::restore_backup,
+            commands::pick_backup_file,
+            commands::restore_backup_from_path,
+            commands::get_backup_config,
+            commands::update_backup_config,
+            commands::get_backup_status,
             commands::create_purchase,
             commands::list_purchases,
             commands::get_purchase,
@@ -218,6 +225,10 @@ pub fn run() {
             commands::create_phone_option,
             commands::update_phone_option,
             commands::delete_phone_option,
+            commands::list_accessory_options,
+            commands::create_accessory_option,
+            commands::update_accessory_option,
+            commands::delete_accessory_option,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
