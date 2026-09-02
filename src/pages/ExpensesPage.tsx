@@ -259,6 +259,7 @@ export function ExpensesPage() {
                   {editingCategory ? "Edit Category" : "Add New Category"}
                 </div>
                 <CategoryForm
+                  key={editingCategory?.id ?? "new"}
                   onSubmit={handleCategorySubmit}
                   onCancel={() => { editingCategory ? setEditingCategory(null) : setCatOpen(false); }}
                   initial={editingCategory}

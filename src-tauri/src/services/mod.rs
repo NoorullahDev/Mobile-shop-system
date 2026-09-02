@@ -6,6 +6,7 @@ pub mod license_service;
 pub mod member_service;
 pub mod notification_service;
 pub mod payment_service;
+pub mod phone_option_service;
 pub mod phone_service;
 pub mod product_category_service;
 pub mod purchase_service;

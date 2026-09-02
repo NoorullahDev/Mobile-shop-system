@@ -6,6 +6,7 @@ pub mod license_repository;
 pub mod member_repository;
 pub mod notification_repository;
 pub mod payment_repository;
+pub mod phone_option_repository;
 pub mod phone_repository;
 pub mod product_category_repository;
 pub mod purchase_repository;

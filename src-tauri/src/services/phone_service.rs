@@ -37,6 +37,17 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
             return Err(AppError::validation("IMEI must be at least 8 characters"));
         }
     }
+    let imei2 = trim(input.imei2.clone()).map(|s| s.to_uppercase());
+    if let Some(imei2) = &imei2 {
+        if imei2.len() < 8 {
+            return Err(AppError::validation("IMEI 2 must be at least 8 characters"));
+        }
+    }
+    if let (Some(a), Some(b)) = (&imei, &imei2) {
+        if a == b {
+            return Err(AppError::validation("IMEI and IMEI 2 cannot be the same"));
+        }
+    }
     Ok(CreatePhoneInput {
         brand,
         model,
@@ -48,7 +59,21 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
         network_type: trim(input.network_type),
         battery_capacity: trim(input.battery_capacity),
         imei,
+        imei2,
         category: trim(input.category),
+        condition: trim(input.condition),
+        variant: trim(input.variant),
+        sku: trim(input.sku),
+        condition_rating: trim(input.condition_rating),
+        body_condition: trim(input.body_condition),
+        screen_condition: trim(input.screen_condition),
+        battery_health: trim(input.battery_health),
+        camera_condition: trim(input.camera_condition),
+        face_id: trim(input.face_id),
+        speaker: trim(input.speaker),
+        charger: trim(input.charger),
+        box_condition: trim(input.box_condition),
+        condition_notes: trim(input.condition_notes),
         cost_price: input.cost_price,
         sale_price: input.sale_price,
         quantity: input.quantity,
@@ -57,15 +82,23 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
     })
 }
 
+fn reject_if_imei_taken(conn: &Connection, imei: &str, exclude_id: Option<i64>) -> Result<(), AppError> {
+    if phone_repository::imei_taken(conn, imei, exclude_id)? {
+        return Err(AppError::validation(format!("IMEI {imei} is already in use")));
+    }
+    Ok(())
+}
+
 pub fn create(conn: &Connection, input: CreatePhoneInput) -> Result<Phone, AppError> {
     let normalized = normalize(input)?;
     if let Some(cat) = normalized.category.as_deref() {
         validate_category(conn, cat)?;
     }
     if let Some(imei) = &normalized.imei {
-        if phone_repository::imei_taken(conn, imei, None)? {
-            return Err(AppError::validation(format!("IMEI {imei} is already in use")));
-        }
+        reject_if_imei_taken(conn, imei, None)?;
+    }
+    if let Some(imei2) = &normalized.imei2 {
+        reject_if_imei_taken(conn, imei2, None)?;
     }
     let id = phone_repository::insert(conn, &normalized)?;
     services::record_activity(conn, None, "phone", "create", Some(id))?;
@@ -88,9 +121,10 @@ pub fn update(conn: &Connection, id: i64, input: CreatePhoneInput) -> Result<Pho
         validate_category(conn, cat)?;
     }
     if let Some(imei) = &normalized.imei {
-        if phone_repository::imei_taken(conn, imei, Some(id))? {
-            return Err(AppError::validation(format!("IMEI {imei} is already in use")));
-        }
+        reject_if_imei_taken(conn, imei, Some(id))?;
+    }
+    if let Some(imei2) = &normalized.imei2 {
+        reject_if_imei_taken(conn, imei2, Some(id))?;
     }
     let updated = phone_repository::update(conn, id, &normalized)?;
     if !updated {
@@ -231,6 +265,61 @@ mod tests {
         b.model = "S25".into();
         b.imei = Some("111222333444555".into());
         assert!(matches!(create(&conn, b).unwrap_err(), AppError::Validation(_)));
+    }
+
+    #[test]
+    fn imei2_duplicate_rejected_across_phones() {
+        let conn = in_memory_conn();
+        let mut a = sample();
+        a.imei = Some("111222333444555".into());
+        create(&conn, a).unwrap();
+        let mut b = sample();
+        b.model = "S25".into();
+        b.imei2 = Some("111222333444555".into());
+        assert!(matches!(create(&conn, b).unwrap_err(), AppError::Validation(_)));
+    }
+
+    #[test]
+    fn imei_and_imei2_same_rejected() {
+        let conn = in_memory_conn();
+        let mut a = sample();
+        a.imei = Some("111222333444555".into());
+        a.imei2 = Some("111222333444555".into());
+        assert!(matches!(create(&conn, a).unwrap_err(), AppError::Validation(_)));
+    }
+
+    #[test]
+    fn condition_details_persisted_and_trimmed() {
+        let conn = in_memory_conn();
+        let mut input = sample();
+        input.condition = Some("Used".into());
+        input.condition_rating = Some(" 8/10 ".into());
+        input.body_condition = Some("Minor Scratches".into());
+        input.screen_condition = Some("Flawless".into());
+        input.battery_health = Some("86%".into());
+        input.camera_condition = Some("Good".into());
+        input.face_id = Some("Working".into());
+        input.speaker = Some("Working".into());
+        input.charger = Some("Original".into());
+        input.box_condition = Some("Original Box".into());
+        input.condition_notes = Some("  Charger cable slightly worn.  ".into());
+        let p = create(&conn, input).unwrap();
+        let got = get(&conn, p.id).unwrap();
+        assert_eq!(got.condition.as_deref(), Some("Used"));
+        assert_eq!(got.condition_rating.as_deref(), Some("8/10"));
+        assert_eq!(got.body_condition.as_deref(), Some("Minor Scratches"));
+        assert_eq!(got.battery_health.as_deref(), Some("86%"));
+        assert_eq!(got.condition_notes.as_deref(), Some("Charger cable slightly worn."));
+
+        let updated = update(&conn, p.id, {
+            let mut u = sample();
+            u.condition = Some("Refurbished".into());
+            u.battery_health = Some("90%".into());
+            u
+        }).unwrap();
+        assert_eq!(updated.battery_health.as_deref(), Some("90%"));
+        assert_eq!(updated.condition.as_deref(), Some("Refurbished"));
+        assert_eq!(updated.condition_rating, None);
     }
 
     #[test]

@@ -204,8 +204,8 @@ export function MembersPage() {
                 <tr>
                   <th>#</th>
                   <th>Customer</th>
-                  <th>Phone</th>
-                  <th>Email</th>
+                  <th>Contact Number</th>
+                  <th>CNIC</th>
                   <th>Status</th>
                   <th className="text-right">Balance (Dues)</th>
                   <th>Customer Since</th>
@@ -243,7 +243,7 @@ export function MembersPage() {
                       </span>
                     </td>
                     <td style={{ color: "#64748B", fontSize: "13px" }}>
-                      {m.email ?? "—"}
+                      {m.cnic ?? "—"}
                     </td>
                     <td>
                       <StatusBadge status={m.status} />

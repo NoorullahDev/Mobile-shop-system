@@ -687,7 +687,7 @@ function NewCustomerForm({
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
+  const [cnic, setCnic] = useState("");
   const [address, setAddress] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -703,7 +703,7 @@ function NewCustomerForm({
       await onSave({
         name: name.trim(),
         phone: phone.trim() || null,
-        email: email.trim() || null,
+        cnic: cnic.trim() || null,
         address: address.trim() || null,
       });
     } catch (e) {
@@ -715,22 +715,22 @@ function NewCustomerForm({
   return (
     <div className="space-y-3">
       <Input
-        label="Customer Name *"
+        label="Full Name *"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="e.g. Alex Thompson"
+        placeholder="e.g. Tahir Shah"
         autoFocus
       />
       <Input
-        label="Phone"
+        label="Contact Number"
         value={phone}
         onChange={(e) => setPhone(e.target.value)}
-        placeholder="e.g. 0712 345 678"
+        placeholder="e.g. 0345 6789101"
       />
       <Input
-        label="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
+        label="CNIC"
+        value={cnic}
+        onChange={(e) => setCnic(e.target.value)}
         placeholder="optional"
       />
       <Input

@@ -113,14 +113,6 @@ pub fn imeis_in_use(conn: &Connection, imeis: &[String]) -> Result<std::collecti
     Ok(out)
 }
 
-pub fn insert_imei(conn: &Connection, phone_id: i64, imei: &str) -> Result<(), AppError> {
-    conn.execute(
-        "INSERT INTO phone_imeis (phone_id, imei) VALUES (?1, ?2)",
-        params![phone_id, imei],
-    )?;
-    Ok(())
-}
-
 /// Inserts several IMEIs for one phone in a single statement.
 pub fn insert_imeis(conn: &Connection, phone_id: i64, imeis: &[String]) -> Result<(), AppError> {
     if imeis.is_empty() {

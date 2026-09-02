@@ -121,7 +121,7 @@ mod tests {
             &CreateMemberInput {
                 name: "Ali".into(),
                 phone: Some("03000000000".into()),
-                email: None,
+                cnic: None,
                 address: None,
                 notes: None,
             },

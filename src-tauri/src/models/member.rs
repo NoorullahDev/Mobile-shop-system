@@ -7,7 +7,7 @@ pub struct Member {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub email: Option<String>,
+    pub cnic: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -24,7 +24,7 @@ pub struct Member {
 pub struct CreateMemberInput {
     pub name: String,
     pub phone: Option<String>,
-    pub email: Option<String>,
+    pub cnic: Option<String>,
     pub address: Option<String>,
     pub notes: Option<String>,
 }

@@ -1218,3 +1218,53 @@ pub fn list_supplier_dues(
     let guard = conn(&db)?;
     purchase_service::list_supplier_dues(&guard, search)
 }
+
+// ---- Phone Options ----
+
+#[tauri::command]
+pub fn list_phone_options(
+    db: State<Database>,
+    _session: State<SessionState>,
+    option_type: Option<String>,
+) -> Result<Vec<crate::models::phone::PhoneOption>, AppError> {
+    let guard = conn(&db)?;
+    if let Some(t) = option_type {
+        crate::services::phone_option_service::list_by_type(&guard, &t)
+    } else {
+        crate::services::phone_option_service::list_all(&guard)
+    }
+}
+
+#[tauri::command]
+pub fn create_phone_option(
+    db: State<Database>,
+    _session: State<SessionState>,
+    input: crate::models::phone::CreatePhoneOptionInput,
+    _actor: Option<i64>,
+) -> Result<crate::models::phone::PhoneOption, AppError> {
+    let guard = conn(&db)?;
+    crate::services::phone_option_service::create(&guard, input)
+}
+
+#[tauri::command]
+pub fn update_phone_option(
+    db: State<Database>,
+    _session: State<SessionState>,
+    id: i64,
+    input: crate::models::phone::CreatePhoneOptionInput,
+    _actor: Option<i64>,
+) -> Result<crate::models::phone::PhoneOption, AppError> {
+    let guard = conn(&db)?;
+    crate::services::phone_option_service::update(&guard, id, input)
+}
+
+#[tauri::command]
+pub fn delete_phone_option(
+    db: State<Database>,
+    _session: State<SessionState>,
+    id: i64,
+    _actor: Option<i64>,
+) -> Result<(), AppError> {
+    let guard = conn(&db)?;
+    crate::services::phone_option_service::delete(&guard, id)
+}

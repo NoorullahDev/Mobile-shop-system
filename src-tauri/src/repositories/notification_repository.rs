@@ -112,13 +112,3 @@ pub fn delete_all_read(conn: &Connection, user_id: i64) -> Result<i64, AppError>
     )?;
     Ok(affected as i64)
 }
-
-/// Deletes a user's notifications (used for cleanup/archive older than an offset).
-pub fn delete_older_than(conn: &Connection, user_id: i64, days: i64) -> Result<i64, AppError> {
-    let affected = conn.execute(
-        "DELETE FROM notifications
-         WHERE user_id = ?1 AND created_at < datetime('now', ?2)",
-        rusqlite::params![user_id, format!("-{days} days")],
-    )?;
-    Ok(affected as i64)
-}

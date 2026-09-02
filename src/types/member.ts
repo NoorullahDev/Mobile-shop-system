@@ -2,7 +2,7 @@ export interface Member {
   id: number;
   name: string;
   phone?: string | null;
-  email?: string | null;
+  cnic?: string | null;
   address?: string | null;
   image_path?: string | null;
   status: string;
@@ -15,7 +15,7 @@ export interface Member {
 export interface CreateMemberInput {
   name: string;
   phone?: string | null;
-  email?: string | null;
+  cnic?: string | null;
   address?: string | null;
   notes?: string | null;
 }

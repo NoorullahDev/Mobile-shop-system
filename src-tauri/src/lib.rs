@@ -13,7 +13,63 @@ pub use services::license_service::generate_key;
 use database::Database;
 use security::SessionState;
 use tauri::Manager;
+use tauri::WindowEvent;
 use utils::logging;
+
+/// Creates a zip backup of the database file to Desktop/Software Backups/.
+/// Returns Ok(()) on success, Err(message) on failure.
+fn create_exit_backup(db: &Database) -> Result<(), String> {
+    use std::fs;
+    use std::io::Write;
+
+    // 1. Determine Desktop path from USERPROFILE env var (works in dev + production)
+    let user_profile = std::env::var("USERPROFILE")
+        .map_err(|_| "Could not determine USERPROFILE".to_string())?;
+    let desktop = std::path::PathBuf::from(&user_profile).join("Desktop");
+    let backup_dir = desktop.join("Software Backups");
+    fs::create_dir_all(&backup_dir)
+        .map_err(|e| format!("Could not create backup directory: {e}"))?;
+
+    // 2. Generate timestamped filename
+    let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let zip_name = format!("Backup_{stamp}.zip");
+    let zip_path = backup_dir.join(&zip_name);
+
+    // 3. Take a consistent snapshot of the live database to a temp file
+    let temp_db = backup_dir.join(format!(".tmp_backup_{stamp}.db"));
+    {
+        let conn = db.conn.lock().expect("db lock for exit backup");
+        services::backup_service::write_backup(&conn, &temp_db)
+            .map_err(|e| format!("DB snapshot failed: {e}"))?;
+    }
+
+    // 4. Compress the snapshot into a zip file
+    let zip_file = fs::File::create(&zip_path)
+        .map_err(|e| format!("Could not create zip file: {e}"))?;
+    let mut zip_writer = zip::ZipWriter::new(zip_file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    // Add the database file
+    zip_writer
+        .start_file("business_management.db", options)
+        .map_err(|e| format!("Zip start_file error: {e}"))?;
+    let db_bytes = fs::read(&temp_db)
+        .map_err(|e| format!("Could not read temp db: {e}"))?;
+    zip_writer
+        .write_all(&db_bytes)
+        .map_err(|e| format!("Zip write error: {e}"))?;
+
+    zip_writer
+        .finish()
+        .map_err(|e| format!("Zip finish error: {e}"))?;
+
+    // 5. Clean up the temp snapshot
+    let _ = fs::remove_file(&temp_db);
+
+    log::info!("Exit backup created: {}", zip_path.display());
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,6 +89,25 @@ pub fn run() {
             app.manage(db);
             app.manage(SessionState::default());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+
+                let app_handle = window.app_handle().clone();
+
+                // Run backup synchronously on a background thread, then exit
+                std::thread::spawn(move || {
+                    if let Some(db) = app_handle.try_state::<Database>() {
+                        match create_exit_backup(db.inner()) {
+                            Ok(()) => log::info!("Exit backup completed successfully"),
+                            Err(e) => log::error!("Exit backup failed: {e}"),
+                        }
+                    }
+                    // Always exit, even if backup fails
+                    app_handle.exit(0);
+                });
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
@@ -139,7 +214,12 @@ pub fn run() {
             commands::get_supplier_balance,
             commands::list_supplier_balances,
             commands::list_supplier_dues,
+            commands::list_phone_options,
+            commands::create_phone_option,
+            commands::update_phone_option,
+            commands::delete_phone_option,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

@@ -16,7 +16,21 @@ fn phone_from_row(r: &rusqlite::Row) -> rusqlite::Result<Phone> {
         network_type: r.get("network_type")?,
         battery_capacity: r.get("battery_capacity")?,
         imei: r.get("imei")?,
+        imei2: r.get("imei2")?,
         category: r.get("category")?,
+        condition: r.get("condition")?,
+        variant: r.get("variant")?,
+        sku: r.get("sku")?,
+        condition_rating: r.get("condition_rating")?,
+        body_condition: r.get("body_condition")?,
+        screen_condition: r.get("screen_condition")?,
+        battery_health: r.get("battery_health")?,
+        camera_condition: r.get("camera_condition")?,
+        face_id: r.get("face_id")?,
+        speaker: r.get("speaker")?,
+        charger: r.get("charger")?,
+        box_condition: r.get("box_condition")?,
+        condition_notes: r.get("condition_notes")?,
         cost_price: r.get("cost_price")?,
         sale_price: r.get("sale_price")?,
         quantity: r.get("quantity")?,
@@ -41,17 +55,23 @@ fn imei_from_row(r: &rusqlite::Row) -> rusqlite::Result<PhoneImei> {
 }
 
 const COLS: &str = "p.id, p.brand, p.model, p.color, p.storage, p.ram, p.processor, \
-     p.chipset, p.network_type, p.battery_capacity, p.imei, p.category, p.cost_price, p.sale_price, \
+     p.chipset, p.network_type, p.battery_capacity, p.imei, p.imei2, p.category, p.condition, p.variant, p.sku, \
+     p.condition_rating, p.body_condition, p.screen_condition, p.battery_health, p.camera_condition, p.face_id, p.speaker, p.charger, p.box_condition, p.condition_notes, \
+     p.cost_price, p.sale_price, \
      p.quantity, p.supplier_id, s.name AS supplier_name, p.low_stock_threshold, p.is_deleted, \
      p.created_at, p.updated_at";
 
 pub fn insert(conn: &Connection, input: &CreatePhoneInput) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO phones (brand, model, color, storage, ram, processor, chipset, network_type, battery_capacity, imei, category, cost_price, sale_price, quantity, supplier_id, low_stock_threshold)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        "INSERT INTO phones (brand, model, color, storage, ram, processor, chipset, network_type, battery_capacity, imei, imei2, category, condition, variant, sku, condition_rating, body_condition, screen_condition, battery_health, camera_condition, face_id, speaker, charger, box_condition, condition_notes, cost_price, sale_price, quantity, supplier_id, low_stock_threshold)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
         params![
             input.brand, input.model, input.color, input.storage, input.ram, input.processor,
-            input.chipset, input.network_type, input.battery_capacity, input.imei, input.category,
+            input.chipset, input.network_type, input.battery_capacity, input.imei, input.imei2, input.category,
+            input.condition, input.variant, input.sku,
+            input.condition_rating, input.body_condition, input.screen_condition, input.battery_health,
+            input.camera_condition, input.face_id, input.speaker, input.charger, input.box_condition,
+            input.condition_notes,
             input.cost_price, input.sale_price, input.quantity, input.supplier_id,
             input.low_stock_threshold
         ],
@@ -116,13 +136,19 @@ pub fn update(
     input: &CreatePhoneInput,
 ) -> Result<bool, AppError> {
     let affected = conn.execute(
-        "UPDATE phones SET brand=?1, model=?2, color=?3, storage=?4, ram=?5, processor=?6, chipset=?7, network_type=?8, battery_capacity=?9, imei=?10, category=?11,
-         cost_price=?12, sale_price=?13, supplier_id=?14, low_stock_threshold=?15, updated_at=CURRENT_TIMESTAMP
-         WHERE id=?16 AND is_deleted=0",
+        "UPDATE phones SET brand=?1, model=?2, color=?3, storage=?4, ram=?5, processor=?6, chipset=?7, network_type=?8, battery_capacity=?9, imei=?10, imei2=?11, category=?12, condition=?13, variant=?14, sku=?15,
+         condition_rating=?16, body_condition=?17, screen_condition=?18, battery_health=?19, camera_condition=?20, face_id=?21, speaker=?22, charger=?23, box_condition=?24, condition_notes=?25,
+         cost_price=?26, sale_price=?27, quantity=?28, supplier_id=?29, low_stock_threshold=?30, updated_at=CURRENT_TIMESTAMP
+         WHERE id=?31 AND is_deleted=0",
         params![
             input.brand, input.model, input.color, input.storage, input.ram, input.processor,
-            input.chipset, input.network_type, input.battery_capacity, input.imei, input.category,
-            input.cost_price, input.sale_price, input.supplier_id, input.low_stock_threshold, id
+            input.chipset, input.network_type, input.battery_capacity, input.imei, input.imei2, input.category,
+            input.condition, input.variant, input.sku,
+            input.condition_rating, input.body_condition, input.screen_condition, input.battery_health,
+            input.camera_condition, input.face_id, input.speaker, input.charger, input.box_condition,
+            input.condition_notes,
+            input.cost_price, input.sale_price, input.quantity, input.supplier_id,
+            input.low_stock_threshold, id
         ],
     )?;
     Ok(affected > 0)
@@ -132,14 +158,14 @@ pub fn imei_taken(conn: &Connection, imei: &str, exclude_id: Option<i64>) -> Res
     let exists: Option<bool> = match exclude_id {
         Some(id) => conn
             .query_row(
-                "SELECT 1 FROM phones WHERE imei = ?1 AND id != ?2 AND is_deleted = 0",
+                "SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND id != ?2 AND is_deleted = 0",
                 params![imei, id],
                 |_| Ok(true),
             )
             .optional()?,
         None => conn
             .query_row(
-                "SELECT 1 FROM phones WHERE imei = ?1 AND is_deleted = 0",
+                "SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND is_deleted = 0",
                 [imei],
                 |_| Ok(true),
             )

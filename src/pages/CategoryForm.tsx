@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Alert } from "../components/Alert";
@@ -15,6 +15,18 @@ export function CategoryForm({ onSubmit, onCancel, initial, categoryType = "expe
   const [name, setName] = useState(initial?.name ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const synced = useRef(false);
+
+  // Keep the field fresh when switching between Add and Edit targets without
+  // needing a remount (defends against stale/empty input state).
+  useEffect(() => {
+    if (!synced.current) {
+      synced.current = true;
+      return;
+    }
+    setName(initial?.name ?? "");
+    setError(null);
+  }, [initial]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +55,10 @@ export function CategoryForm({ onSubmit, onCancel, initial, categoryType = "expe
         name="name"
         label="Category Name *"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => {
+          setName(e.target.value);
+          if (error) setError(null);
+        }}
         disabled={saving}
         autoFocus
       />

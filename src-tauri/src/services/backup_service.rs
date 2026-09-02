@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn missing_file_rejected() {
-        let conn = test_utils::in_memory_conn();
+        let _conn = test_utils::in_memory_conn();
         let dir = temp_dir("missing");
         let orphan = dir.join("no_such_file.db");
         assert!(verify_backup(&orphan).is_err());

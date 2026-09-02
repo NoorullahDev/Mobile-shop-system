@@ -577,6 +577,194 @@ const MIGRATIONS: &[(&str, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_phones_category ON phones(category);
         "#,
     ),
+    (
+        "0013_member_cnic",
+        r#"
+        -- Rename email to cnic in members table
+        ALTER TABLE members RENAME COLUMN email TO cnic;
+        -- Create index on cnic (which used to be on email)
+        DROP INDEX IF EXISTS idx_members_email;
+        CREATE INDEX IF NOT EXISTS idx_members_cnic ON members(cnic);
+        "#,
+    ),
+    (
+        "0014_phone_options_and_fields",
+        r#"
+        -- Dynamic dropdown options for the phone form
+        CREATE TABLE IF NOT EXISTS phone_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            option_type TEXT NOT NULL,
+            value TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(option_type, value)
+        );
+        CREATE INDEX IF NOT EXISTS idx_phone_options_type ON phone_options(option_type);
+
+        -- New phone fields
+        ALTER TABLE phones ADD COLUMN condition TEXT;
+        ALTER TABLE phones ADD COLUMN variant TEXT;
+        ALTER TABLE phones ADD COLUMN sku TEXT;
+        ALTER TABLE phones ADD COLUMN imei2 TEXT;
+
+        -- Seed brands
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('brand', 'Samsung', 1),
+            ('brand', 'Apple', 2),
+            ('brand', 'Xiaomi', 3),
+            ('brand', 'OnePlus', 4),
+            ('brand', 'Oppo', 5),
+            ('brand', 'Vivo', 6),
+            ('brand', 'Realme', 7),
+            ('brand', 'Infinix', 8),
+            ('brand', 'Techno', 9),
+            ('brand', 'Nokia', 10);
+
+        -- Seed RAM
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('ram', '3 GB', 1),
+            ('ram', '4 GB', 2),
+            ('ram', '6 GB', 3),
+            ('ram', '8 GB', 4),
+            ('ram', '12 GB', 5),
+            ('ram', '16 GB', 6);
+
+        -- Seed Storage
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('storage', '32 GB', 1),
+            ('storage', '64 GB', 2),
+            ('storage', '128 GB', 3),
+            ('storage', '256 GB', 4),
+            ('storage', '512 GB', 5),
+            ('storage', '1 TB', 6);
+
+        -- Seed Colors
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('color', 'Black', 1),
+            ('color', 'White', 2),
+            ('color', 'Blue', 3),
+            ('color', 'Green', 4),
+            ('color', 'Red', 5),
+            ('color', 'Gold', 6),
+            ('color', 'Silver', 7),
+            ('color', 'Purple', 8);
+
+        -- Seed Network Types
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('network_type', '3G', 1),
+            ('network_type', '4G', 2),
+            ('network_type', '5G', 3);
+
+        -- Seed Conditions
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('condition', 'New', 1),
+            ('condition', 'Used', 2),
+            ('condition', 'Refurbished', 3);
+        "#,
+    ),
+    (
+        "0015_phone_condition_fields",
+        r#"
+        -- =====================================================================
+        -- Professional phone form: device-condition inspection fields + extra
+        -- database-driven dropdown options. All dropdown values live in the
+        -- phone_options table so the Owner/Admin can add/edit/delete them.
+        -- =====================================================================
+
+        -- Condition inspection fields (only meaningful for used/refurbished
+        -- phones, but stored on the phone record regardless).
+        ALTER TABLE phones ADD COLUMN condition_rating TEXT;
+        ALTER TABLE phones ADD COLUMN body_condition TEXT;
+        ALTER TABLE phones ADD COLUMN screen_condition TEXT;
+        ALTER TABLE phones ADD COLUMN battery_health TEXT;
+        ALTER TABLE phones ADD COLUMN camera_condition TEXT;
+        ALTER TABLE phones ADD COLUMN face_id TEXT;
+        ALTER TABLE phones ADD COLUMN speaker TEXT;
+        ALTER TABLE phones ADD COLUMN charger TEXT;
+        ALTER TABLE phones ADD COLUMN box_condition TEXT;
+        ALTER TABLE phones ADD COLUMN condition_notes TEXT;
+
+        -- Extra brand + condition requested in the spec.
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('brand', 'Google', 11);
+
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('condition', 'Open Box', 4);
+
+        -- Condition rating scale
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('condition_rating', '10/10', 1),
+            ('condition_rating', '9/10', 2),
+            ('condition_rating', '8/10', 3),
+            ('condition_rating', '7/10', 4),
+            ('condition_rating', '6/10', 5),
+            ('condition_rating', '5/10', 6),
+            ('condition_rating', '4/10', 7),
+            ('condition_rating', '3/10', 8),
+            ('condition_rating', '2/10', 9),
+            ('condition_rating', '1/10', 10);
+
+        -- Body condition
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('body_condition', 'Excellent', 1),
+            ('body_condition', 'Good', 2),
+            ('body_condition', 'Minor Scratches', 3),
+            ('body_condition', 'Major Scratches', 4),
+            ('body_condition', 'Dented', 5);
+
+        -- Screen condition
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('screen_condition', 'Flawless', 1),
+            ('screen_condition', 'Minor Scratches', 2),
+            ('screen_condition', 'Deep Scratches', 3),
+            ('screen_condition', 'Cracked', 4),
+            ('screen_condition', 'Glass Replaced', 5);
+
+        -- Battery health (%)
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('battery_health', '100%', 1),
+            ('battery_health', '95%', 2),
+            ('battery_health', '90%', 3),
+            ('battery_health', '85%', 4),
+            ('battery_health', '80%', 5),
+            ('battery_health', '75%', 6),
+            ('battery_health', '70%', 7);
+
+        -- Camera condition
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('camera_condition', 'Excellent', 1),
+            ('camera_condition', 'Good', 2),
+            ('camera_condition', 'Minor Scratches', 3),
+            ('camera_condition', 'Lens Replaced', 4),
+            ('camera_condition', 'Faulty', 5);
+
+        -- Face ID / Fingerprint
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('face_id', 'Working', 1),
+            ('face_id', 'Replaced', 2),
+            ('face_id', 'Not Working', 3),
+            ('face_id', 'Not Available', 4);
+
+        -- Speaker
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('speaker', 'Working', 1),
+            ('speaker', 'Weak', 2),
+            ('speaker', 'Replaced', 3),
+            ('speaker', 'Not Working', 4);
+
+        -- Charger (included with the device)
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('charger', 'Original', 1),
+            ('charger', 'Compatible', 2),
+            ('charger', 'Not Included', 3);
+
+        -- Box (included with the device)
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('box_condition', 'Original Box', 1),
+            ('box_condition', 'No Box', 2),
+            ('box_condition', 'Generic Box', 3);
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

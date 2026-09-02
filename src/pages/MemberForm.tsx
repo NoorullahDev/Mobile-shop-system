@@ -14,7 +14,7 @@ export function MemberForm({ onSubmit, onCancel, initial }: MemberFormProps) {
   const [form, setForm] = useState<CreateMemberInput>({
     name: initial?.name ?? "",
     phone: initial?.phone ?? "",
-    email: initial?.email ?? "",
+    cnic: initial?.cnic ?? "",
     address: initial?.address ?? "",
     notes: initial?.notes ?? "",
   });
@@ -39,7 +39,7 @@ export function MemberForm({ onSubmit, onCancel, initial }: MemberFormProps) {
         ...form,
         name: form.name.trim(),
         phone: form.phone ? form.phone.trim() : "",
-        email: form.email ? form.email.trim() : "",
+        cnic: form.cnic ? form.cnic.trim() : "",
         address: form.address ? form.address.trim() : "",
         notes: form.notes ? form.notes.trim() : "",
       });
@@ -65,17 +65,16 @@ export function MemberForm({ onSubmit, onCancel, initial }: MemberFormProps) {
         />
         <Input
           name="phone"
-          label="Phone"
+          label="Contact Number"
           value={form.phone ?? ""}
           onChange={(e) => set("phone", e.target.value)}
           disabled={saving}
         />
         <Input
-          name="email"
-          label="Email"
-          type="email"
-          value={form.email ?? ""}
-          onChange={(e) => set("email", e.target.value)}
+          name="cnic"
+          label="CNIC"
+          value={form.cnic ?? ""}
+          onChange={(e) => set("cnic", e.target.value)}
           disabled={saving}
         />
         <Input

@@ -9,6 +9,7 @@ const rowTitle = (item: Phone) => `${item.brand} ${item.model}`;
 
 function phoneSubtitle(item: Phone) {
   const parts: string[] = [];
+  if (item.variant) parts.push(item.variant);
   if (item.storage) parts.push(item.storage);
   if (item.ram) parts.push(item.ram);
   if (item.network_type) parts.push(item.network_type);

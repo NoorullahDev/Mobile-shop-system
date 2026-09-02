@@ -25,7 +25,7 @@ CREATE TABLE users (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT, email TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT, cnic TEXT,
     address TEXT, image_path TEXT, status TEXT NOT NULL DEFAULT 'active', notes TEXT,
     is_deleted INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -72,13 +72,24 @@ CREATE TABLE suppliers (
 CREATE TABLE phones (
     id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT NOT NULL, model TEXT NOT NULL,
     color TEXT, storage TEXT, ram TEXT, processor TEXT, chipset TEXT, network_type TEXT,
-    battery_capacity TEXT, imei TEXT, category TEXT,
+    battery_capacity TEXT, imei TEXT, imei2 TEXT, category TEXT, condition TEXT,
+    variant TEXT, sku TEXT,
+    condition_rating TEXT, body_condition TEXT, screen_condition TEXT, battery_health TEXT,
+    camera_condition TEXT, face_id TEXT, speaker TEXT, charger TEXT, box_condition TEXT,
+    condition_notes TEXT,
     cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0,
     quantity INTEGER NOT NULL DEFAULT 0, supplier_id INTEGER,
     low_stock_threshold INTEGER NOT NULL DEFAULT 0,
     is_deleted INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE phone_options (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    option_type TEXT NOT NULL, value TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(option_type, value)
 );
 CREATE TABLE accessories (
     id INTEGER PRIMARY KEY AUTOINCREMENT, accessory_type TEXT NOT NULL DEFAULT 'other',

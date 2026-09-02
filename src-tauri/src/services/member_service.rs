@@ -25,7 +25,7 @@ pub fn create(conn: &Connection, input: CreateMemberInput) -> Result<Member, App
     let normalized = CreateMemberInput {
         name,
         phone: input.phone.map(|p| p.trim().to_string()),
-        email: input.email.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
+        cnic: input.cnic.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
         address: input.address.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()),
         notes: input.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
     };
@@ -70,7 +70,7 @@ pub fn update(
     let normalized = CreateMemberInput {
         name,
         phone: input.phone.map(|p| p.trim().to_string()),
-        email: input.email.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
+        cnic: input.cnic.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
         address: input.address.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()),
         notes: input.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
     };
@@ -106,7 +106,7 @@ mod tests {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 phone TEXT,
-                email TEXT,
+                cnic TEXT,
                 address TEXT,
                 image_path TEXT,
                 status TEXT NOT NULL DEFAULT 'active',
@@ -136,7 +136,7 @@ mod tests {
         let input = CreateMemberInput {
             name: "Ali Khan".into(),
             phone: Some("03001234567".into()),
-            email: None,
+            cnic: None,
             address: None,
             notes: None,
         };
@@ -151,7 +151,7 @@ mod tests {
         let input = CreateMemberInput {
             name: "   ".into(),
             phone: None,
-            email: None,
+            cnic: None,
             address: None,
             notes: None,
         };
@@ -165,7 +165,7 @@ mod tests {
         let base = CreateMemberInput {
             name: "A".into(),
             phone: Some("03000000000".into()),
-            email: None,
+            cnic: None,
             address: None,
             notes: None,
         };
@@ -180,7 +180,7 @@ mod tests {
         let input = CreateMemberInput {
             name: "To Delete".into(),
             phone: None,
-            email: None,
+            cnic: None,
             address: None,
             notes: None,
         };
@@ -195,7 +195,7 @@ mod tests {
         let input = CreateMemberInput {
             name: "Original".into(),
             phone: Some("03000000001".into()),
-            email: None,
+            cnic: None,
             address: None,
             notes: None,
         };
@@ -203,13 +203,13 @@ mod tests {
         let updated_input = CreateMemberInput {
             name: "Changed".into(),
             phone: Some("03000000002".into()),
-            email: Some("new@test.com".into()),
+            cnic: Some("12345-6789012-3".into()),
             address: None,
             notes: None,
         };
         let updated = update(&conn, member.id, updated_input).expect("update");
         assert_eq!(updated.name, "Changed");
-        assert_eq!(updated.email.as_deref(), Some("new@test.com"));
+        assert_eq!(updated.cnic.as_deref(), Some("12345-6789012-3"));
     }
 
     #[test]
@@ -220,7 +220,7 @@ mod tests {
             CreateMemberInput {
                 name: "First".into(),
                 phone: Some("03001111111".into()),
-                email: None,
+                cnic: None,
                 address: None,
                 notes: None,
             },
@@ -231,7 +231,7 @@ mod tests {
             CreateMemberInput {
                 name: "Second".into(),
                 phone: Some("03002222222".into()),
-                email: None,
+                cnic: None,
                 address: None,
                 notes: None,
             },
@@ -244,7 +244,7 @@ mod tests {
             CreateMemberInput {
                 name: "Second".into(),
                 phone: Some("03001111111".into()),
-                email: None,
+                cnic: None,
                 address: None,
                 notes: None,
             },

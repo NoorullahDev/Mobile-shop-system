@@ -116,7 +116,7 @@ export function LoginPage() {
         />
 
         {/* Welcome text */}
-        <div style={{ marginBottom: "20px" }}>
+        <div style={{ marginBottom: "20px", textAlign: "center" }}>
           <h1
             style={{
               fontSize: "18px",
@@ -217,7 +217,17 @@ export function LoginPage() {
           }}
         >
           Forgot your password?{" "}
-          <span style={{ color: "#64748B" }}>Contact your administrator</span>
+          <a 
+            href="https://wa.me/923464451505" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            style={{ color: "#3B6FD4", textDecoration: "none", fontWeight: 500, cursor: "pointer" }}
+            onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
+            onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
+            title="Tahir Shah: 0346-4451505"
+          >
+            Contact your administrator
+          </a>
         </p>
       </div>
 
@@ -253,16 +263,6 @@ export function LoginPage() {
             />
             License Activated
           </span>
-          <span style={{ color: "#CBD5E1" }}>·</span>
-          <span>Offline Desktop Application</span>
-        </div>
-        <div
-          style={{
-            fontSize: "11px",
-            color: "#CBD5E1",
-          }}
-        >
-          Version 1.0
         </div>
       </div>
     </div>

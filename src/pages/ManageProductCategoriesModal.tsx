@@ -101,6 +101,7 @@ export function ManageProductCategoriesModal({ open, onClose }: ManageProductCat
                   {editing ? "Edit Category" : "Add New Category"}
                 </div>
                 <CategoryForm
+                  key={editing?.id ?? "new"}
                   onSubmit={handleSubmit}
                   onCancel={() => {
                     editing ? setEditing(null) : onClose();

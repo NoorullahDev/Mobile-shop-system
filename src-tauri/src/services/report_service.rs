@@ -161,21 +161,33 @@ mod tests {
     use super::*;
     use crate::services::test_utils::in_memory_conn;
 
+    fn local_today() -> String {
+        chrono::Local::now().date_naive().format("%Y-%m-%d").to_string()
+    }
+
     fn seed_sale(conn: &Connection, total: f64, member_id: Option<i64>) -> i64 {
+        seed_sale_on(conn, total, member_id, None)
+    }
+
+    fn seed_sale_on(conn: &Connection, total: f64, member_id: Option<i64>, on: Option<&str>) -> i64 {
         conn.execute(
-            "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method)
-             VALUES (?1, ?2, ?3, ?3, 'cash')",
-            rusqlite::params![format!("R{}", rand_id()), member_id, total],
+            "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method, created_at)
+             VALUES (?1, ?2, ?3, ?3, 'cash', COALESCE(?4, CURRENT_TIMESTAMP))",
+            rusqlite::params![format!("R{}", rand_id()), member_id, total, on],
         )
         .unwrap();
         conn.last_insert_rowid()
     }
 
     fn seed_expense(conn: &Connection, amount: f64, category_id: i64) {
+        seed_expense_on(conn, amount, category_id, None)
+    }
+
+    fn seed_expense_on(conn: &Connection, amount: f64, category_id: i64, on: Option<&str>) {
         conn.execute(
             "INSERT INTO expenses (category_id, amount, expense_date, description)
-             VALUES (?1, ?2, date('now'), 'test')",
-            rusqlite::params![category_id, amount],
+             VALUES (?1, ?2, COALESCE(?3, date('now')), 'test')",
+            rusqlite::params![category_id, amount, on],
         )
         .unwrap();
     }
@@ -225,14 +237,15 @@ mod tests {
         )
         .unwrap();
         let cat = conn.last_insert_rowid();
-        seed_sale(&conn, 1000.0, None);
-        seed_expense(&conn, 250.0, cat);
+        let today = local_today();
+        seed_sale_on(&conn, 1000.0, None, Some(&today));
+        seed_expense_on(&conn, 250.0, cat, Some(&today));
 
         let from = chrono::Local::now()
             .date_naive()
             .format("%Y-%m-01")
             .to_string();
-        let to = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let to = today;
         let p = period_summary(&conn, &from, &to).unwrap();
         assert_eq!(p.revenue, 1000.0);
         assert_eq!(p.expenses, 250.0);
@@ -269,18 +282,28 @@ mod tests {
             [],
         )
         .unwrap();
+        let today = local_today();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method, created_at) VALUES
+               ('R1', 650, 0, 650, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method, created_at) VALUES
+               ('R2', 1300, 50, 300, 'credit', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
         conn.execute_batch(
-            "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method) VALUES
-               ('R1', 650, 0, 650, 'cash'),
-               ('R2', 1300, 50, 300, 'credit');
-             INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price) VALUES
+            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price) VALUES
                (1, 1, 1, 650),
                (2, 1, 2, 650);",
         )
         .unwrap();
 
         let from = chrono::Local::now().date_naive().format("%Y-%m-01").to_string();
-        let to = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let to = today;
 
         let p = period_summary(&conn, &from, &to).unwrap();
         assert_eq!(p.revenue, 1950.0);
@@ -319,21 +342,26 @@ mod tests {
             [],
         )
         .unwrap();
+        let today = local_today();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method, created_at) VALUES
+               ('P1', 1300, 1300, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
         conn.execute_batch(
-            "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method) VALUES
-               ('P1', 1300, 1300, 'cash');
-             INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price) VALUES
+            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price) VALUES
                (1, 1, 2, 650);",
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO expenses (category_id, amount, expense_date, description) VALUES (?1, ?2, date('now'), 'rent')",
-            rusqlite::params![cat, 200],
+            "INSERT INTO expenses (category_id, amount, expense_date, description) VALUES (?1, ?2, ?3, 'rent')",
+            rusqlite::params![cat, 200, today],
         )
         .unwrap();
 
         let from = chrono::Local::now().date_naive().format("%Y-%m-01").to_string();
-        let to = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let to = today;
 
         let pl = profit_loss(&conn, &from, &to).unwrap();
         assert_eq!(pl.total_revenue, 1300.0);

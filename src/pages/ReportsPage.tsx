@@ -14,6 +14,7 @@ import {
   Smartphone,
   Headphones,
   Boxes,
+  FileText,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -283,6 +284,14 @@ export function ReportsPage() {
               icon={<Download className="h-3.5 w-3.5" />}
             >
               Export CSV
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handlePrint}
+              icon={<FileText className="h-3.5 w-3.5" />}
+            >
+              Export PDF
             </Button>
             <Button
               size="sm"

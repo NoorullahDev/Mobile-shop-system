@@ -69,6 +69,8 @@ pub fn delete(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(affected > 0)
 }
 
+// Used by tests; part of the public repository API.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn count(conn: &Connection) -> Result<i64, AppError> {
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM backups", [], |r| r.get(0))?;
     Ok(n)

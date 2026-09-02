@@ -47,7 +47,21 @@ export interface Phone {
   network_type?: string | null;
   battery_capacity?: string | null;
   imei?: string | null;
+  imei2?: string | null;
   category?: string | null;
+  condition?: string | null;
+  variant?: string | null;
+  sku?: string | null;
+  condition_rating?: string | null;
+  body_condition?: string | null;
+  screen_condition?: string | null;
+  battery_health?: string | null;
+  camera_condition?: string | null;
+  face_id?: string | null;
+  speaker?: string | null;
+  charger?: string | null;
+  box_condition?: string | null;
+  condition_notes?: string | null;
   cost_price: number;
   sale_price: number;
   quantity: number;
@@ -70,7 +84,21 @@ export interface CreatePhoneInput {
   network_type?: string | null;
   battery_capacity?: string | null;
   imei?: string | null;
+  imei2?: string | null;
   category?: string | null;
+  condition?: string | null;
+  variant?: string | null;
+  sku?: string | null;
+  condition_rating?: string | null;
+  body_condition?: string | null;
+  screen_condition?: string | null;
+  battery_health?: string | null;
+  camera_condition?: string | null;
+  face_id?: string | null;
+  speaker?: string | null;
+  charger?: string | null;
+  box_condition?: string | null;
+  condition_notes?: string | null;
   cost_price: number;
   sale_price: number;
   quantity: number;
@@ -128,10 +156,26 @@ export interface CreateAccessoryInput {
 }
 
 // ===========================================================================
-// Shared constants
+// Phone Options (Dynamic Dropdowns)
 // ===========================================================================
 
-export const NETWORK_TYPES = ["4G", "5G", "3G", "Dual SIM 4G", "Dual SIM 5G"] as const;
+export interface PhoneOption {
+  id: number;
+  option_type: string;
+  value: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface CreatePhoneOptionInput {
+  option_type: string;
+  value: string;
+  sort_order?: number;
+}
+
+// ===========================================================================
+// Shared constants
+// ===========================================================================
 
 export const IMEI_STATUS = {
   IN_STOCK: "in_stock",

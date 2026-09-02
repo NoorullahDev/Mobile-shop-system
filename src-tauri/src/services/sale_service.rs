@@ -34,7 +34,6 @@ pub fn create(
         quantity: i64,
         imei_id: Option<i64>,
         unit_price: f64,
-        line_total: f64,
     }
 
     let mut lines: Vec<Line> = Vec::new();
@@ -98,7 +97,6 @@ pub fn create(
             quantity: item.quantity,
             imei_id: line_imei,
             unit_price: round2(unit_price),
-            line_total,
         });
     }
 
