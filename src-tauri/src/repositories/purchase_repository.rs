@@ -11,12 +11,14 @@ pub fn insert_purchase(
     discount: f64,
     paid_amount: f64,
     payment_method: &str,
+    purchase_date: Option<&str>,
+    invoice_reference: Option<&str>,
     notes: Option<&str>,
     created_by: Option<i64>,
 ) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO purchases (purchase_no, supplier_id, total_amount, discount, paid_amount, payment_method, notes, created_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO purchases (purchase_no, supplier_id, total_amount, discount, paid_amount, payment_method, purchase_date, invoice_reference, notes, created_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             purchase_no,
             supplier_id,
@@ -24,6 +26,8 @@ pub fn insert_purchase(
             discount,
             paid_amount,
             payment_method,
+            purchase_date,
+            invoice_reference,
             notes,
             created_by
         ],
@@ -38,18 +42,54 @@ pub fn insert_purchase_item(
     item_id: i64,
     quantity: i64,
     unit_cost: f64,
+    selling_price: Option<f64>,
+    warranty: Option<&str>,
+    condition: Option<&str>,
+    serials: &[String],
 ) -> Result<(), AppError> {
     let (col, val) = if item_type == "phone" {
         ("phone_id", rusqlite::types::Value::from(item_id))
     } else {
         ("accessory_id", rusqlite::types::Value::from(item_id))
     };
+    let serials_json = if serials.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(serials).unwrap_or_default())
+    };
     conn.execute(
         &format!(
-            "INSERT INTO purchase_items (purchase_id, {col}, quantity, unit_cost)
-             VALUES (?1, ?2, ?3, ?4)"
+            "INSERT INTO purchase_items (purchase_id, {col}, quantity, unit_cost, selling_price, warranty, condition, serials)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
         ),
-        rusqlite::params![purchase_id, val, quantity, unit_cost],
+        rusqlite::params![
+            purchase_id,
+            val,
+            quantity,
+            unit_cost,
+            selling_price,
+            warranty,
+            condition,
+            serials_json
+        ],
+    )?;
+    Ok(())
+}
+
+/// Records the true unit cost paid on the product's row as the last purchase
+/// cost (preserving costing history without destroying prior values).
+pub fn update_last_purchase_cost(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    unit_cost: f64,
+) -> Result<(), AppError> {
+    let table = if item_type == "phone" { "phones" } else { "accessories" };
+    conn.execute(
+        &format!(
+            "UPDATE {table} SET last_purchase_cost = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND is_deleted = 0"
+        ),
+        params![unit_cost, item_id],
     )?;
     Ok(())
 }
@@ -129,33 +169,54 @@ pub fn insert_imeis(conn: &Connection, phone_id: i64, imeis: &[String]) -> Resul
 }
 
 fn purchase_from_row(r: &Row) -> rusqlite::Result<Purchase> {
+    let paid_amount: f64 = r.get("paid_amount")?;
+    let total_amount: f64 = r.get("total_amount")?;
+    let balance_due: f64 = ((total_amount - paid_amount).max(0.0) * 100.0).round() / 100.0;
+    let payment_status = if paid_amount >= total_amount - 0.005 {
+        "paid".to_string()
+    } else if paid_amount > 0.0 {
+        "partial".to_string()
+    } else {
+        "unpaid".to_string()
+    };
     Ok(Purchase {
         id: r.get("id")?,
         purchase_no: r.get("purchase_no")?,
         supplier_id: r.get("supplier_id")?,
         supplier_name: r.get("supplier_name")?,
-        total_amount: r.get("total_amount")?,
+        total_amount,
         discount: r.get("discount")?,
-        paid_amount: r.get("paid_amount")?,
+        paid_amount,
+        purchase_date: r.get("purchase_date")?,
+        invoice_reference: r.get("invoice_reference")?,
         payment_method: r.get("payment_method")?,
         notes: r.get("notes")?,
         created_by: r.get("created_by")?,
         created_at: r.get("created_at")?,
+        balance_due,
+        payment_status,
         items: Vec::new(),
     })
 }
 
 const PURCHASE_COLS: &str = "p.id, p.purchase_no, p.supplier_id, s.name AS supplier_name, \
-     p.total_amount, p.discount, p.paid_amount, p.payment_method, p.notes, p.created_by, p.created_at";
+     p.total_amount, p.discount, p.paid_amount, p.payment_method, p.purchase_date, p.invoice_reference, p.notes, p.created_by, p.created_at";
 
 const PURCHASE_JOIN: &str = "FROM purchases p LEFT JOIN suppliers s ON s.id = p.supplier_id";
+
+fn parse_serials(v: Option<String>) -> Vec<String> {
+    match v {
+        Some(s) if !s.is_empty() => serde_json::from_str(&s).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
 
 fn list_items(conn: &Connection, purchase_id: i64) -> Result<Vec<PurchaseItem>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT pi.id, pi.purchase_id,
                 CASE WHEN pi.phone_id IS NOT NULL THEN 'phone' ELSE 'accessory' END AS item_type,
                 COALESCE(pi.phone_id, pi.accessory_id) AS item_id,
-                pi.quantity, pi.unit_cost,
+                pi.quantity, pi.unit_cost, pi.selling_price, pi.warranty, pi.condition, pi.serials,
                 COALESCE(p.brand || ' ' || p.model, a.brand || ' ' || a.product_name) AS product_name
          FROM purchase_items pi
          LEFT JOIN phones p ON p.id = pi.phone_id
@@ -172,8 +233,12 @@ fn list_items(conn: &Connection, purchase_id: i64) -> Result<Vec<PurchaseItem>, 
             item_id: r.get("item_id")?,
             quantity,
             unit_cost,
+            selling_price: r.get("selling_price")?,
+            warranty: r.get("warranty")?,
+            condition: r.get("condition")?,
             product_name: r.get("product_name")?,
             line_total: (unit_cost * quantity as f64 * 100.0).round() / 100.0,
+            serials: parse_serials(r.get("serials")?),
         })
     })?;
     let mut out = Vec::new();
@@ -204,8 +269,12 @@ fn item_from_r(r: &rusqlite::Row) -> rusqlite::Result<PurchaseItem> {
         item_id: r.get("item_id")?,
         quantity,
         unit_cost,
+        selling_price: r.get("selling_price")?,
+        warranty: r.get("warranty")?,
+        condition: r.get("condition")?,
         product_name: r.get("product_name")?,
         line_total: (unit_cost * quantity as f64 * 100.0).round() / 100.0,
+        serials: parse_serials(r.get("serials")?),
     })
 }
 
@@ -225,7 +294,7 @@ fn list_items_for_purchases<T: IntoIterator<Item = i64>>(
         "SELECT pi.id, pi.purchase_id,
                 CASE WHEN pi.phone_id IS NOT NULL THEN 'phone' ELSE 'accessory' END AS item_type,
                 COALESCE(pi.phone_id, pi.accessory_id) AS item_id,
-                pi.quantity, pi.unit_cost,
+                pi.quantity, pi.unit_cost, pi.selling_price, pi.warranty, pi.condition, pi.serials,
                 COALESCE(p.brand || ' ' || p.model, a.brand || ' ' || a.product_name) AS product_name
          FROM purchase_items pi
          LEFT JOIN phones p ON p.id = pi.phone_id

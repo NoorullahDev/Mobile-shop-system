@@ -3,6 +3,9 @@ export interface PurchaseItemInput {
   item_id: number;
   quantity: number;
   unit_cost?: number | null;
+  selling_price?: number | null;
+  warranty?: string | null;
+  condition?: string | null;
   imeis: string[];
 }
 
@@ -11,6 +14,8 @@ export interface CreatePurchaseInput {
   discount: number;
   paid_amount?: number | null;
   payment_method?: string | null;
+  purchase_date?: string | null;
+  invoice_reference?: string | null;
   notes?: string | null;
   items: PurchaseItemInput[];
 }
@@ -22,8 +27,12 @@ export interface PurchaseItem {
   item_id: number;
   quantity: number;
   unit_cost: number;
+  selling_price?: number | null;
+  warranty?: string | null;
+  condition?: string | null;
   product_name?: string | null;
   line_total: number;
+  serials?: string[];
 }
 
 export interface Purchase {
@@ -34,10 +43,14 @@ export interface Purchase {
   total_amount: number;
   discount: number;
   paid_amount: number;
+  purchase_date?: string | null;
+  invoice_reference?: string | null;
   payment_method: string;
   notes?: string | null;
   created_by?: number | null;
   created_at: string;
+  balance_due: number;
+  payment_status: "paid" | "partial" | "unpaid";
   items: PurchaseItem[];
 }
 

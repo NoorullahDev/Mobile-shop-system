@@ -8,6 +8,12 @@ pub struct PurchaseItemInput {
     pub quantity: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit_cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selling_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
     #[serde(default)]
     pub imeis: Vec<String>,
 }
@@ -21,6 +27,10 @@ pub struct CreatePurchaseInput {
     pub paid_amount: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payment_method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purchase_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_reference: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     pub items: Vec<PurchaseItemInput>,
@@ -36,8 +46,16 @@ pub struct PurchaseItem {
     pub quantity: i64,
     pub unit_cost: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub selling_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub product_name: Option<String>,
     pub line_total: f64,
+    #[serde(default)]
+    pub serials: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -51,12 +69,20 @@ pub struct Purchase {
     pub total_amount: f64,
     pub discount: f64,
     pub paid_amount: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purchase_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_reference: Option<String>,
     pub payment_method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<i64>,
     pub created_at: String,
+    /// Grand total minus amount paid.
+    pub balance_due: f64,
+    /// "paid", "partial" or "unpaid".
+    pub payment_status: String,
     pub items: Vec<PurchaseItem>,
 }
 

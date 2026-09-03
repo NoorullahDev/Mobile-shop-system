@@ -50,6 +50,8 @@ pub struct Phone {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub box_condition: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub condition_notes: Option<String>,
     pub cost_price: f64,
     pub sale_price: f64,
@@ -90,6 +92,7 @@ pub struct CreatePhoneInput {
     pub speaker: Option<String>,
     pub charger: Option<String>,
     pub box_condition: Option<String>,
+    pub warranty: Option<String>,
     pub condition_notes: Option<String>,
     pub cost_price: f64,
     pub sale_price: f64,
@@ -123,6 +126,7 @@ pub struct PhoneOption {
     pub option_type: String,
     pub value: String,
     pub sort_order: i64,
+    pub is_active: bool,
     pub created_at: String,
 }
 
@@ -131,4 +135,5 @@ pub struct CreatePhoneOptionInput {
     pub option_type: String,
     pub value: String,
     pub sort_order: Option<i64>,
+    pub is_active: Option<bool>,
 }

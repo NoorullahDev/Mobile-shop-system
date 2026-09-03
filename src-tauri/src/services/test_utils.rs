@@ -76,8 +76,9 @@ CREATE TABLE phones (
     variant TEXT, sku TEXT,
     condition_rating TEXT, body_condition TEXT, screen_condition TEXT, battery_health TEXT,
     camera_condition TEXT, face_id TEXT, speaker TEXT, charger TEXT, box_condition TEXT,
-    condition_notes TEXT,
+    warranty TEXT, condition_notes TEXT,
     cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0,
+    last_purchase_cost REAL,
     quantity INTEGER NOT NULL DEFAULT 0, supplier_id INTEGER,
     low_stock_threshold INTEGER NOT NULL DEFAULT 0,
     is_deleted INTEGER NOT NULL DEFAULT 0,
@@ -88,6 +89,7 @@ CREATE TABLE phone_options (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     option_type TEXT NOT NULL, value TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(option_type, value)
 );
@@ -96,6 +98,7 @@ CREATE TABLE accessories (
     brand TEXT NOT NULL, product_name TEXT NOT NULL, compatible_models TEXT, color TEXT,
     condition TEXT, connector_type TEXT, warranty TEXT, features TEXT, description TEXT, sku TEXT,
     cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0,
+    last_purchase_cost REAL,
     quantity INTEGER NOT NULL DEFAULT 0, supplier_id INTEGER,
     low_stock_threshold INTEGER NOT NULL DEFAULT 0,
     is_deleted INTEGER NOT NULL DEFAULT 0,
@@ -122,12 +125,14 @@ CREATE TABLE purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_no TEXT NOT NULL UNIQUE, supplier_id INTEGER,
     total_amount REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0,
     paid_amount REAL NOT NULL DEFAULT 0, payment_method TEXT NOT NULL DEFAULT 'cash',
+    purchase_date TEXT, invoice_reference TEXT,
     notes TEXT, created_by INTEGER, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE purchase_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_id INTEGER NOT NULL,
     phone_id INTEGER, accessory_id INTEGER,
-    quantity INTEGER NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0
+    quantity INTEGER NOT NULL DEFAULT 1, unit_cost REAL NOT NULL DEFAULT 0,
+    selling_price REAL, warranty TEXT, condition TEXT, serials TEXT
 );
 CREATE TABLE supplier_payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_id INTEGER, amount REAL NOT NULL,

@@ -35,7 +35,7 @@ const methodLabels: Record<string, string> = {
 
 export function PurchasesPage() {
   const { purchases, loading, error, load, add } = usePurchaseStore();
-  const { products, load: loadInventory } = useInventoryStore();
+  const { phones, accessories, load: loadInventory, addPhone, addAccessory } = useInventoryStore();
   const { suppliers, load: loadSuppliers } = useSupplierStore();
   const user = useSessionStore((s) => s.user);
 
@@ -279,7 +279,10 @@ export function PurchasesPage() {
           }}
           onCancel={() => setRecordOpen(false)}
           suppliers={suppliers}
-          products={products}
+          phones={phones}
+          accessories={accessories}
+          addPhone={addPhone}
+          addAccessory={addAccessory}
         />
       </Modal>
 
@@ -316,10 +319,54 @@ export function PurchasesPage() {
                     style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}
                   >
                     <div className="text-[11px] uppercase tracking-wide" style={{ color: "#94A3B8" }}>
-                      Date
+                      Purchase Date
                     </div>
                     <div className="mt-1 text-[14px] font-semibold" style={{ color: "#0F172A" }}>
-                      {formatDate(detail.created_at)}
+                      {detail.purchase_date ? formatDate(detail.purchase_date) : formatDate(detail.created_at)}
+                    </div>
+                  </div>
+                  <div
+                    className="rounded-lg p-3"
+                    style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}
+                  >
+                    <div className="text-[11px] uppercase tracking-wide" style={{ color: "#94A3B8" }}>
+                      Supplier Invoice / Ref
+                    </div>
+                    <div className="mt-1 font-mono text-[13px] font-semibold" style={{ color: "#0F172A" }}>
+                      {detail.invoice_reference ?? "—"}
+                    </div>
+                  </div>
+                  <div
+                    className="rounded-lg p-3"
+                    style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}
+                  >
+                    <div className="text-[11px] uppercase tracking-wide" style={{ color: "#94A3B8" }}>
+                      Payment Status
+                    </div>
+                    <div className="mt-1 inline-flex items-center gap-2">
+                      <span
+                        className="rounded-full px-3 py-1 text-[12px] font-bold"
+                        style={{
+                          background:
+                            detail.payment_status === "paid"
+                              ? "#ECFDF5"
+                              : detail.payment_status === "partial"
+                                ? "#FFFBEB"
+                                : "#FEF2F2",
+                          color:
+                            detail.payment_status === "paid"
+                              ? "#047857"
+                              : detail.payment_status === "partial"
+                                ? "#B45309"
+                                : "#B91C1C",
+                        }}
+                      >
+                        {detail.payment_status === "paid"
+                          ? "Paid"
+                          : detail.payment_status === "partial"
+                            ? "Partial"
+                            : "Unpaid"}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -331,6 +378,7 @@ export function PurchasesPage() {
                         <th>Product</th>
                         <th className="text-right">Qty</th>
                         <th className="text-right">Unit Cost</th>
+                        <th className="text-right">Selling</th>
                         <th className="text-right">Total</th>
                       </tr>
                     </thead>
@@ -341,12 +389,20 @@ export function PurchasesPage() {
                             <span className="font-semibold" style={{ fontSize: "13px", color: "#0F172A" }}>
                               {it.product_name ?? `Item #${it.item_id}`}
                             </span>
+                            {(it.warranty || it.condition) && (
+                              <div className="text-[11px]" style={{ color: "#94A3B8" }}>
+                                {[it.condition, it.warranty].filter(Boolean).join(" · ")}
+                              </div>
+                            )}
                           </td>
                           <td className="text-right" style={{ fontSize: "13px", color: "#475569" }}>
                             {it.quantity}
                           </td>
                           <td className="text-right" style={{ fontSize: "13px", color: "#475569" }}>
                             {formatMoney(it.unit_cost)}
+                          </td>
+                          <td className="text-right" style={{ fontSize: "13px", color: "#475569" }}>
+                            {it.selling_price != null ? formatMoney(it.selling_price) : "—"}
                           </td>
                           <td className="text-right" style={{ fontSize: "13px", color: "#0F172A" }}>
                             {formatMoney(it.line_total)}
@@ -385,10 +441,10 @@ export function PurchasesPage() {
                     style={{ background: "#FEF3C7", border: "1px solid #FDE68A" }}
                   >
                     <div className="text-[11px] uppercase tracking-wide" style={{ color: "#94A3B8" }}>
-                      Due
+                      Balance Due
                     </div>
                     <div className="mt-1 amount text-[15px] font-bold" style={{ color: "#B45309" }}>
-                      {formatMoney(Math.max(0, detail.total_amount - detail.paid_amount))}
+                      {formatMoney(detail.balance_due)}
                     </div>
                   </div>
                 </div>

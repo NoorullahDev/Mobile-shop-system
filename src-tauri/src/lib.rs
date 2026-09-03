@@ -225,10 +225,12 @@ pub fn run() {
             commands::create_phone_option,
             commands::update_phone_option,
             commands::delete_phone_option,
+            commands::set_phone_option_active,
             commands::list_accessory_options,
             commands::create_accessory_option,
             commands::update_accessory_option,
             commands::delete_accessory_option,
+            commands::set_accessory_option_active,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

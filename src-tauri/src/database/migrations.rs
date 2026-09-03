@@ -870,6 +870,83 @@ const MIGRATIONS: &[(&str, &str)] = &[
         WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Wired Earphone Type-C');
         "#,
     ),
+    (
+        "0017_dynamic_options_activation",
+        r#"
+        -- =====================================================================
+        -- Fully dynamic, database-driven dropdown options.
+        --
+        -- 1) Add soft activate/deactivate support to phone_options so the
+        --    Owner/Admin can disable an option (hiding it from forms) without
+        --    losing its data history.
+        -- 2) Add a `warranty` column to phones (phones previously had no
+        --    warranty field; accessories already do).
+        -- 3) Seed additional realistic options (phone Category, extra shared
+        --    Warranty, Ronin brand, 24GB RAM, 2TB Storage, and a new Accessory
+        --    Category). These are stored in the same phone_options table as
+        --    every other option so they behave exactly like user-created data.
+        -- =====================================================================
+
+        ALTER TABLE phone_options ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
+
+        ALTER TABLE phones ADD COLUMN warranty TEXT;
+
+        -- Phone Categories
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('category', 'Smartphone', 1),
+            ('category', 'Feature Phone', 2),
+            ('category', 'Tablet', 3),
+            ('category', 'Smart Watch', 4);
+
+        -- Shared Warranty options (phones + accessories now both use `warranty`)
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('warranty', 'No Warranty', 1),
+            ('warranty', '3 Months', 2),
+            ('warranty', '6 Months', 3),
+            ('warranty', '1 Year', 4),
+            ('warranty', '2 Years', 5);
+
+        -- Extra brand + spec values mentioned in the spec
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('brand', 'Ronin', 12),
+            ('ram', '24 GB', 7),
+            ('storage', '2 TB', 7);
+
+        -- New Accessory Category
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('accessory_category', 'Gaming Accessories', 13);
+        "#,
+    ),
+    (
+        "0018_purchase_stock_in",
+        r#"
+        -- =====================================================================
+        -- Treat purchases as a proper Supplier Purchase / Stock-In transaction.
+        --
+        -- 1) purchases: add purchase_date and supplier invoice/reference.
+        -- 2) purchase_items: capture selling price, warranty, condition and
+        --    the recorded IMEI/serial list for each purchased line (kept as a
+        --    JSON text snapshot for traceability).
+        -- 3) phones/accessories: track the last purchase cost for costing and
+        --    profit reporting.
+        --
+        -- The existing phone_id/accessory_id columns are retained for backward
+        -- compatibility; item_type + item_id already make the schema scalable
+        -- to future product types.
+        -- =====================================================================
+
+        ALTER TABLE purchases ADD COLUMN purchase_date TEXT;
+        ALTER TABLE purchases ADD COLUMN invoice_reference TEXT;
+
+        ALTER TABLE purchase_items ADD COLUMN selling_price REAL;
+        ALTER TABLE purchase_items ADD COLUMN warranty TEXT;
+        ALTER TABLE purchase_items ADD COLUMN condition TEXT;
+        ALTER TABLE purchase_items ADD COLUMN serials TEXT;
+
+        ALTER TABLE phones ADD COLUMN last_purchase_cost REAL;
+        ALTER TABLE accessories ADD COLUMN last_purchase_cost REAL;
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

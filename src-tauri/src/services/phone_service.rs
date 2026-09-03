@@ -73,6 +73,7 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
         speaker: trim(input.speaker),
         charger: trim(input.charger),
         box_condition: trim(input.box_condition),
+        warranty: trim(input.warranty),
         condition_notes: trim(input.condition_notes),
         cost_price: input.cost_price,
         sale_price: input.sale_price,

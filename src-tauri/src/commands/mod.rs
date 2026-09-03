@@ -1374,6 +1374,18 @@ pub fn delete_phone_option(
     crate::services::phone_option_service::delete(&guard, id)
 }
 
+#[tauri::command]
+pub fn set_phone_option_active(
+    db: State<Database>,
+    _session: State<SessionState>,
+    id: i64,
+    is_active: bool,
+    _actor: Option<i64>,
+) -> Result<(), AppError> {
+    let guard = conn(&db)?;
+    crate::services::phone_option_service::set_active(&guard, id, is_active)
+}
+
 // ---- Accessory Options (reuse the phone_options table) ----
 
 #[tauri::command]
@@ -1422,4 +1434,16 @@ pub fn delete_accessory_option(
 ) -> Result<(), AppError> {
     let guard = conn(&db)?;
     crate::services::phone_option_service::delete(&guard, id)
+}
+
+#[tauri::command]
+pub fn set_accessory_option_active(
+    db: State<Database>,
+    _session: State<SessionState>,
+    id: i64,
+    is_active: bool,
+    _actor: Option<i64>,
+) -> Result<(), AppError> {
+    let guard = conn(&db)?;
+    crate::services::phone_option_service::set_active(&guard, id, is_active)
 }

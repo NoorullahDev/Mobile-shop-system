@@ -57,6 +57,9 @@ pub fn create_purchase(
         item_id: i64,
         quantity: i64,
         unit_cost: f64,
+        selling_price: Option<f64>,
+        warranty: Option<String>,
+        condition: Option<String>,
         imeis: Vec<String>,
     }
 
@@ -88,9 +91,15 @@ pub fn create_purchase(
         if unit_cost < 0.0 {
             return Err(AppError::validation("Unit cost cannot be negative"));
         }
+        if let Some(sp) = item.selling_price {
+            if sp < 0.0 {
+                return Err(AppError::validation("Selling price cannot be negative"));
+            }
+        }
 
         // Validate IMEIs are unique and not already in use (Rule: unique IMEI).
-        // IMEIs only apply to phones.
+        // IMEIs only apply to phones, and every purchased phone unit needs one,
+        // so the number of IMEIs must equal the quantity.
         let mut seen: Vec<String> = Vec::new();
         if item_type == "phone" {
             for imei in item
@@ -105,14 +114,28 @@ pub fn create_purchase(
                 seen.push(imei.clone());
                 all_imeis.push(imei);
             }
+            if seen.len() != item.quantity as usize {
+                return Err(AppError::validation(format!(
+                    "Quantity {} requires exactly {} IMEI(s) for this phone, but {} were provided",
+                    item.quantity,
+                    item.quantity,
+                    seen.len()
+                )));
+            }
         }
 
         subtotal += round2(unit_cost * item.quantity as f64);
+        let trim = |s: &Option<String>| -> Option<String> {
+            s.as_deref().map(|x| x.trim().to_string()).filter(|x| !x.is_empty())
+        };
         lines.push(Line {
             item_type,
             item_id: item.item_id,
             quantity: item.quantity,
             unit_cost: round2(unit_cost),
+            selling_price: item.selling_price.map(round2),
+            warranty: trim(&item.warranty),
+            condition: trim(&item.condition),
             imeis: seen,
         });
     }
@@ -159,8 +182,20 @@ pub fn create_purchase(
         .as_deref()
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
+    let purchase_date = input
+        .purchase_date
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let invoice_reference = input
+        .invoice_reference
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
 
-    // Apply atomically: record purchase, boost stock, register IMEIs.
+    // Apply atomically: record purchase, boost stock, register IMEIs, update
+    // last purchase cost + supplier balance (ledger). A failure at any step
+    // rolls everything back so no partial stock or financial updates remain.
     let tx = conn.unchecked_transaction()?;
     let purchase_id = purchase_repository::insert_purchase(
         &tx,
@@ -170,6 +205,8 @@ pub fn create_purchase(
         round2(input.discount),
         paid_amount,
         &payment_method,
+        purchase_date,
+        invoice_reference,
         notes,
         actor,
     )?;
@@ -182,8 +219,18 @@ pub fn create_purchase(
             line.item_id,
             line.quantity,
             line.unit_cost,
+            line.selling_price,
+            line.warranty.as_deref(),
+            line.condition.as_deref(),
+            &line.imeis,
         )?;
         purchase_repository::increment_stock(&tx, &line.item_type, line.item_id, line.quantity)?;
+        purchase_repository::update_last_purchase_cost(
+            &tx,
+            &line.item_type,
+            line.item_id,
+            line.unit_cost,
+        )?;
         if line.item_type == "phone" {
             purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis)?;
         }
@@ -293,6 +340,7 @@ mod tests {
     use crate::models::phone::CreatePhoneInput;
     use crate::models::purchase::PurchaseItemInput;
     use crate::services::{phone_service, supplier_service, test_utils::in_memory_conn};
+    use rusqlite::params;
 
     fn supplier(conn: &Connection) -> i64 {
         supplier_service::create(
@@ -334,12 +382,17 @@ mod tests {
             discount: 0.0,
             paid_amount: Some(200.0),
             payment_method: Some("cash".into()),
+            purchase_date: Some("2026-01-15".into()),
+            invoice_reference: Some("INV-001".into()),
             notes: None,
             items: vec![PurchaseItemInput {
                 item_type: "phone".into(),
                 item_id,
                 quantity: 2,
                 unit_cost: Some(100.0),
+                selling_price: Some(150.0),
+                warranty: Some("12 months".into()),
+                condition: Some("new".into()),
                 imeis: vec!["111111111111111".into(), "222222222222222".into()],
             }],
         }
@@ -362,6 +415,60 @@ mod tests {
         let after = phone_service::get(&conn, iid).unwrap().quantity;
         assert_eq!(after, before + 2);
         assert_eq!(phone_service::list_imei(&conn, iid).unwrap().len(), 2);
+
+        // New stock-in fields and derived values round-trip.
+        assert_eq!(p.purchase_date.as_deref(), Some("2026-01-15"));
+        assert_eq!(p.invoice_reference.as_deref(), Some("INV-001"));
+        assert_eq!(p.paid_amount, 200.0);
+        assert_eq!(p.balance_due, 0.0);
+        assert_eq!(p.payment_status, "paid");
+        assert_eq!(p.items[0].selling_price, Some(150.0));
+        assert_eq!(p.items[0].warranty.as_deref(), Some("12 months"));
+        assert_eq!(p.items[0].condition.as_deref(), Some("new"));
+
+        // Last purchase cost is recorded on the phone row.
+        let lpc: Option<f64> = conn
+            .query_row("SELECT last_purchase_cost FROM phones WHERE id = ?1", params![iid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(lpc, Some(100.0));
+    }
+
+    #[test]
+    fn partial_and_unpaid_payment_status_derivation() {
+        use crate::models::purchase::PurchaseItemInput;
+        let conn = in_memory_conn();
+        let sid = supplier(&conn);
+        let iid = phone_item(&conn, Some(sid));
+
+        let input = CreatePurchaseInput {
+            supplier_id: Some(sid),
+            discount: 0.0,
+            paid_amount: Some(50.0),
+            payment_method: Some("cash".into()),
+            purchase_date: None,
+            invoice_reference: None,
+            notes: None,
+            items: vec![PurchaseItemInput {
+                item_type: "phone".into(),
+                item_id: iid,
+                quantity: 1,
+                unit_cost: Some(100.0),
+                selling_price: None,
+                warranty: None,
+                condition: None,
+                imeis: vec!["111111111111111".into()],
+            }],
+        };
+        let p = create_purchase(&conn, input, None).unwrap();
+        assert_eq!(p.balance_due, 50.0);
+        assert_eq!(p.payment_status, "partial");
+
+        let mut input2 = purchase_input(iid, Some(sid));
+        input2.paid_amount = Some(0.0);
+        input2.items[0].imeis = vec!["999999999999991".into(), "999999999999992".into()];
+        let p2 = create_purchase(&conn, input2, None).unwrap();
+        assert_eq!(p2.balance_due, 200.0);
+        assert_eq!(p2.payment_status, "unpaid");
     }
 
     #[test]
@@ -371,6 +478,23 @@ mod tests {
         let iid = phone_item(&conn, Some(sid));
         let mut input = purchase_input(iid, Some(sid));
         input.items[0].imeis = vec!["111111111111111".into(), "111111111111111".into()];
+
+        let err = create_purchase(&conn, input, None).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        // transaction rolled back: stock unchanged, no purchase recorded
+        assert_eq!(phone_service::get(&conn, iid).unwrap().quantity, 5);
+        assert!(list(&conn, None).unwrap().is_empty());
+        assert!(phone_service::list_imei(&conn, iid).unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_missing_imeis_for_phone_atomically() {
+        let conn = in_memory_conn();
+        let sid = supplier(&conn);
+        let iid = phone_item(&conn, Some(sid));
+        let mut input = purchase_input(iid, Some(sid));
+        // Quantity is 2 but only one IMEI provided => must be rejected.
+        input.items[0].imeis = vec!["111111111111111".into()];
 
         let err = create_purchase(&conn, input, None).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));

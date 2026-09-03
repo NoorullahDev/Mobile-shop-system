@@ -47,3 +47,10 @@ pub fn delete(conn: &Connection, id: i64) -> Result<(), AppError> {
     }
     Ok(())
 }
+
+pub fn set_active(conn: &Connection, id: i64, is_active: bool) -> Result<(), AppError> {
+    if !phone_option_repository::set_active(conn, id, is_active)? {
+        return Err(AppError::validation("Phone option not found"));
+    }
+    Ok(())
+}
