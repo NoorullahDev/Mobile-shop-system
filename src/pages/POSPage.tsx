@@ -662,7 +662,7 @@ export function POSPage() {
         title="Sale Completed!"
         subtitle="Invoice generated successfully"
         onClose={() => setJustCreated(null)}
-        size="lg"
+        size="xl"
       >
         {justCreated && (
           <SaleReceipt

@@ -275,7 +275,7 @@ export function SalesPage() {
           setViewSale(null);
           setJustCreated(null);
         }}
-        size="lg"
+        size="xl"
       >
         {(viewSale ?? justCreated) && (
           <SaleReceipt

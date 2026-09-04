@@ -2,6 +2,8 @@ import { create } from "zustand";
 import * as settingsService from "../services/settingsService";
 import type { Currency } from "../lib/format";
 
+export type ReceiptPaperSize = "58mm" | "80mm";
+
 export interface BusinessProfile {
   businessName: string;
   logo: string | null;
@@ -9,6 +11,7 @@ export interface BusinessProfile {
   email: string;
   address: string;
   currency: Currency;
+  receiptPaperSize: ReceiptPaperSize;
 }
 
 interface SettingsState extends BusinessProfile {
@@ -24,6 +27,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   email: "",
   address: "",
   currency: "PKR",
+  receiptPaperSize: "80mm",
   loaded: false,
 
   load: async () => {
@@ -36,6 +40,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       email: map.get("email") ?? "",
       address: map.get("address") ?? "",
       currency: (map.get("currency") as Currency | undefined) ?? "PKR",
+      receiptPaperSize: map.get("receipt_paper_size") === "58mm" ? "58mm" : "80mm",
       loaded: true,
     });
   },

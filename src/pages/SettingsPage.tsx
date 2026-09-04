@@ -6,6 +6,7 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Alert } from "../components/Alert";
+import { Select } from "../components/Select";
 import { Spinner } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
 import * as settingsService from "../services/settingsService";
@@ -61,6 +62,7 @@ export function SettingsPage() {
   const [logo, setLogo] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const [receiptPaperSize, setReceiptPaperSize] = useState<"58mm" | "80mm">("80mm");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -83,6 +85,7 @@ export function SettingsPage() {
         setPhone(map.get("phone") ?? "");
         setEmail(map.get("email") ?? "");
         setLogo(map.get("shop_logo") || null);
+        setReceiptPaperSize(map.get("receipt_paper_size") === "58mm" ? "58mm" : "80mm");
         setError(null);
       } catch (e) {
         setError(String(e));
@@ -127,6 +130,7 @@ export function SettingsPage() {
       if (phone.trim()) entries.push(["phone", phone]);
       if (email.trim()) entries.push(["email", email]);
       entries.push(["shop_logo", logo ?? ""]);
+      entries.push(["receipt_paper_size", receiptPaperSize]);
       for (const [k, v] of entries) {
         await settingsService.updateSetting(k, v, actor);
       }
@@ -138,6 +142,7 @@ export function SettingsPage() {
         phone: phone.trim(),
         email: email.trim(),
         logo,
+        receiptPaperSize,
       });
       setMessage("Settings saved successfully.");
       await loadLogs();
@@ -261,6 +266,39 @@ export function SettingsPage() {
                   onChange={(e) => setAddress(e.target.value)}
                   placeholder="Street, City, Province"
                 />
+              </div>
+            </div>
+          </Card>
+
+          {/* ─── Receipt Printing ─── */}
+          <Card
+            title="Receipt Printing"
+            actions={
+              <Button
+                size="sm"
+                onClick={handleSave}
+                loading={saving}
+                icon={<Save className="h-3.5 w-3.5" />}
+              >
+                {saving ? "Saving..." : "Save Changes"}
+              </Button>
+            }
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Select
+                label="Receipt Paper Size"
+                options={[
+                  { value: "58mm", label: "58mm — small thermal roll" },
+                  { value: "80mm", label: "80mm — standard thermal roll" },
+                ]}
+                value={receiptPaperSize}
+                onChange={(e) => setReceiptPaperSize(e.target.value as "58mm" | "80mm")}
+              />
+              <div className="flex flex-col justify-end pb-1">
+                <span className="text-[12px]" style={{ color: "#64748B" }}>
+                  Used for sales receipts printed from the POS and sales screens. The selected
+                  size is remembered for future prints.
+                </span>
               </div>
             </div>
           </Card>
