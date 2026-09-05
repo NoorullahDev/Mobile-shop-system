@@ -27,7 +27,7 @@ export function AccessoriesPage() {
         rows={accessories}
         loading={loading}
         error={error}
-        onLoad={() => loadAccessories()}
+        onLoad={(search) => loadAccessories(search)}
         rowTitle={rowTitle}
         rowSubtitle={accessorySubtitle}
         add={addAccessory}

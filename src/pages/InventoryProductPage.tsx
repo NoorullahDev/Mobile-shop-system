@@ -14,6 +14,7 @@ import {
   Coins,
   Tags,
   X,
+  ImageIcon,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -30,6 +31,7 @@ import { useSupplierStore } from "../store/suppliers";
 import { useProductCategoryStore } from "../store/productCategories";
 import { useSessionStore } from "../store/session";
 import { formatMoneyCompact } from "../lib/format";
+import * as inventoryService from "../services/inventoryService";
 import type { PhoneImei, ProductCategory, Supplier } from "../types/inventory";
 
 function formatPKR(n: number) {
@@ -44,6 +46,22 @@ export interface InventoryRow {
   low_stock_threshold: number;
   supplier_name?: string | null;
   imei?: string | null;
+  image_paths?: string[];
+}
+
+const imageCache = new Map<string, Promise<string>>();
+function loadProductImage(path: string) {
+  let pending=imageCache.get(path);
+  if(!pending){pending=inventoryService.readProductImage(path);imageCache.set(path,pending);}
+  return pending;
+}
+
+function ProductThumbnail({ path, title, onPreview }: { path?: string; title: string; onPreview: (src:string,title:string)=>void }) {
+  const [src,setSrc]=useState<string|null>(null);
+  const [failed,setFailed]=useState(false);
+  useEffect(()=>{let active=true;setSrc(null);setFailed(false);if(path){loadProductImage(path).then(v=>active&&setSrc(v)).catch(()=>{imageCache.delete(path);if(active)setFailed(true);});}return()=>{active=false};},[path]);
+  if(!path||failed||!src)return <div className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-slate-200 bg-slate-50" aria-label="No product image"><ImageIcon className="h-5 w-5 text-slate-300"/></div>;
+  return <button type="button" onClick={()=>onPreview(src,title)} className="h-11 w-11 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-50" title="Preview product image"><img src={src} alt={title} className="h-full w-full object-cover" onError={()=>setFailed(true)}/></button>;
 }
 
 function StockBadge<T extends InventoryRow>({ item }: { item: T }) {
@@ -124,6 +142,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
   const [imeiLoading, setImeiLoading] = useState(false);
   const [stockFilter, setStockFilter] = useState<"all" | "in" | "low" | "out">("all");
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
+  const [imagePreview,setImagePreview]=useState<{src:string;title:string}|null>(null);
   const imeiReq = useRef(0);
   const canManageCategories = user !== null && (user.role === "Admin" || user.role === "Owner");
 
@@ -416,11 +435,16 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                   return (
                     <tr key={item.id}>
                       <td>
-                        <div className="font-semibold" style={{ color: "#0F172A", fontSize: "13px" }}>
-                          {rowTitle(item)}
-                        </div>
-                        <div className="text-[11px]" style={{ color: "#94A3B8" }}>
-                          ID: {item.id}
+                        <div className="flex items-center gap-3">
+                          <ProductThumbnail path={item.image_paths?.[0]} title={rowTitle(item)} onPreview={(src,title)=>setImagePreview({src,title})}/>
+                          <div className="min-w-0">
+                            <div className="font-semibold" style={{ color: "#0F172A", fontSize: "13px" }}>
+                              {rowTitle(item)}
+                            </div>
+                            <div className="text-[11px]" style={{ color: "#94A3B8" }}>
+                              ID: {item.id}
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td>
@@ -631,6 +655,10 @@ export function InventoryProductPage<T extends InventoryRow, I>({
             Are you sure you want to delete this {itemName} from your inventory?
           </p>
         </div>
+      </Modal>
+
+      <Modal open={imagePreview !== null} title={imagePreview?.title ?? "Product Image"} subtitle="Primary product image" onClose={()=>setImagePreview(null)} size="lg">
+        {imagePreview && <div className="flex max-h-[62vh] min-h-64 items-center justify-center overflow-hidden rounded-lg bg-slate-50"><img src={imagePreview.src} alt={imagePreview.title} className="max-h-[62vh] max-w-full object-contain" onError={()=>setImagePreview(null)}/></div>}
       </Modal>
 
       {/* Manage Product Categories */}

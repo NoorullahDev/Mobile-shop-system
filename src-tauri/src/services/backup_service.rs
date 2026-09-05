@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::Local;
@@ -7,13 +7,47 @@ use rusqlite::{Connection, DatabaseName};
 use tauri::Manager;
 
 use crate::errors::AppError;
-use crate::models::backup::{Backup, BackupStatus, BackupType};
+use crate::models::backup::{Backup, BackupInspection, BackupModule, BackupStatus, BackupType};
 use crate::models::backup_config::{BackupConfig, BackupStatusInfo, UpdateBackupConfigInput};
 use crate::repositories::{backup_repository, settings_repository};
 use crate::services;
 
 const SNAPSHOT_NAME: &str = "business_management.db";
 const MANIFEST_NAME: &str = "backup_info.json";
+
+const MODULES: &[(&str, &str, &[&str])] = &[
+    ("mobile_phones", "Mobile Phones", &["phones", "phone_imeis", "phone_options"]),
+    ("accessories", "Accessories", &["accessories", "product_categories"]),
+    ("sales", "Sales", &["sales", "sale_items"]),
+    ("customers", "Customers", &["members"]),
+    ("customer_dues", "Customer Dues", &["payments"]),
+    ("suppliers", "Suppliers", &["suppliers"]),
+    ("supplier_dues", "Supplier Dues", &["supplier_payments"]),
+    ("purchases", "Purchases", &["purchases", "purchase_items"]),
+    ("expenses", "Expenses", &["categories", "expenses"]),
+    ("settings", "Settings", &["settings"]),
+    // The current architecture stores the shop logo in settings and attachment
+    // references on customer/expense rows. Restore handles this module column-wise.
+    ("images_attachments", "Images / Attachments", &["members", "expenses", "settings"]),
+    ("users_roles", "Users & Roles", &["roles", "permissions", "role_permissions", "users"]),
+    ("reports", "Reports", &["report_templates"]),
+    ("activity_notifications", "Activity Logs & Notifications", &["activity_logs", "notifications"]),
+];
+
+pub fn available_modules() -> Vec<BackupModule> {
+    MODULES.iter().map(|(id, label, _)| BackupModule { id: (*id).into(), label: (*label).into() }).collect()
+}
+
+fn tables_for_modules(modules: &[String]) -> Result<Vec<&'static str>, AppError> {
+    let mut tables = Vec::new();
+    for id in modules {
+        let Some((_, _, module_tables)) = MODULES.iter().find(|m| m.0 == id) else {
+            return Err(AppError::validation(format!("Unknown backup module: {id}")));
+        };
+        for table in *module_tables { if !tables.contains(table) { tables.push(*table); } }
+    }
+    Ok(tables)
+}
 
 const KEY_AUTO_ENABLED: &str = "auto_backup_enabled";
 const KEY_INTERVAL: &str = "auto_backup_interval_minutes";
@@ -189,7 +223,7 @@ fn extract_snapshot(archive_path: &Path) -> Result<PathBuf, AppError> {
 
 /// Packs the live SQLite snapshot plus a small JSON manifest into a `.zip`
 /// archive at `destination`. Returns the number of bytes written.
-fn write_zip(conn: &Connection, destination: &Path) -> Result<u64, AppError> {
+fn write_zip(conn: &Connection, destination: &Path, backup_type: BackupType, modules: &[String]) -> Result<u64, AppError> {
     if let Some(parent) = destination.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -203,6 +237,19 @@ fn write_zip(conn: &Connection, destination: &Path) -> Result<u64, AppError> {
     let temp = temp_dir.join(format!("bms_snapshot_{}.db", unique_token()));
     let _ = fs::remove_file(&temp);
     write_backup(conn, &temp)?;
+
+    if backup_type == BackupType::Selective {
+        let keep = tables_for_modules(modules)?;
+        let filtered = Connection::open(&temp)?;
+        filtered.execute_batch("PRAGMA foreign_keys=OFF;")?;
+        for (_, _, tables) in MODULES {
+            for table in *tables {
+                if !keep.contains(table) {
+                    filtered.execute(&format!("DELETE FROM \"{table}\""), [])?;
+                }
+            }
+        }
+    }
 
     let file = fs::File::create(destination)
         .map_err(|e| AppError::file(format!("failed to create backup archive: {e}")))?;
@@ -224,7 +271,11 @@ fn write_zip(conn: &Connection, destination: &Path) -> Result<u64, AppError> {
     // 2) Manifest with app/backup metadata (software settings + config summary).
     let manifest = serde_json::json!({
         "app": "Mobile Shop Management System",
+        "app_version": env!("CARGO_PKG_VERSION"),
+        "database_version": env!("CARGO_PKG_VERSION"),
         "backup_created_at": Local::now().to_rfc3339(),
+        "backup_type": backup_type.as_str(),
+        "included_modules": modules,
         "database": SNAPSHOT_NAME,
     });
     writer
@@ -233,6 +284,24 @@ fn write_zip(conn: &Connection, destination: &Path) -> Result<u64, AppError> {
     writer
         .write_all(manifest.to_string().as_bytes())
         .map_err(|e| AppError::file(format!("failed to write manifest entry: {e}")))?;
+
+    // Product images are application-managed files next to the database. Keep
+    // relative archive paths so restore works across installations/machines.
+    let db_path: Option<String> = conn.query_row("SELECT file FROM pragma_database_list WHERE name='main'", [], |r| r.get(0)).ok();
+    let include_product_assets = backup_type != BackupType::Selective || modules.iter().any(|m| matches!(m.as_str(), "mobile_phones"|"accessories"|"images_attachments"));
+    if include_product_assets { if let Some(root) = db_path.and_then(|p| PathBuf::from(p).parent().map(Path::to_path_buf)) {
+        let images = root.join("product_images");
+        if images.is_dir() {
+            for entry in fs::read_dir(images).map_err(|e| AppError::file(format!("could not read product images: {e}")))? {
+                let entry=entry.map_err(|e|AppError::file(format!("could not read product image: {e}")))?;
+                if entry.path().is_file() {
+                    let name=format!("product_images/{}",entry.file_name().to_string_lossy());
+                    writer.start_file(name,options).map_err(|e|AppError::file(format!("failed to archive product image: {e}")))?;
+                    writer.write_all(&fs::read(entry.path()).map_err(|e|AppError::file(format!("could not read product image: {e}")))?).map_err(|e|AppError::file(format!("failed to archive product image: {e}")))?;
+                }
+            }
+        }
+    }}
 
     let _ = fs::remove_file(&temp);
 
@@ -261,6 +330,7 @@ pub fn create_backup(
     let prefix = match backup_type {
         BackupType::Full => "Manual_Backup",
         BackupType::Database => "Auto_Backup",
+        BackupType::Selective => "Selective_Backup",
     };
     let stamp = display_timestamp();
     let mut file_name = format!("{prefix}_{stamp}.zip");
@@ -272,7 +342,8 @@ pub fn create_backup(
         n += 1;
     }
 
-    let size = write_zip(conn, &destination)? as i64;
+    let all_modules: Vec<String> = MODULES.iter().map(|m| m.0.to_string()).collect();
+    let size = write_zip(conn, &destination, backup_type, &all_modules)? as i64;
 
     if let Err(e) = verify_backup_entry(&destination) {
         // A failed backup must still be recorded and surfaced to the user.
@@ -310,6 +381,39 @@ pub fn create_backup(
 
     backup_repository::get_by_id(conn, id)?
         .ok_or_else(|| AppError::Internal("Created backup could not be retrieved".into()))
+}
+
+pub fn create_selective_backup(conn: &Connection, backups_dir: &Path, actor: Option<i64>, modules: Vec<String>) -> Result<Backup, AppError> {
+    if modules.is_empty() { return Err(AppError::validation("Select at least one module")); }
+    tables_for_modules(&modules)?;
+    fs::create_dir_all(backups_dir).map_err(|e| AppError::file(format!("could not create backup directory: {e}")))?;
+    let stamp = display_timestamp();
+    let mut file_name = format!("Selective_Backup_{stamp}.zip");
+    let mut destination = backups_dir.join(&file_name);
+    let mut n = 1;
+    while destination.exists() { file_name = format!("Selective_Backup_{stamp}_{n}.zip"); destination = backups_dir.join(&file_name); n += 1; }
+    let size = write_zip(conn, &destination, BackupType::Selective, &modules)? as i64;
+    verify_backup_entry(&destination)?;
+    let id = backup_repository::insert(conn, &file_name, BackupType::Selective, &destination.to_string_lossy(), size, BackupStatus::Success, actor)?;
+    services::record_activity(conn, actor, "backup", "create_selective", Some(id))?;
+    backup_repository::get_by_id(conn, id)?.ok_or_else(|| AppError::Internal("Created backup could not be retrieved".into()))
+}
+
+pub fn inspect_backup(path: &Path) -> Result<BackupInspection, AppError> {
+    validate_archive(path)?;
+    if path.extension().map(|e| e.eq_ignore_ascii_case("zip")).unwrap_or(false) {
+        let file = fs::File::open(path).map_err(|e| AppError::file(format!("could not open backup archive: {e}")))?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| AppError::validation(format!("Invalid backup archive: {e}")))?;
+        if let Ok(mut entry) = archive.by_name(MANIFEST_NAME) {
+            let mut text = String::new(); entry.read_to_string(&mut text).map_err(|e| AppError::validation(format!("Invalid backup metadata: {e}")))?;
+            let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| AppError::validation(format!("Invalid backup metadata: {e}")))?;
+            let kind = BackupType::from_str(value.get("backup_type").and_then(|v| v.as_str()).unwrap_or("full"));
+            let ids: Vec<String> = value.get("included_modules").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let modules = ids.iter().filter_map(|id| MODULES.iter().find(|m| m.0 == id).map(|m| BackupModule{id:id.clone(), label:m.1.into()})).collect();
+            return Ok(BackupInspection { backup_type: kind, created_at: value.get("backup_created_at").and_then(|v|v.as_str()).map(String::from), modules, app_version: value.get("app_version").and_then(|v|v.as_str()).map(String::from) });
+        };
+    }
+    Ok(BackupInspection { backup_type: BackupType::Full, created_at: None, modules: vec![], app_version: None })
 }
 
 pub fn list_backups(conn: &Connection) -> Result<Vec<Backup>, AppError> {
@@ -356,6 +460,7 @@ pub fn restore_backup(
     actor: Option<i64>,
     source: &Path,
 ) -> Result<(), AppError> {
+    let inspection = inspect_backup(source)?;
     let snapshot = if source
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase().as_bytes() == b"zip")
@@ -377,12 +482,56 @@ pub fn restore_backup(
         log::warn!("could not create emergency backup before restore: {e}");
     }
 
-    conn.restore(
-        DatabaseName::Main,
-        &snapshot,
-        None::<fn(rusqlite::backup::Progress)>,
-    )
-    .map_err(|e| AppError::file(format!("failed to restore: {e}")))?;
+    if inspection.backup_type == BackupType::Selective {
+        let ids: Vec<String> = inspection.modules.iter().map(|m| m.id.clone()).collect();
+        let attachment_only = ids.iter().any(|id| id == "images_attachments");
+        let regular_ids: Vec<String> = ids.iter().filter(|id| id.as_str() != "images_attachments").cloned().collect();
+        let tables = tables_for_modules(&regular_ids)?;
+        conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+        conn.execute("ATTACH DATABASE ?1 AS selective_backup", [snapshot.to_string_lossy().as_ref()])?;
+        let result = (|| -> Result<(), AppError> {
+            let tx = conn.transaction()?;
+            for table in tables.iter().rev() { tx.execute(&format!("DELETE FROM \"{table}\""), [])?; }
+            for table in &tables {
+                let mut stmt = tx.prepare(&format!("PRAGMA main.table_info(\"{table}\")"))?;
+                let live: Vec<String> = stmt.query_map([], |r| r.get(1))?.collect::<Result<_, _>>()?;
+                let mut stmt = tx.prepare(&format!("PRAGMA selective_backup.table_info(\"{table}\")"))?;
+                let source_cols: Vec<String> = stmt.query_map([], |r| r.get(1))?.collect::<Result<_, _>>()?;
+                let cols: Vec<String> = live.into_iter().filter(|c| source_cols.contains(c)).collect();
+                if cols.is_empty() { return Err(AppError::validation(format!("Backup module table is incompatible: {table}"))); }
+                let quoted = cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(",");
+                tx.execute(&format!("INSERT INTO main.\"{table}\" ({quoted}) SELECT {quoted} FROM selective_backup.\"{table}\""), [])?;
+            }
+            if attachment_only {
+                if !tables.contains(&"members") {
+                    tx.execute_batch("UPDATE members SET image_path=(SELECT image_path FROM selective_backup.members b WHERE b.id=members.id) WHERE id IN (SELECT id FROM selective_backup.members);")?;
+                }
+                if !tables.contains(&"expenses") {
+                    tx.execute_batch("UPDATE expenses SET receipt_path=(SELECT receipt_path FROM selective_backup.expenses b WHERE b.id=expenses.id) WHERE id IN (SELECT id FROM selective_backup.expenses);")?;
+                }
+                if !tables.contains(&"settings") {
+                    tx.execute_batch("INSERT INTO settings(key,value) SELECT key,value FROM selective_backup.settings WHERE key='shop_logo' ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })();
+        let _ = conn.execute_batch("DETACH DATABASE selective_backup; PRAGMA foreign_keys=ON;");
+        result?;
+    } else {
+        conn.restore(DatabaseName::Main, &snapshot, None::<fn(rusqlite::backup::Progress)>)
+            .map_err(|e| AppError::file(format!("failed to restore: {e}")))?;
+    }
+
+    let restore_product_assets = inspection.backup_type != BackupType::Selective || inspection.modules.iter().any(|m| matches!(m.id.as_str(), "mobile_phones"|"accessories"|"images_attachments"));
+    if restore_product_assets && source.extension().map(|e|e.eq_ignore_ascii_case("zip")).unwrap_or(false) {
+        let db_file: Option<String> = conn.query_row("SELECT file FROM pragma_database_list WHERE name='main'", [], |r|r.get(0)).ok();
+        if let Some(root)=db_file.and_then(|p|PathBuf::from(p).parent().map(Path::to_path_buf)) {
+            let file=fs::File::open(source).map_err(|e|AppError::file(format!("could not open backup archive: {e}")))?;
+            let mut archive=zip::ZipArchive::new(file).map_err(|e|AppError::validation(format!("Invalid backup archive: {e}")))?;
+            for i in 0..archive.len() { let mut entry=archive.by_index(i).map_err(|e|AppError::validation(format!("Invalid image entry: {e}")))?; let name=entry.name().replace('\\',"/"); if name.starts_with("product_images/") && !name.contains("..") && !name.ends_with('/') { let target=root.join(&name); if let Some(parent)=target.parent(){fs::create_dir_all(parent).map_err(|e|AppError::file(format!("could not restore image folder: {e}")))?;} let mut out=fs::File::create(target).map_err(|e|AppError::file(format!("could not restore product image: {e}")))?; std::io::copy(&mut entry,&mut out).map_err(|e|AppError::file(format!("could not restore product image: {e}")))?; } }
+        }
+    }
 
     // Clean up the extracted snapshot temp file if we created one.
     if snapshot != source {

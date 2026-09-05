@@ -4,6 +4,7 @@ import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
+import { ProductImageInput } from "../components/ProductImageInput";
 import { ManagePhoneOptionsModal } from "./ManagePhoneOptionsModal";
 import { usePhoneOptionStore } from "../store/phoneOptions";
 import type { CreatePhoneInput, Phone, ProductCategory, Supplier, PhoneOption } from "../types/inventory";
@@ -86,6 +87,8 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
     battery_capacity: initial?.battery_capacity ?? "",
     imei: initial?.imei ?? "",
     imei2: initial?.imei2 ?? "",
+    serial_number: initial?.serial_number ?? "",
+    image_paths: initial?.image_paths ?? [],
     quantity: initial?.quantity ?? 0,
     low_stock_threshold: initial?.low_stock_threshold ?? 0,
     sku: initial?.sku ?? "",
@@ -164,6 +167,8 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
         battery_capacity: form.battery_capacity ? form.battery_capacity.trim() : "",
         imei: imei || "",
         imei2: imei2 || "",
+        serial_number: form.serial_number?.trim() || "",
+        image_paths: form.image_paths ?? [],
         quantity: Number(form.quantity) || 0,
         low_stock_threshold: Number(form.low_stock_threshold) || 0,
         sku: form.sku ? form.sku.trim() : "",
@@ -468,6 +473,7 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
             }}
             disabled={saving}
           />
+          <Input name="serial_number" label="Serial Number" placeholder="Manufacturer serial number" hint="Optional, but must be unique" value={form.serial_number ?? ""} onChange={(e)=>set("serial_number",e.target.value)} disabled={saving}/>
           <Input
             name="quantity"
             label="Quantity / Stock"
@@ -490,6 +496,8 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
             disabled={saving}
           />
         </Section>
+
+        <ProductImageInput value={form.image_paths ?? []} onChange={(paths)=>setForm(f=>({...f,image_paths:paths}))} disabled={saving}/>
 
         <Section index="5" title="Pricing">
           <Input

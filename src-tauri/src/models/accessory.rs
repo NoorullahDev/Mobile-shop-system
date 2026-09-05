@@ -22,6 +22,8 @@ pub struct Accessory {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sku: Option<String>,
+    pub serial_number: Option<String>,
+    pub image_paths: Vec<String>,
     pub cost_price: f64,
     pub sale_price: f64,
     pub quantity: i64,
@@ -48,6 +50,9 @@ pub struct CreateAccessoryInput {
     pub features: Option<String>,
     pub description: Option<String>,
     pub sku: Option<String>,
+    pub serial_number: Option<String>,
+    #[serde(default)]
+    pub image_paths: Vec<String>,
     pub cost_price: f64,
     pub sale_price: f64,
     pub quantity: i64,

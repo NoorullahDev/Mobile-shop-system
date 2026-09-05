@@ -48,6 +48,8 @@ export interface Phone {
   battery_capacity?: string | null;
   imei?: string | null;
   imei2?: string | null;
+  serial_number?: string | null;
+  image_paths: string[];
   category?: string | null;
   condition?: string | null;
   variant?: string | null;
@@ -85,6 +87,8 @@ export interface CreatePhoneInput {
   battery_capacity?: string | null;
   imei?: string | null;
   imei2?: string | null;
+  serial_number?: string | null;
+  image_paths?: string[];
   category?: string | null;
   condition?: string | null;
   variant?: string | null;
@@ -137,6 +141,8 @@ export interface Accessory {
   features?: string | null;
   description?: string | null;
   sku?: string | null;
+  serial_number?: string | null;
+  image_paths: string[];
   cost_price: number;
   sale_price: number;
   quantity: number;
@@ -160,6 +166,8 @@ export interface CreateAccessoryInput {
   features?: string | null;
   description?: string | null;
   sku?: string | null;
+  serial_number?: string | null;
+  image_paths?: string[];
   cost_price: number;
   sale_price: number;
   quantity: number;

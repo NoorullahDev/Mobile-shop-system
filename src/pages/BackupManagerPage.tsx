@@ -32,7 +32,7 @@ import {
   parseBackupTime,
   formatBytes,
 } from "../types/backup";
-import type { Backup, BackupStatusInfo } from "../types/backup";
+import type { Backup, BackupInspection, BackupModule, BackupStatusInfo } from "../types/backup";
 
 export function BackupManagerPage() {
   const actor = useSessionStore((s) => s.user?.id ?? null);
@@ -59,6 +59,14 @@ export function BackupManagerPage() {
   // File-picker restore path (chosen from Desktop/Software Backup)
   const [fileRestoreTarget, setFileRestoreTarget] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createType, setCreateType] = useState<"full" | "selective">("full");
+  const [modules, setModules] = useState<BackupModule[]>([]);
+  const [selectedModules, setSelectedModules] = useState<string[]>([]);
+  const [customLocation, setCustomLocation] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [createdPath, setCreatedPath] = useState<string | null>(null);
+  const [restoreInspection, setRestoreInspection] = useState<BackupInspection | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,6 +81,9 @@ export function BackupManagerPage() {
       setAutoEnabled(info.config.auto_backup_enabled);
       setAutoInterval(info.config.auto_backup_interval_minutes);
       setBackupFrequency(info.config.backup_frequency ?? "30");
+      const available = await backupService.listBackupModules();
+      setModules(available);
+      setSelectedModules((current) => current.length ? current : available.map((m) => m.id));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -113,19 +124,35 @@ export function BackupManagerPage() {
     }
   };
 
-  const handleCreate = async () => {
+  const handleCreate = () => setCreateOpen(true);
+
+  const handleConfirmCreate = async () => {
     setCreating(true);
     setError(null);
     setMessage(null);
     try {
-      const created = await backupService.createBackup(actor);
-      setMessage(`Manual backup created: ${created.file_name}`);
+      const created = createType === "full"
+        ? await backupService.createBackup(actor)
+        : await backupService.createSelectiveBackup(selectedModules, customLocation ? selectedFolder : null, actor);
+      setCreateOpen(false);
+      setCreatedPath(created.file_path);
       await load();
     } catch (e) {
       setError(String(e));
     } finally {
       setCreating(false);
     }
+  };
+
+  const chooseFolder = async () => {
+    const folder = await backupService.pickBackupFolder();
+    if (folder) setSelectedFolder(folder);
+  };
+
+  const prepareRestore = async (backup: Backup) => {
+    setError(null);
+    try { setRestoreInspection(await backupService.inspectBackup(backup.id)); setRestoreTarget(backup); }
+    catch (e) { setError(String(e)); }
   };
 
   const handleVerify = async (b: Backup) => {
@@ -166,7 +193,7 @@ export function BackupManagerPage() {
     try {
       const path = await backupService.pickBackupFile();
       if (path) {
-        // Confirm before actually restoring (safety step).
+        setRestoreInspection(await backupService.inspectBackup(null, path));
         setFileRestoreTarget(path);
       }
     } catch (e) {
@@ -406,7 +433,7 @@ export function BackupManagerPage() {
                       </span>
                     </td>
                     <td>
-                      <StatusBadge status={b.file_name.startsWith("Manual_Backup") ? "Manual" : "Automatic"} />
+                      <StatusBadge status={b.backup_type === "selective" ? "Selective" : b.file_name.startsWith("Manual_Backup") ? "Manual" : "Automatic"} />
                     </td>
                     <td style={{ color: "#64748B", fontSize: "12px" }}>
                       {parseBackupTime(b.created_at).toLocaleString("en-PK", {
@@ -434,7 +461,7 @@ export function BackupManagerPage() {
                         <Button
                           size="xs"
                           variant="ghost"
-                          onClick={() => setRestoreTarget(b)}
+                          onClick={() => prepareRestore(b)}
                           disabled={busyId === b.id}
                           icon={<UploadCloud className="h-3.5 w-3.5" />}
                         >
@@ -461,12 +488,30 @@ export function BackupManagerPage() {
 
       {/* Restore confirmation (DB-row or file-picker restore) */}
       <Modal
+        open={createOpen}
+        title="Create Backup"
+        subtitle="Choose what to include and where to save it"
+        onClose={() => !creating && setCreateOpen(false)}
+        size="sm"
+        footer={<><Button variant="secondary" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button><Button size="sm" onClick={handleConfirmCreate} loading={creating} disabled={createType === "selective" && (!selectedModules.length || (customLocation && !selectedFolder))}>Create Backup</Button></>}
+      >
+        <div className="grid grid-cols-2 gap-3">
+          {(["full", "selective"] as const).map((type) => <button key={type} type="button" onClick={() => setCreateType(type)} className="rounded border p-3 text-left" style={{borderColor:createType===type?"#3B6FD4":"#CBD5E1", background:createType===type?"#EFF6FF":"white"}}><div className="font-semibold text-[13px]">{type === "full" ? "Full Backup" : "Selective Backup"}</div><div className="text-[11px] text-slate-500 mt-1">{type === "full" ? "All application data" : "Choose specific modules"}</div></button>)}
+        </div>
+        {createType === "selective" && <div className="mt-4"><div className="mb-2 flex justify-between"><span className="font-semibold text-[12px]">Included data</span><button className="text-[12px] text-blue-600" onClick={() => setSelectedModules(selectedModules.length === modules.length ? [] : modules.map(m=>m.id))}>{selectedModules.length === modules.length ? "Clear all" : "Select all"}</button></div><div className="grid grid-cols-2 gap-2 max-h-52 overflow-auto">{modules.map(m=><label key={m.id} className="flex items-center gap-2 rounded border p-2 text-[12px]"><input type="checkbox" checked={selectedModules.includes(m.id)} onChange={() => setSelectedModules(v => v.includes(m.id) ? v.filter(x=>x!==m.id) : [...v,m.id])}/>{m.label}</label>)}</div></div>}
+        {createType === "selective" && <div className="mt-4"><div className="font-semibold text-[12px] mb-2">Backup location</div><label className="block text-[12px] mb-2"><input type="radio" checked={!customLocation} onChange={()=>setCustomLocation(false)} /> <span className="ml-1">Use Default Backup Folder</span></label><label className="block text-[12px]"><input type="radio" checked={customLocation} onChange={()=>setCustomLocation(true)} /> <span className="ml-1">Choose Another Location</span></label>{customLocation && <div className="mt-2"><Button size="xs" variant="secondary" onClick={chooseFolder} icon={<FolderOpen className="h-3.5 w-3.5"/>}>Choose Folder</Button>{selectedFolder && <p className="mt-2 break-all font-mono text-[11px] text-slate-600">{selectedFolder}</p>}</div>}</div>}
+      </Modal>
+
+      <Modal open={createdPath !== null} title="Backup created successfully" subtitle="Your backup is ready" onClose={()=>setCreatedPath(null)} size="sm" footer={<><Button size="sm" variant="secondary" onClick={()=>createdPath && backupService.openBackupFolder(createdPath)} icon={<FolderOpen className="h-3.5 w-3.5"/>}>Open Folder</Button><Button size="sm" onClick={()=>setCreatedPath(null)}>Close</Button></>}><p className="break-all rounded bg-slate-50 p-3 font-mono text-[12px]">{createdPath}</p></Modal>
+
+      <Modal
         open={restoreTarget !== null || fileRestoreTarget !== null}
         title="Confirm Restore"
-        subtitle="This action is irreversible"
+        subtitle={restoreInspection?.backup_type === "selective" ? "Only the included modules will be restored" : "This action is irreversible"}
         onClose={() => {
           setRestoreTarget(null);
           setFileRestoreTarget(null);
+          setRestoreInspection(null);
         }}
         size="sm"
         footer={
@@ -477,6 +522,7 @@ export function BackupManagerPage() {
               onClick={() => {
                 setRestoreTarget(null);
                 setFileRestoreTarget(null);
+                setRestoreInspection(null);
               }}
             >
               Cancel
@@ -493,10 +539,12 @@ export function BackupManagerPage() {
         }
       >
         <Alert
-          variant="error"
-          title="Current data will be replaced"
+          variant={restoreInspection?.backup_type === "selective" ? "info" : "error"}
+          title={restoreInspection?.backup_type === "selective" ? "Selective backup validated" : "Current data will be replaced"}
           message={
-            restoreTarget
+            restoreInspection?.backup_type === "selective"
+              ? `Only these modules will be replaced: ${restoreInspection.modules.map(m => m.label).join(", ")}. Unrelated data will not be changed.`
+              : restoreTarget
               ? `"${restoreTarget.file_name}" will overwrite all current data (database, files, settings and configuration). This cannot be undone. Do you want to continue?`
               : "The selected backup will overwrite all current data (database, files, settings and configuration). This cannot be undone. Do you want to continue?"
           }

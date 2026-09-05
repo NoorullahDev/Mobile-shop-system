@@ -3,6 +3,7 @@ import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
+import { ProductImageInput } from "../components/ProductImageInput";
 import { useAccessoryOptionStore } from "../store/accessoryOptions";
 import type {
   Accessory,
@@ -38,6 +39,8 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
     features: initial?.features ?? "",
     description: initial?.description ?? "",
     sku: initial?.sku ?? "",
+    serial_number: initial?.serial_number ?? "",
+    image_paths: initial?.image_paths ?? [],
     cost_price: initial?.cost_price ?? 0,
     sale_price: initial?.sale_price ?? 0,
     quantity: initial?.quantity ?? 0,
@@ -120,6 +123,8 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
         features: form.features ? form.features.trim() : "",
         description: form.description ? form.description.trim() : "",
         sku: form.sku ? form.sku.trim() : "",
+        serial_number: form.serial_number?.trim() || "",
+        image_paths: form.image_paths ?? [],
         cost_price: Number(form.cost_price) || 0,
         sale_price: Number(form.sale_price) || 0,
         quantity: Number(form.quantity) || 0,
@@ -244,6 +249,7 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
             onChange={(e) => set("sku", e.target.value)}
             disabled={saving}
           />
+          <Input name="serial_number" label="Serial Number" hint="Optional for individually serialized accessories" value={form.serial_number ?? ""} onChange={(e)=>set("serial_number",e.target.value)} disabled={saving}/>
         </div>
         <div className="mt-4">
           <Input
@@ -256,6 +262,8 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
           />
         </div>
       </section>
+
+      <ProductImageInput value={form.image_paths ?? []} onChange={(paths)=>setForm(f=>({...f,image_paths:paths}))} disabled={saving}/>
 
       {/* Section: Inventory & Stock */}
       <section className="flex flex-col gap-1">

@@ -434,6 +434,29 @@ pub fn delete_supplier(
 // ---- Phone Inventory ----
 
 #[tauri::command]
+pub fn save_product_image(app: tauri::AppHandle, _session: State<SessionState>, bytes: Vec<u8>, extension: String) -> Result<String, AppError> {
+    use tauri::Manager;
+    if bytes.is_empty() || bytes.len() > 10 * 1024 * 1024 { return Err(AppError::validation("Product image must be between 1 byte and 10 MB")); }
+    let ext = match extension.to_ascii_lowercase().as_str() { "jpg"|"jpeg" => "jpg", "png" => "png", "webp" => "webp", _ => return Err(AppError::validation("Only JPG, PNG and WebP images are supported")) };
+    let relative = format!("product_images/{}_{}.{}", chrono::Utc::now().timestamp_millis(), std::process::id(), ext);
+    let path = app.path().app_data_dir().map_err(|e| AppError::file(format!("Could not resolve application data folder: {e}")))?.join(&relative);
+    if let Some(parent)=path.parent(){std::fs::create_dir_all(parent).map_err(|e|AppError::file(format!("Could not create image folder: {e}")))?;}
+    std::fs::write(&path, bytes).map_err(|e|AppError::file(format!("Could not save product image: {e}")))?;
+    Ok(relative.replace('\\', "/"))
+}
+
+#[tauri::command]
+pub fn read_product_image(app: tauri::AppHandle, _session: State<SessionState>, relative_path: String) -> Result<String, AppError> {
+    use base64::Engine;
+    use tauri::Manager;
+    if relative_path.contains("..") || !relative_path.replace('\\', "/").starts_with("product_images/") { return Err(AppError::validation("Invalid product image path")); }
+    let path=app.path().app_data_dir().map_err(|e|AppError::file(format!("Could not resolve application data folder: {e}")))?.join(&relative_path);
+    let bytes=std::fs::read(&path).map_err(|e|AppError::file(format!("Could not read product image: {e}")))?;
+    let mime=if relative_path.ends_with(".png"){"image/png"}else if relative_path.ends_with(".webp"){"image/webp"}else{"image/jpeg"};
+    Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
+#[tauri::command]
 pub fn create_phone(
     db: State<Database>,
     _session: State<SessionState>,
@@ -1052,6 +1075,42 @@ pub fn create_backup(
 }
 
 #[tauri::command]
+pub fn list_backup_modules(_session: State<SessionState>) -> Vec<crate::models::backup::BackupModule> {
+    backup_service::available_modules()
+}
+
+#[tauri::command]
+pub fn pick_backup_folder(app: tauri::AppHandle, db: State<Database>, _session: State<SessionState>) -> Result<Option<String>, AppError> {
+    use tauri_plugin_dialog::DialogExt;
+    let guard = conn(&db)?;
+    let folder = backup_service::backup_dir(&guard)?;
+    let picked = app.dialog().file().set_title("Choose Backup Location").set_directory(&folder).blocking_pick_folder();
+    match picked { Some(fp) => Ok(Some(fp.into_path().map_err(|e| AppError::validation(format!("Invalid path: {e}")))?.to_string_lossy().to_string())), None => Ok(None) }
+}
+
+#[tauri::command]
+pub fn create_selective_backup(db: State<Database>, _session: State<SessionState>, actor: Option<i64>, modules: Vec<String>, folder: Option<String>) -> Result<crate::models::backup::Backup, AppError> {
+    let guard = conn(&db)?;
+    let dir = folder.filter(|f| !f.trim().is_empty()).map(std::path::PathBuf::from).unwrap_or(backup_service::backup_dir(&guard)?);
+    backup_service::create_selective_backup(&guard, &dir, actor, modules)
+}
+
+#[tauri::command]
+pub fn inspect_backup(id: Option<i64>, file_path: Option<String>, db: State<Database>, _session: State<SessionState>) -> Result<crate::models::backup::BackupInspection, AppError> {
+    let guard = conn(&db)?;
+    let path = if let Some(id) = id { backup_service::get_backup(&guard, id)?.ok_or_else(|| AppError::validation(format!("Backup #{id} not found")))?.file_path } else { file_path.ok_or_else(|| AppError::validation("Backup path is required"))? };
+    backup_service::inspect_backup(std::path::Path::new(&path))
+}
+
+#[tauri::command]
+pub fn open_backup_folder(path: String, _session: State<SessionState>) -> Result<(), AppError> {
+    let target = std::path::PathBuf::from(path);
+    let folder = if target.is_dir() { target } else { target.parent().ok_or_else(|| AppError::validation("Invalid backup path"))?.to_path_buf() };
+    std::process::Command::new("explorer.exe").arg(&folder).spawn().map_err(|e| AppError::file(format!("Could not open backup folder: {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn list_backups(
     db: State<Database>,
     _session: State<SessionState>,
@@ -1105,7 +1164,7 @@ pub fn restore_backup(
     let item = backup_service::get_backup(&guard, id)?.ok_or_else(|| {
         AppError::validation(format!("Backup #{id} not found"))
     })?;
-    let dir = backup_service::desktop_folder()?;
+    let dir = backup_service::backup_dir(&guard)?;
     backup_service::restore_backup(
         &mut guard,
         &dir,
@@ -1151,7 +1210,7 @@ pub fn restore_backup_from_path(
 
     let source = PathBuf::from(&file_path);
     let mut guard = conn(&db)?;
-    let dir = backup_service::desktop_folder()?;
+    let dir = backup_service::backup_dir(&guard)?;
     let file_name = source
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -1167,7 +1226,9 @@ pub fn restore_backup_from_path(
     let size = std::fs::metadata(&source)
         .map(|m| m.len() as i64)
         .unwrap_or(0);
-    let bt = if file_name.starts_with("Manual_Backup") {
+    let bt = if file_name.starts_with("Selective_Backup") {
+        crate::models::backup::BackupType::Selective
+    } else if file_name.starts_with("Manual_Backup") {
         crate::models::backup::BackupType::Full
     } else {
         crate::models::backup::BackupType::Database

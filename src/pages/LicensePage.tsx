@@ -107,6 +107,14 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function StatusBadge({ status }: { status: LicenseStatus }) {
+  if (status.invalid) {
+    return (
+      <div className="flex h-10 w-full items-center gap-2 rounded-md px-3 text-[13px] font-medium" style={{background:"#FFF5F5",border:"1px solid #FECACA",color:"#991B1B"}}>
+        <span className="inline-block h-2 w-2 rounded-full" style={{background:"#DC2626"}} />
+        {status.clock_rollback_detected ? "Invalid — suspicious system clock rollback detected" : "Invalid license"}
+      </div>
+    );
+  }
   if (!status.activated && !status.expired) {
     return (
       <div
@@ -252,7 +260,7 @@ function RenewModal({
             rows={3}
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="MSP-..."
+            placeholder="MSP2-..."
             className="w-full resize-none rounded-md px-3 py-2 text-[13px] outline-none transition-shadow"
             style={{
               border: "1px solid #CBD5E1",
@@ -264,7 +272,7 @@ function RenewModal({
             onBlur={(e) => (e.target.style.boxShadow = "none")}
           />
           <p className="text-[11px]" style={{ color: "#94A3B8" }}>
-            Format: MSP-&lt;payload&gt;.&lt;signature&gt;
+            Format: MSP2-&lt;payload&gt;.&lt;signature&gt;
           </p>
         </div>
 

@@ -584,9 +584,7 @@ function ReceiptBody({
       </div>
 
       <div style={{ textAlign: "center", marginTop: 12, fontSize: xs, color: "#6B7280", lineHeight: 1.5 }}>
-        <div>Software developed by</div>
-        <div style={{ fontWeight: 600, color: "#374151" }}>EagleNest Creations</div>
-        <div>0346-4451505</div>
+        Software developed by <span style={{ fontWeight: 600, color: "#374151" }}>EagleNest Creations</span> 0346-4451505
       </div>
     </div>
   );

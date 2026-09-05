@@ -7,6 +7,8 @@ const KEY_LICENSE_KEY: &str = "license_key";
 const KEY_LICENSE_CUSTOMER: &str = "license_customer";
 const KEY_LICENSE_GRANTED_DAYS: &str = "license_granted_days";
 const KEY_LICENSE_ACTIVATED_AT: &str = "license_activated_at";
+const KEY_LAST_VALID_TIME: &str = "license_last_valid_time";
+const KEY_LAST_VALID_SEAL: &str = "license_last_valid_seal";
 
 /// License persistence lives in the `settings` table — no extra migration needed.
 pub struct StoredLicense {
@@ -14,6 +16,18 @@ pub struct StoredLicense {
     pub customer: String,
     pub granted_days: i64,
     pub activated_at: String,
+}
+
+pub fn get_last_valid_time(conn: &Connection) -> Result<Option<(String,String)>, AppError> {
+    let Some(time) = settings_repository::get(conn, KEY_LAST_VALID_TIME)? else { return Ok(None) };
+    let seal = settings_repository::get(conn, KEY_LAST_VALID_SEAL)?.unwrap_or_default();
+    Ok(Some((time, seal)))
+}
+
+pub fn save_last_valid_time(conn: &Connection, time: &str, seal: &str) -> Result<(), AppError> {
+    settings_repository::set(conn, KEY_LAST_VALID_TIME, time)?;
+    settings_repository::set(conn, KEY_LAST_VALID_SEAL, seal)?;
+    Ok(())
 }
 
 pub fn get(conn: &Connection) -> Result<Option<StoredLicense>, AppError> {
@@ -51,12 +65,7 @@ pub fn save(
 }
 
 pub fn clear(conn: &Connection) -> Result<(), AppError> {
-    conn.execute("DELETE FROM settings WHERE key IN (?1, ?2, ?3, ?4)", [
-        KEY_LICENSE_KEY,
-        KEY_LICENSE_CUSTOMER,
-        KEY_LICENSE_GRANTED_DAYS,
-        KEY_LICENSE_ACTIVATED_AT,
-    ])?;
+    conn.execute("DELETE FROM settings WHERE key IN ('license_key','license_customer','license_granted_days','license_activated_at','license_last_valid_time','license_last_valid_seal')", [])?;
     Ok(())
 }
 

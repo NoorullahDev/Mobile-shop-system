@@ -60,6 +60,8 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
         battery_capacity: trim(input.battery_capacity),
         imei,
         imei2,
+        serial_number: trim(input.serial_number).map(|s| s.to_uppercase()),
+        image_paths: input.image_paths,
         category: trim(input.category),
         condition: trim(input.condition),
         variant: trim(input.variant),
@@ -101,6 +103,7 @@ pub fn create(conn: &Connection, input: CreatePhoneInput) -> Result<Phone, AppEr
     if let Some(imei2) = &normalized.imei2 {
         reject_if_imei_taken(conn, imei2, None)?;
     }
+    if let Some(serial) = &normalized.serial_number { if phone_repository::serial_taken(conn, serial, None)? { return Err(AppError::validation(format!("Serial Number {serial} is already in use"))); } }
     let id = phone_repository::insert(conn, &normalized)?;
     services::record_activity(conn, None, "phone", "create", Some(id))?;
     phone_repository::get_by_id(conn, id)?
@@ -127,6 +130,7 @@ pub fn update(conn: &Connection, id: i64, input: CreatePhoneInput) -> Result<Pho
     if let Some(imei2) = &normalized.imei2 {
         reject_if_imei_taken(conn, imei2, Some(id))?;
     }
+    if let Some(serial) = &normalized.serial_number { if phone_repository::serial_taken(conn, serial, Some(id))? { return Err(AppError::validation(format!("Serial Number {serial} is already in use"))); } }
     let updated = phone_repository::update(conn, id, &normalized)?;
     if !updated {
         return Err(AppError::validation("Phone not found"));
@@ -332,6 +336,14 @@ mod tests {
         apple.model = "iPhone 15".into();
         create(&conn, apple).unwrap();
         assert_eq!(list(&conn, Some("iPhone".into())).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn serial_number_is_unique_and_searchable() {
+        let conn=in_memory_conn(); let mut first=sample(); first.serial_number=Some(" sn-phone-001 ".into()); create(&conn,first).unwrap();
+        assert_eq!(list(&conn,Some("SN-PHONE-001".into())).unwrap().len(),1);
+        let mut duplicate=sample(); duplicate.model="Other".into(); duplicate.serial_number=Some("sn-phone-001".into());
+        assert!(matches!(create(&conn,duplicate).unwrap_err(),AppError::Validation(_)));
     }
 
     #[test]

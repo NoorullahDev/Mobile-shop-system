@@ -23,6 +23,8 @@ pub struct LicenseStatus {
     pub hardware_id: String,
     /// Whether the license has expired (remaining_days == 0 and was activated).
     pub expired: bool,
+    pub invalid: bool,
+    pub clock_rollback_detected: bool,
 }
 
 /// Input for activating a license key.
@@ -37,6 +39,7 @@ pub struct LicensePayload {
     pub customer: String,
     pub days: i64,
     pub issued_at: String,
+    pub expires_at: String,
     /// Hardware ID of the machine this key was generated for.
     pub hardware_id: String,
 }

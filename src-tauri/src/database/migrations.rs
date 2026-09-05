@@ -947,6 +947,19 @@ const MIGRATIONS: &[(&str, &str)] = &[
         ALTER TABLE accessories ADD COLUMN last_purchase_cost REAL;
         "#,
     ),
+    (
+        "0019_product_serials_images",
+        r#"
+        ALTER TABLE phones ADD COLUMN serial_number TEXT;
+        ALTER TABLE phones ADD COLUMN image_paths TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE accessories ADD COLUMN serial_number TEXT;
+        ALTER TABLE accessories ADD COLUMN image_paths TEXT NOT NULL DEFAULT '[]';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_phones_serial_active ON phones(serial_number) WHERE serial_number IS NOT NULL AND serial_number <> '' AND is_deleted = 0;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_accessories_serial_active ON accessories(serial_number) WHERE serial_number IS NOT NULL AND serial_number <> '' AND is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_phones_sku ON phones(sku);
+        CREATE INDEX IF NOT EXISTS idx_accessories_sku ON accessories(sku);
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

@@ -27,7 +27,7 @@ export function InventoryPage() {
       rows={phones}
       loading={loading}
       error={error}
-      onLoad={() => loadPhones()}
+      onLoad={(search) => loadPhones(search)}
       rowTitle={rowTitle}
       rowSubtitle={phoneSubtitle}
       add={addPhone}

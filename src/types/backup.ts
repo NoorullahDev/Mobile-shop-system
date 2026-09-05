@@ -1,4 +1,4 @@
-export type BackupType = "full" | "database";
+export type BackupType = "full" | "database" | "selective";
 export type BackupStatus = "success" | "failed";
 
 export interface Backup {
@@ -10,6 +10,14 @@ export interface Backup {
   status: BackupStatus;
   created_by: number | null;
   created_at: string;
+}
+
+export interface BackupModule { id: string; label: string }
+export interface BackupInspection {
+  backup_type: BackupType;
+  created_at: string | null;
+  modules: BackupModule[];
+  app_version: string | null;
 }
 
 export interface BackupConfig {

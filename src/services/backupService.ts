@@ -4,11 +4,23 @@ import type {
   BackupConfig,
   BackupStatusInfo,
   UpdateBackupConfigInput,
+  BackupModule,
+  BackupInspection,
 } from "../types/backup";
 
 export async function createBackup(actor?: number | null): Promise<Backup> {
   return invoke<Backup>("create_backup", { actor: actor ?? null });
 }
+
+export async function listBackupModules(): Promise<BackupModule[]> { return invoke("list_backup_modules"); }
+export async function pickBackupFolder(): Promise<string | null> { return invoke("pick_backup_folder"); }
+export async function createSelectiveBackup(modules: string[], folder?: string | null, actor?: number | null): Promise<Backup> {
+  return invoke("create_selective_backup", { modules, folder: folder ?? null, actor: actor ?? null });
+}
+export async function inspectBackup(id?: number | null, file_path?: string | null): Promise<BackupInspection> {
+  return invoke("inspect_backup", { id: id ?? null, file_path: file_path ?? null });
+}
+export async function openBackupFolder(path: string): Promise<void> { return invoke("open_backup_folder", { path }); }
 
 export async function listBackups(): Promise<Backup[]> {
   return invoke<Backup[]>("list_backups");

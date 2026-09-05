@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum BackupType {
     Full,
     Database,
+    Selective,
 }
 
 impl BackupType {
@@ -12,15 +13,31 @@ impl BackupType {
         match self {
             BackupType::Full => "full",
             BackupType::Database => "database",
+            BackupType::Selective => "selective",
         }
     }
 
     pub fn from_str(s: &str) -> Self {
         match s {
             "full" => BackupType::Full,
+            "selective" => BackupType::Selective,
             _ => BackupType::Database,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupModule {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupInspection {
+    pub backup_type: BackupType,
+    pub created_at: Option<String>,
+    pub modules: Vec<BackupModule>,
+    pub app_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -23,6 +23,8 @@ pub struct Phone {
     pub imei: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub imei2: Option<String>,
+    pub serial_number: Option<String>,
+    pub image_paths: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,6 +81,9 @@ pub struct CreatePhoneInput {
     pub battery_capacity: Option<String>,
     pub imei: Option<String>,
     pub imei2: Option<String>,
+    pub serial_number: Option<String>,
+    #[serde(default)]
+    pub image_paths: Vec<String>,
     pub category: Option<String>,
     pub condition: Option<String>,
     pub variant: Option<String>,

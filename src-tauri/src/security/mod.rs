@@ -2,21 +2,16 @@ use std::sync::Mutex;
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use hmac::{Hmac, Mac};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use rand_core::OsRng;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 use crate::errors::AppError;
 use crate::models::user::SessionUser;
 
-/// Secret embedded in the binary used to sign activation keys.
-/// Replace with your own value for production builds.
-const LICENSE_SECRET: &[u8] = b"mobile-shop-pro-license-v1";
-
-/// Salt used when deriving the public Hardware ID from the raw machine identifier.
-const HW_ID_SALT: &[u8] = b"mobile-shop-pro-hwid-v1";
-
-type HmacSha256 = Hmac<Sha256>;
+// Public verification key only. The corresponding private key is held by the
+// vendor generator and is never compiled into the customer application.
+const LICENSE_PUBLIC_KEY_HEX: &str = "25b75702d8ea72f2e3d6578859fa4ad5e077a16b8deed396badeb6df2ba4238b";
 
 /// Holds the authenticated session for the single desktop application.
 #[derive(Default)]
@@ -40,25 +35,20 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
         .is_ok())
 }
 
-/// HMAC-SHA256 signature over `data`. Used to sign activation keys.
-pub fn sign(data: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(LICENSE_SECRET)
-        .expect("HMAC accepts any key length");
-    mac.update(data);
-    mac.finalize().into_bytes().to_vec()
-}
-
-/// Constant-time comparison of a signature against the recomputed HMAC.
 pub fn verify_signature(data: &[u8], signature: &[u8]) -> bool {
-    let expected = sign(data);
-    if expected.len() != signature.len() {
-        return false;
+    let Ok(bytes) = hex::decode(LICENSE_PUBLIC_KEY_HEX) else { return false };
+    let Ok(key_bytes) = <[u8; 32]>::try_from(bytes.as_slice()) else { return false };
+    let Ok(key) = VerifyingKey::from_bytes(&key_bytes) else { return false };
+    let Ok(sig) = Signature::from_slice(signature) else { return false };
+    if key.verify(data, &sig).is_ok() { return true; }
+    #[cfg(test)]
+    {
+        let test = hex::decode("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a").unwrap();
+        let test: [u8;32] = test.try_into().unwrap();
+        return VerifyingKey::from_bytes(&test).map(|k| k.verify(data, &sig).is_ok()).unwrap_or(false);
     }
-    let mut diff = 0u8;
-    for (a, b) in expected.iter().zip(signature.iter()) {
-        diff |= a ^ b;
-    }
-    diff == 0
+    #[cfg(not(test))]
+    false
 }
 
 // ---- Hardware ID ----
@@ -70,15 +60,28 @@ fn read_machine_raw() -> String {
     use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let mut values = Vec::new();
     if let Ok(key) = hklm.open_subkey("SOFTWARE\\Microsoft\\Cryptography") {
         if let Ok(guid) = key.get_value::<String, _>("MachineGuid") {
             if !guid.trim().is_empty() {
-                return guid.trim().to_uppercase();
+                values.push(format!("GUID={}", guid.trim().to_uppercase()));
             }
         }
     }
-    // Fallback: computer name (still unique per machine)
-    std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN-PC".to_string())
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let script = "$c=Get-CimInstance Win32_ComputerSystemProduct -ErrorAction SilentlyContinue; $b=Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue; $m=Get-CimInstance Win32_BaseBoard -ErrorAction SilentlyContinue; @($c.UUID,$b.SerialNumber,$m.SerialNumber) -join '|'";
+    if let Ok(output) = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", script]).creation_flags(CREATE_NO_WINDOW).output() {
+        if output.status.success() {
+            let stable = String::from_utf8_lossy(&output.stdout).trim().to_uppercase();
+            for (i, value) in stable.split('|').enumerate() {
+                let v=value.trim();
+                if !v.is_empty() && v != "TO BE FILLED BY O.E.M." && v != "DEFAULT STRING" { values.push(format!("WMI{i}={v}")); }
+            }
+        }
+    }
+    if values.is_empty() { values.push(format!("HOST={}", std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN-PC".into()))); }
+    values.join("|")
 }
 
 /// Non-Windows fallback (hostname based).
@@ -92,14 +95,10 @@ fn read_machine_raw() -> String {
 /// Returns a stable, unique Hardware ID for this machine, formatted as
 /// `XXXX-XXXX-XXXX-XXXX` (16 uppercase hex chars in groups of 4).
 ///
-/// The raw machine identifier is HMAC-hashed with a fixed app salt so the
-/// display value is non-reversible.
+/// Available stable identifiers are normalized, combined and SHA-256 hashed.
 pub fn get_hardware_id() -> String {
     let raw = read_machine_raw();
-    let mut mac = HmacSha256::new_from_slice(HW_ID_SALT)
-        .expect("HMAC accepts any key length");
-    mac.update(raw.as_bytes());
-    let hash = mac.finalize().into_bytes();
+    let hash = Sha256::digest(raw.as_bytes());
     // Take first 8 bytes → 16 hex chars → group as XXXX-XXXX-XXXX-XXXX
     let hex_str: String = hash[..8]
         .iter()
@@ -112,6 +111,10 @@ pub fn get_hardware_id() -> String {
         &hex_str[8..12],
         &hex_str[12..16]
     )
+}
+
+pub fn seal_local_license_state(value: &str, hardware_id: &str) -> String {
+    hex::encode(Sha256::digest(format!("MSP-LICENSE-STATE-V2|{hardware_id}|{value}").as_bytes()))
 }
 
 #[cfg(test)]

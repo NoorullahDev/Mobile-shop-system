@@ -8,7 +8,7 @@ mod services;
 mod utils;
 
 pub use security::get_hardware_id;
-pub use services::license_service::generate_key;
+pub use services::license_service::{generate_key, parse_key};
 
 use database::Database;
 use security::SessionState;
@@ -149,6 +149,8 @@ pub fn run() {
             commands::delete_supplier,
             commands::create_phone,
             commands::list_phones,
+            commands::save_product_image,
+            commands::read_product_image,
             commands::get_phone,
             commands::update_phone,
             commands::delete_phone,
@@ -202,6 +204,11 @@ pub fn run() {
             commands::clear_read_notifications,
             commands::list_activity_logs,
             commands::create_backup,
+            commands::create_selective_backup,
+            commands::list_backup_modules,
+            commands::pick_backup_folder,
+            commands::inspect_backup,
+            commands::open_backup_folder,
             commands::list_backups,
             commands::get_backup,
             commands::verify_backup,
@@ -236,4 +243,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

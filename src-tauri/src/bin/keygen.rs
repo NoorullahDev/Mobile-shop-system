@@ -4,6 +4,7 @@ use std::io::{self, Write};
 const PRESETS: &[(&str, i64)] = &[
     ("7 days", 7),
     ("30 days", 30),
+    ("90 days", 90),
     ("6 months (180 days)", 180),
     ("1 year (365 days)", 365),
 ];
@@ -49,6 +50,10 @@ fn main() {
     println!("Customer:     {customer}");
     println!("Duration:     {days} days");
     println!("Hardware ID:  {hardware_id}");
+    if let Ok(payload) = business_management_system_lib::parse_key(&key) {
+        println!("Issue Date:   {}", payload.issued_at);
+        println!("Expiry Date:  {}", payload.expires_at);
+    }
     println!();
     println!("License Key:  {key}");
     println!("--------------------------------------------------");

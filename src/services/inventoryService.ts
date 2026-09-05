@@ -15,6 +15,16 @@ export async function createPhone(input: CreatePhoneInput): Promise<Phone> {
   return invoke<Phone>("create_phone", { input });
 }
 
+export async function saveProductImage(file: File): Promise<string> {
+  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  return invoke<string>("save_product_image", { bytes, extension });
+}
+
+export async function readProductImage(relativePath: string): Promise<string> {
+  return invoke<string>("read_product_image", { relativePath });
+}
+
 export async function listPhones(search?: string): Promise<Phone[]> {
   return invoke<Phone[]>("list_phones", { search: search ?? null });
 }

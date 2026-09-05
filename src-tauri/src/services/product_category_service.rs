@@ -132,6 +132,8 @@ mod tests {
                 features: None,
                 description: None,
                 sku: None,
+                serial_number: None,
+                image_paths: vec![],
                 cost_price: 10.0,
                 sale_price: 25.0,
                 quantity: 5,

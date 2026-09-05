@@ -15,8 +15,8 @@ interface InventoryState {
   loading: boolean;
   error: string | null;
   load: () => Promise<void>;
-  loadPhones: () => Promise<void>;
-  loadAccessories: () => Promise<void>;
+  loadPhones: (search?: string) => Promise<void>;
+  loadAccessories: (search?: string) => Promise<void>;
   addPhone: (input: CreatePhoneInput) => Promise<void>;
   updatePhone: (id: number, input: CreatePhoneInput) => Promise<void>;
   removePhone: (id: number) => Promise<void>;
@@ -76,10 +76,10 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     }
   },
 
-  loadPhones: async () => {
+  loadPhones: async (search) => {
     set({ loading: true, error: null });
     try {
-      const phones = await inventoryService.listPhones();
+      const phones = await inventoryService.listPhones(search);
       set((s) => ({
         phones,
         products: buildProducts(phones, s.accessories),
@@ -90,10 +90,10 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     }
   },
 
-  loadAccessories: async () => {
+  loadAccessories: async (search) => {
     set({ loading: true, error: null });
     try {
-      const accessories = await inventoryService.listAccessories();
+      const accessories = await inventoryService.listAccessories(search);
       set((s) => ({
         accessories,
         products: buildProducts(s.phones, accessories),

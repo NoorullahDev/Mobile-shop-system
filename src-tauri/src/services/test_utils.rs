@@ -73,7 +73,7 @@ CREATE TABLE phones (
     id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT NOT NULL, model TEXT NOT NULL,
     color TEXT, storage TEXT, ram TEXT, processor TEXT, chipset TEXT, network_type TEXT,
     battery_capacity TEXT, imei TEXT, imei2 TEXT, category TEXT, condition TEXT,
-    variant TEXT, sku TEXT,
+    variant TEXT, sku TEXT, serial_number TEXT, image_paths TEXT NOT NULL DEFAULT '[]',
     condition_rating TEXT, body_condition TEXT, screen_condition TEXT, battery_health TEXT,
     camera_condition TEXT, face_id TEXT, speaker TEXT, charger TEXT, box_condition TEXT,
     warranty TEXT, condition_notes TEXT,
@@ -96,7 +96,7 @@ CREATE TABLE phone_options (
 CREATE TABLE accessories (
     id INTEGER PRIMARY KEY AUTOINCREMENT, accessory_type TEXT NOT NULL DEFAULT 'other',
     brand TEXT NOT NULL, product_name TEXT NOT NULL, compatible_models TEXT, color TEXT,
-    condition TEXT, connector_type TEXT, warranty TEXT, features TEXT, description TEXT, sku TEXT,
+    condition TEXT, connector_type TEXT, warranty TEXT, features TEXT, description TEXT, sku TEXT, serial_number TEXT, image_paths TEXT NOT NULL DEFAULT '[]',
     cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0,
     last_purchase_cost REAL,
     quantity INTEGER NOT NULL DEFAULT 0, supplier_id INTEGER,

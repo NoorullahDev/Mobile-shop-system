@@ -11,6 +11,8 @@ export interface LicenseStatus {
   hardware_id: string;
   /** True when the license was once active but has now expired. */
   expired: boolean;
+  invalid: boolean;
+  clock_rollback_detected: boolean;
 }
 
 export interface ActivateLicenseInput {
