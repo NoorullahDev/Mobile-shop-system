@@ -3,7 +3,9 @@ use rusqlite::{params, Connection};
 use crate::errors::AppError;
 
 /// Dashboard KPIs for the current period (all-time ledger).
-pub fn dashboard_summary(conn: &Connection) -> Result<(f64, f64, i64, i64, i64, i64, f64), AppError> {
+pub fn dashboard_summary(
+    conn: &Connection,
+) -> Result<(f64, f64, i64, i64, i64, i64, f64), AppError> {
     let revenue = conn.query_row(
         "SELECT COALESCE(SUM(total_amount), 0) FROM sales",
         [],
@@ -91,7 +93,10 @@ pub fn monthly_expenses(conn: &Connection, months: i64) -> Result<Vec<(String, f
 }
 
 /// Recent activity log entries.
-pub fn recent_activity(conn: &Connection, limit: i64) -> Result<Vec<crate::models::report::ActivityLog>, AppError> {
+pub fn recent_activity(
+    conn: &Connection,
+    limit: i64,
+) -> Result<Vec<crate::models::report::ActivityLog>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, user_id, module, action, record_id, timestamp
          FROM activity_logs ORDER BY timestamp DESC, id DESC LIMIT ?1",
@@ -122,30 +127,30 @@ pub fn period_summary(
 ) -> Result<(f64, f64, i64, f64, f64), AppError> {
     let revenue = conn.query_row(
         "SELECT COALESCE(SUM(total_amount), 0) FROM sales
-         WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)",
+         WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
     let expenses = conn.query_row(
         "SELECT COALESCE(SUM(amount), 0) FROM expenses
-         WHERE is_deleted = 0 AND date(expense_date) >= date(?1) AND date(expense_date) <= date(?2)",
+         WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
     let sales_count = conn.query_row(
-        "SELECT COUNT(*) FROM sales WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)",
+        "SELECT COUNT(*) FROM sales WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, i64>(0),
     )?;
     let received = conn.query_row(
         "SELECT COALESCE(SUM(paid_amount), 0) FROM sales
-         WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)",
+         WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
     let discount = conn.query_row(
         "SELECT COALESCE(SUM(discount), 0) FROM sales
-         WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)",
+         WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
@@ -153,11 +158,15 @@ pub fn period_summary(
 }
 
 /// Daily sales revenue grouped by date within an inclusive range (earliest..latest).
-pub fn sales_series(conn: &Connection, from: &str, to: &str) -> Result<Vec<(String, f64)>, AppError> {
+pub fn sales_series(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<(String, f64)>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT date(created_at) AS day, SUM(total_amount) AS total
          FROM sales
-         WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)
+         WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')
          GROUP BY day ORDER BY day",
     )?;
     let rows = stmt.query_map(params![from, to], |r| {
@@ -186,7 +195,7 @@ pub fn top_sellers(
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN phones p ON p.id = si.phone_id
-             WHERE date(s.created_at) >= date(?1) AND date(s.created_at) <= date(?2)
+             WHERE s.created_at >= date(?1) AND s.created_at < date(?2, '+1 day')
                  AND si.phone_id IS NOT NULL
              UNION ALL
              SELECT 'accessory' AS item_type, si.accessory_id AS item_id,
@@ -194,7 +203,7 @@ pub fn top_sellers(
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN accessories a ON a.id = si.accessory_id
-             WHERE date(s.created_at) >= date(?1) AND date(s.created_at) <= date(?2)
+             WHERE s.created_at >= date(?1) AND s.created_at < date(?2, '+1 day')
                  AND si.accessory_id IS NOT NULL
          ) t
          GROUP BY item_type, item_id, product_name
@@ -226,7 +235,7 @@ pub fn payment_breakdown(
     let mut stmt = conn.prepare(
         "SELECT payment_method, SUM(total_amount) AS total, COUNT(*) AS count
          FROM sales
-         WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)
+         WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')
          GROUP BY payment_method ORDER BY total DESC",
     )?;
     let rows = stmt.query_map(params![from, to], |r| {
@@ -255,7 +264,7 @@ pub fn profit_loss_summary(
 ) -> Result<(f64, f64, f64, i64), AppError> {
     let revenue = conn.query_row(
         "SELECT COALESCE(SUM(total_amount), 0) FROM sales
-         WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)",
+         WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
@@ -265,14 +274,14 @@ pub fn profit_loss_summary(
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN phones p ON p.id = si.phone_id
-             WHERE date(s.created_at) >= date(?1) AND date(s.created_at) <= date(?2)
+             WHERE s.created_at >= date(?1) AND s.created_at < date(?2, '+1 day')
                  AND si.phone_id IS NOT NULL
              UNION ALL
              SELECT si.quantity AS qty, a.cost_price AS cost
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN accessories a ON a.id = si.accessory_id
-             WHERE date(s.created_at) >= date(?1) AND date(s.created_at) <= date(?2)
+             WHERE s.created_at >= date(?1) AND s.created_at < date(?2, '+1 day')
                  AND si.accessory_id IS NOT NULL
          ) t",
         params![from, to],
@@ -280,12 +289,12 @@ pub fn profit_loss_summary(
     )?;
     let expenses = conn.query_row(
         "SELECT COALESCE(SUM(amount), 0) FROM expenses
-         WHERE is_deleted = 0 AND date(expense_date) >= date(?1) AND date(expense_date) <= date(?2)",
+         WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
     let sales_count = conn.query_row(
-        "SELECT COUNT(*) FROM sales WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)",
+        "SELECT COUNT(*) FROM sales WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, i64>(0),
     )?;
@@ -306,7 +315,7 @@ pub fn monthly_profit_loss(
                    0.0 AS cogs,
                    0.0 AS expenses
             FROM sales
-            WHERE date(created_at) >= date(?1) AND date(created_at) <= date(?2)
+            WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')
             GROUP BY m
             UNION ALL
             SELECT strftime('%Y-%m', s.created_at) AS m,
@@ -322,7 +331,7 @@ pub fn monthly_profit_loss(
                 FROM sale_items si JOIN accessories a ON a.id = si.accessory_id
                 WHERE si.accessory_id IS NOT NULL
             ) t JOIN sales s ON s.id = t.sid
-            WHERE date(s.created_at) >= date(?1) AND date(s.created_at) <= date(?2)
+            WHERE s.created_at >= date(?1) AND s.created_at < date(?2, '+1 day')
             GROUP BY m
             UNION ALL
             SELECT strftime('%Y-%m', expense_date) AS m,
@@ -330,7 +339,7 @@ pub fn monthly_profit_loss(
                    0.0 AS cogs,
                    SUM(amount) AS expenses
             FROM expenses
-            WHERE is_deleted = 0 AND date(expense_date) >= date(?1) AND date(expense_date) <= date(?2)
+            WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')
             GROUP BY m
         ) sub
         GROUP BY m
@@ -356,13 +365,13 @@ pub fn monthly_profit_loss(
 pub fn today_summary(conn: &Connection) -> Result<(f64, i64), AppError> {
     let revenue = conn.query_row(
         "SELECT COALESCE(SUM(total_amount), 0) FROM sales
-         WHERE date(created_at) = date('now')",
+         WHERE created_at >= date('now') AND created_at < date('now', '+1 day')",
         [],
         |r| r.get::<_, f64>(0),
     )?;
     let count = conn.query_row(
         "SELECT COUNT(*) FROM sales
-         WHERE date(created_at) = date('now')",
+         WHERE created_at >= date('now') AND created_at < date('now', '+1 day')",
         [],
         |r| r.get::<_, i64>(0),
     )?;

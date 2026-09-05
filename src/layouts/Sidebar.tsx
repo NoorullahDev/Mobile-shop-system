@@ -20,7 +20,6 @@ import {
   Shield,
   Bell,
   DatabaseBackup,
-  Store,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -121,12 +120,11 @@ function getRoleColor(role: string): string {
 
 function SideLogo() {
   return (
-    <div
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
-      style={{ background: "linear-gradient(135deg, #3B6FD4, #2E4B8F)", boxShadow: "0 2px 6px rgba(59,111,212,0.4)" }}
-    >
-      <Store className="h-4 w-4 text-white" />
-    </div>
+    <img
+      src="/logo.png"
+      alt="Mobile Shop System logo"
+      className="h-8 w-8 shrink-0 rounded-md object-contain"
+    />
   );
 }
 
@@ -135,21 +133,11 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
   const displayName = username || user?.username || "User";
   const displayRole = role || user?.role || "Staff";
   const shopName = useSettingsStore((s) => s.businessName);
-  const shopLogo = useSettingsStore((s) => s.logo);
   return (
     <aside className="flex w-64 shrink-0 flex-col" style={{ background: "#0F1B32", borderRight: "1px solid #1E2E4F" }}>
       {/* Brand */}
       <div className="flex h-16 shrink-0 items-center gap-3 px-5" style={{ borderBottom: "1px solid #1E2E4F" }}>
-        {shopLogo ? (
-          <img
-            src={shopLogo}
-            alt={shopName || "Shop logo"}
-            className="h-8 w-8 shrink-0 rounded-md object-cover"
-            style={{ background: "#FFFFFF" }}
-          />
-        ) : (
-          <SideLogo />
-        )}
+        <SideLogo />
         <div className="min-w-0 leading-tight">
           <div className="truncate text-[15px] font-bold tracking-tight text-white">
             {shopName || "Mobile Shop Pro"}

@@ -22,7 +22,11 @@ const SELECT: &str = "SELECT e.id, e.category_id, c.name AS category_name, e.amo
     e.description, e.receipt_path, e.expense_date, e.created_by, e.created_at, e.is_deleted
     FROM expenses e LEFT JOIN categories c ON c.id = e.category_id";
 
-pub fn insert(conn: &Connection, input: &CreateExpenseInput, user_id: Option<i64>) -> Result<i64, AppError> {
+pub fn insert(
+    conn: &Connection,
+    input: &CreateExpenseInput,
+    user_id: Option<i64>,
+) -> Result<i64, AppError> {
     conn.execute(
         "INSERT INTO expenses (category_id, amount, description, receipt_path, expense_date, created_by)
          VALUES (?1, ?2, ?3, ?4, COALESCE(?5, CURRENT_TIMESTAMP), ?6)",
@@ -38,7 +42,11 @@ pub fn insert(conn: &Connection, input: &CreateExpenseInput, user_id: Option<i64
     Ok(conn.last_insert_rowid())
 }
 
-pub fn get_by_id(conn: &Connection, id: i64, include_deleted: bool) -> Result<Option<Expense>, AppError> {
+pub fn get_by_id(
+    conn: &Connection,
+    id: i64,
+    include_deleted: bool,
+) -> Result<Option<Expense>, AppError> {
     let sql = if include_deleted {
         format!("{SELECT} WHERE e.id = ?1")
     } else {
@@ -54,9 +62,7 @@ pub fn list(
     from: Option<&str>,
     to: Option<&str>,
 ) -> Result<Vec<Expense>, AppError> {
-    let mut sql = format!(
-        "{SELECT} WHERE e.is_deleted = 0"
-    );
+    let mut sql = format!("{SELECT} WHERE e.is_deleted = 0");
     let mut q: Vec<rusqlite::types::Value> = Vec::new();
     if let Some(id) = category_id {
         sql.push_str(" AND e.category_id = ?");
@@ -89,19 +95,23 @@ pub fn list(
 pub fn total_in_range(conn: &Connection, from: &str, to: &str) -> Result<f64, AppError> {
     let total = conn.query_row(
         "SELECT COALESCE(SUM(amount), 0) FROM expenses
-         WHERE is_deleted = 0 AND date(expense_date) >= date(?1) AND date(expense_date) <= date(?2)",
+         WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
     Ok(total)
 }
 
-pub fn category_totals(conn: &Connection, from: &str, to: &str) -> Result<Vec<CategoryTotal>, AppError> {
+pub fn category_totals(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<CategoryTotal>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT e.category_id, c.name AS category_name,
                 SUM(e.amount) AS total, COUNT(*) AS count
          FROM expenses e LEFT JOIN categories c ON c.id = e.category_id
-         WHERE e.is_deleted = 0 AND date(e.expense_date) >= date(?1) AND date(e.expense_date) <= date(?2)
+         WHERE e.is_deleted = 0 AND e.expense_date >= date(?1) AND e.expense_date < date(?2, '+1 day')
          GROUP BY e.category_id ORDER BY total DESC",
     )?;
     let rows = stmt.query_map(params![from, to], |r| {

@@ -50,9 +50,21 @@ export interface InventoryRow {
 }
 
 const imageCache = new Map<string, Promise<string>>();
+const MAX_IMAGE_CACHE_ENTRIES = 100;
 function loadProductImage(path: string) {
-  let pending=imageCache.get(path);
-  if(!pending){pending=inventoryService.readProductImage(path);imageCache.set(path,pending);}
+  let pending = imageCache.get(path);
+  if (pending) {
+    // Refresh insertion order so frequently viewed images remain cached.
+    imageCache.delete(path);
+    imageCache.set(path, pending);
+    return pending;
+  }
+  pending = inventoryService.readProductImage(path);
+  imageCache.set(path, pending);
+  if (imageCache.size > MAX_IMAGE_CACHE_ENTRIES) {
+    const oldest = imageCache.keys().next().value;
+    if (oldest) imageCache.delete(oldest);
+  }
   return pending;
 }
 

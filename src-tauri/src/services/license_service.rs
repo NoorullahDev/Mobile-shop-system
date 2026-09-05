@@ -7,6 +7,67 @@ use crate::security;
 use crate::services;
 use ed25519_dalek::{Signer, SigningKey};
 
+fn save_license_clock(conn: &Connection, value: &str, hardware_id: &str) -> Result<(), AppError> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    {
+        let _ = conn;
+        security::save_protected_license_time(value, hardware_id)
+    }
+    #[cfg(any(not(target_os = "windows"), test))]
+    {
+        license_repository::save_last_valid_time(
+            conn,
+            value,
+            &security::seal_local_license_state(value, hardware_id),
+        )
+    }
+}
+
+fn load_license_clock(
+    conn: &Connection,
+    hardware_id: &str,
+) -> Result<Option<(String, bool)>, AppError> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    {
+        match security::load_protected_license_time(hardware_id) {
+            Ok(Some(value)) => Ok(Some((value, true))),
+            Ok(None) => {
+                // One-time compatibility migration for existing activated installs.
+                if let Some((value, seal)) = license_repository::get_last_valid_time(conn)? {
+                    let valid = seal == security::seal_local_license_state(&value, hardware_id);
+                    if valid {
+                        security::save_protected_license_time(&value, hardware_id)?;
+                    }
+                    Ok(Some((value, valid)))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(_) => Ok(Some((String::new(), false))),
+        }
+    }
+    #[cfg(any(not(target_os = "windows"), test))]
+    {
+        Ok(
+            license_repository::get_last_valid_time(conn)?.map(|(value, seal)| {
+                let valid = seal == security::seal_local_license_state(&value, hardware_id);
+                (value, valid)
+            }),
+        )
+    }
+}
+
+fn clear_license_clock() -> Result<(), AppError> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    {
+        security::clear_protected_license_time()
+    }
+    #[cfg(any(not(target_os = "windows"), test))]
+    {
+        Ok(())
+    }
+}
+
 /// Keys look like: MSP-<payload-hex>.<signature-hex>
 const KEY_PREFIX: &str = "MSP2-";
 
@@ -20,12 +81,19 @@ pub fn generate_key(customer: &str, days: i64, hardware_id: &str) -> Result<Stri
     generate_key_with_secret(customer, days, hardware_id, secret.trim())
 }
 
-fn generate_key_with_secret(customer: &str, days: i64, hardware_id: &str, secret_hex: &str) -> Result<String, AppError> {
+fn generate_key_with_secret(
+    customer: &str,
+    days: i64,
+    hardware_id: &str,
+    secret_hex: &str,
+) -> Result<String, AppError> {
     if customer.trim().is_empty() {
         return Err(AppError::validation("Customer name cannot be blank"));
     }
     if days <= 0 || days > 3650 {
-        return Err(AppError::validation("Granted days must be between 1 and 3650"));
+        return Err(AppError::validation(
+            "Granted days must be between 1 and 3650",
+        ));
     }
     if hardware_id.trim().is_empty() {
         return Err(AppError::validation("Hardware ID cannot be blank"));
@@ -41,9 +109,17 @@ fn generate_key_with_secret(customer: &str, days: i64, hardware_id: &str, secret
     let body = serde_json::to_string(&payload)
         .map_err(|e| AppError::Internal(format!("Failed to encode license payload: {e}")))?;
     let body_hex = hex::encode(body.as_bytes());
-    let secret = hex::decode(secret_hex).map_err(|_| AppError::validation("Vendor private key must be 64 hexadecimal characters"))?;
-    let secret: [u8;32] = secret.try_into().map_err(|_| AppError::validation("Vendor private key must be 32 bytes"))?;
-    let sig_hex = hex::encode(SigningKey::from_bytes(&secret).sign(body.as_bytes()).to_bytes());
+    let secret = hex::decode(secret_hex).map_err(|_| {
+        AppError::validation("Vendor private key must be 64 hexadecimal characters")
+    })?;
+    let secret: [u8; 32] = secret
+        .try_into()
+        .map_err(|_| AppError::validation("Vendor private key must be 32 bytes"))?;
+    let sig_hex = hex::encode(
+        SigningKey::from_bytes(&secret)
+            .sign(body.as_bytes())
+            .to_bytes(),
+    );
     Ok(format!("{KEY_PREFIX}{body_hex}.{sig_hex}"))
 }
 
@@ -69,7 +145,9 @@ pub fn parse_key(key: &str) -> Result<LicensePayload, AppError> {
     let payload: LicensePayload = serde_json::from_slice(&body_bytes)
         .map_err(|_| AppError::validation("Activation key payload is malformed"))?;
     if payload.days <= 0 || payload.days > 3650 {
-        return Err(AppError::validation("Activation key grants an invalid duration"));
+        return Err(AppError::validation(
+            "Activation key grants an invalid duration",
+        ));
     }
     if payload.customer.trim().is_empty() {
         return Err(AppError::validation("Activation key has no customer"));
@@ -79,9 +157,15 @@ pub fn parse_key(key: &str) -> Result<LicensePayload, AppError> {
             "Activation key is missing hardware ID binding — please generate a new key",
         ));
     }
-    let issued = chrono::DateTime::parse_from_rfc3339(&payload.issued_at).map_err(|_| AppError::validation("Activation key has an invalid issue date"))?;
-    let expiry = chrono::DateTime::parse_from_rfc3339(&payload.expires_at).map_err(|_| AppError::validation("Activation key has an invalid expiry date"))?;
-    if expiry <= issued { return Err(AppError::validation("Activation key has an invalid expiry date")); }
+    let issued = chrono::DateTime::parse_from_rfc3339(&payload.issued_at)
+        .map_err(|_| AppError::validation("Activation key has an invalid issue date"))?;
+    let expiry = chrono::DateTime::parse_from_rfc3339(&payload.expires_at)
+        .map_err(|_| AppError::validation("Activation key has an invalid expiry date"))?;
+    if expiry <= issued {
+        return Err(AppError::validation(
+            "Activation key has an invalid expiry date",
+        ));
+    }
     Ok(payload)
 }
 
@@ -102,7 +186,10 @@ pub fn activate(
              Please provide the Hardware ID shown on this page to your vendor.",
         ));
     }
-    if chrono::DateTime::parse_from_rfc3339(&payload.expires_at).map(|d| d.with_timezone(&chrono::Utc) <= chrono::Utc::now()).unwrap_or(true) {
+    if chrono::DateTime::parse_from_rfc3339(&payload.expires_at)
+        .map(|d| d.with_timezone(&chrono::Utc) <= chrono::Utc::now())
+        .unwrap_or(true)
+    {
         return Err(AppError::validation("This license has expired"));
     }
 
@@ -114,7 +201,7 @@ pub fn activate(
         payload.days,
         &activated_at,
     )?;
-    license_repository::save_last_valid_time(conn, &activated_at, &security::seal_local_license_state(&activated_at, &machine_hw_id))?;
+    save_license_clock(conn, &activated_at, &machine_hw_id)?;
     services::record_activity(conn, user_id, "license", "activate", None)?;
     status(conn)
 }
@@ -123,6 +210,7 @@ pub fn activate(
 pub fn deactivate(conn: &Connection, user_id: Option<i64>) -> Result<LicenseStatus, AppError> {
     if license_repository::exists(conn)? {
         license_repository::clear(conn)?;
+        clear_license_clock()?;
         services::record_activity(conn, user_id, "license", "deactivate", None)?;
     }
     status(conn)
@@ -151,32 +239,54 @@ pub fn status(conn: &Connection) -> Result<LicenseStatus, AppError> {
     };
 
     let parsed = parse_key(&stored.key).ok();
-    let signature_valid = parsed.as_ref().map(|p| p.hardware_id.eq_ignore_ascii_case(&hardware_id)).unwrap_or(false);
+    let signature_valid = parsed
+        .as_ref()
+        .map(|p| p.hardware_id.eq_ignore_ascii_case(&hardware_id))
+        .unwrap_or(false);
 
     let activated_at = chrono::DateTime::parse_from_rfc3339(&stored.activated_at)
         .map(|d| d.with_timezone(&chrono::Utc))
         .ok();
 
-    let activated_until = parsed.as_ref().and_then(|p| chrono::DateTime::parse_from_rfc3339(&p.expires_at).ok()).map(|d|d.with_timezone(&chrono::Utc));
+    let activated_until = parsed
+        .as_ref()
+        .and_then(|p| chrono::DateTime::parse_from_rfc3339(&p.expires_at).ok())
+        .map(|d| d.with_timezone(&chrono::Utc));
 
     let now = chrono::Utc::now();
     let mut clock_rollback_detected = false;
-    if let Some((last, seal)) = license_repository::get_last_valid_time(conn)? {
-        let seal_ok = seal == security::seal_local_license_state(&last, &hardware_id);
-        let last_time = chrono::DateTime::parse_from_rfc3339(&last).ok().map(|d| d.with_timezone(&chrono::Utc));
-        clock_rollback_detected = !seal_ok || last_time.map(|t| now < t - chrono::Duration::minutes(5)).unwrap_or(true);
+    if let Some((last, seal_ok)) = load_license_clock(conn, &hardware_id)? {
+        let last_time = chrono::DateTime::parse_from_rfc3339(&last)
+            .ok()
+            .map(|d| d.with_timezone(&chrono::Utc));
+        clock_rollback_detected = !seal_ok
+            || last_time
+                .map(|t| now < t - chrono::Duration::minutes(5))
+                .unwrap_or(true);
     }
     if !clock_rollback_detected {
         let current = now.to_rfc3339();
-        license_repository::save_last_valid_time(conn, &current, &security::seal_local_license_state(&current, &hardware_id))?;
+        save_license_clock(conn, &current, &hardware_id)?;
     }
-    let remaining_days = activated_until.map(|e| {
-        let seconds = (e - now).num_seconds();
-        if seconds <= 0 { 0 } else { (seconds + 86_399) / 86_400 }
-    }).unwrap_or(0);
+    let remaining_days = activated_until
+        .map(|e| {
+            let seconds = (e - now).num_seconds();
+            if seconds <= 0 {
+                0
+            } else {
+                (seconds + 86_399) / 86_400
+            }
+        })
+        .unwrap_or(0);
 
-    let customer = parsed.as_ref().map(|p| p.customer.clone()).unwrap_or(stored.customer);
-    let granted_days = parsed.as_ref().map(|p| p.days).unwrap_or(stored.granted_days);
+    let customer = parsed
+        .as_ref()
+        .map(|p| p.customer.clone())
+        .unwrap_or(stored.customer);
+    let granted_days = parsed
+        .as_ref()
+        .map(|p| p.days)
+        .unwrap_or(stored.granted_days);
     let is_activated = !customer.trim().is_empty() && granted_days > 0;
     let expired = is_activated && activated_until.map(|e| e <= now).unwrap_or(true);
 
@@ -259,10 +369,14 @@ mod tests {
     #[test]
     fn invalid_key_activation_fails() {
         let conn = in_memory_conn();
-        assert!(
-            activate(&conn, Some(1), ActivateLicenseInput { key: "MSP-bad.key".into() })
-                .is_err()
-        );
+        assert!(activate(
+            &conn,
+            Some(1),
+            ActivateLicenseInput {
+                key: "MSP-bad.key".into()
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -277,7 +391,39 @@ mod tests {
     fn generator_validates_inputs() {
         assert!(generate_key_with_secret("", 30, "XXXX-XXXX-XXXX-XXXX", TEST_SECRET).is_err());
         assert!(generate_key_with_secret("Shop", 0, "XXXX-XXXX-XXXX-XXXX", TEST_SECRET).is_err());
-        assert!(generate_key_with_secret("Shop", 5000, "XXXX-XXXX-XXXX-XXXX", TEST_SECRET).is_err());
+        assert!(
+            generate_key_with_secret("Shop", 5000, "XXXX-XXXX-XXXX-XXXX", TEST_SECRET).is_err()
+        );
         assert!(generate_key_with_secret("Shop", 30, "", TEST_SECRET).is_err());
+    }
+
+    #[test]
+    fn standard_renewal_durations_are_preserved() {
+        let hardware_id = local_hw_id();
+        for days in [30, 90, 365] {
+            let key = test_key("Renewal Shop", days, &hardware_id).unwrap();
+            assert_eq!(parse_key(&key).unwrap().days, days);
+        }
+    }
+
+    #[test]
+    fn backward_clock_is_rejected() {
+        let conn = in_memory_conn();
+        let hardware_id = local_hw_id();
+        let key = test_key("Clock Test Shop", 30, &hardware_id).unwrap();
+        activate(&conn, Some(1), ActivateLicenseInput { key }).unwrap();
+
+        let future = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+        license_repository::save_last_valid_time(
+            &conn,
+            &future,
+            &security::seal_local_license_state(&future, &hardware_id),
+        )
+        .unwrap();
+
+        let result = status(&conn).unwrap();
+        assert!(!result.activated);
+        assert!(result.invalid);
+        assert!(result.clock_rollback_detected);
     }
 }

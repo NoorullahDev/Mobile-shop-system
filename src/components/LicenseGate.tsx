@@ -7,7 +7,6 @@ import {
   Check,
   Copy,
   RefreshCw,
-  Lock,
 } from "lucide-react";
 import * as licenseService from "../services/licenseService";
 import { Button } from "../components/Button";
@@ -104,12 +103,11 @@ export function LicenseGate({
               <ShieldAlert className="h-7 w-7" />
             </div>
           ) : (
-            <div
-              className="mb-3 flex h-14 w-14 items-center justify-center rounded-full"
-              style={{ background: "#EEF2FF", color: "#4F46E5" }}
-            >
-              <Lock className="h-7 w-7" />
-            </div>
+            <img
+              src="/logo.png"
+              alt="Mobile Shop System logo"
+              className="mb-3 h-16 w-16 object-contain"
+            />
           )}
           <h1 className="text-[20px] font-bold" style={{ color: "#0F172A" }}>
             {isExpired ? "License Expired" : "Activate Mobile Shop Pro"}

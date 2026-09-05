@@ -3,15 +3,17 @@ use tauri::State;
 
 use crate::database::Database;
 use crate::errors::AppError;
-use crate::models::backup::BackupStatus;
-use crate::models::inventory::{CreateSupplierInput, Supplier};
 use crate::models::accessory::{Accessory, CreateAccessoryInput};
-use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
+use crate::models::backup::BackupStatus;
+use crate::models::expense::{
+    Category, CategoryTotal, CreateCategoryInput, CreateExpenseInput, Expense,
+};
+use crate::models::inventory::{CreateSupplierInput, Supplier};
 use crate::models::license::{ActivateLicenseInput, LicenseStatus};
 use crate::models::member::{CreateMemberInput, Member};
 use crate::models::notification::{AppNotification, CreateNotificationInput, NotificationCount};
-use crate::models::expense::{Category, CategoryTotal, CreateCategoryInput, CreateExpenseInput, Expense};
 use crate::models::payment::{CreatePaymentInput, MemberBalance, Payment};
+use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
 use crate::models::product_category::{CreateProductCategoryInput, ProductCategory};
 use crate::models::purchase::{
     CreatePurchaseInput, CreateSupplierPaymentInput, Purchase, SupplierBalance, SupplierPayment,
@@ -25,17 +27,18 @@ use crate::models::user::{
     CreateRoleInput, CreateUserInput, Permission, ResetPasswordInput, RoleWithPermissions,
     SessionUser, UpdateRoleInput, UpdateUserInput, UserDetail,
 };
-use crate::security::SessionState;
 use crate::repositories::{backup_repository, user_repository};
+use crate::security::SessionState;
 use crate::services::{
     accessory_service, auth_service, backup_service, expense_service, license_service,
-    member_service, notification_service, payment_service, phone_service,
-    product_category_service, purchase_service, report_service, sale_service,
-    settings_service, supplier_service, user_admin_service,
+    member_service, notification_service, payment_service, phone_service, product_category_service,
+    purchase_service, report_service, sale_service, settings_service, supplier_service,
+    user_admin_service,
 };
 
-/// Helper: acquire the database connection or fail gracefully.
-fn conn(db: &Database) -> Result<std::sync::MutexGuard<'_, rusqlite::Connection>, AppError> {
+/// Acquire the database connection for commands that are intentionally
+/// available before sign-in (login and offline license activation/status).
+fn public_conn(db: &Database) -> Result<std::sync::MutexGuard<'_, rusqlite::Connection>, AppError> {
     db.conn
         .lock()
         .map_err(|_| AppError::Internal("Database lock poisoned".into()))
@@ -53,6 +56,42 @@ fn current_user_id(session: &SessionState) -> Result<i64, AppError> {
         .ok_or_else(|| AppError::Authentication("Not signed in".into()))
 }
 
+fn require_permission(session: &SessionState, permission: &str) -> Result<i64, AppError> {
+    let guard = session
+        .0
+        .lock()
+        .map_err(|_| AppError::Internal("Session lock poisoned".into()))?;
+    let user = guard
+        .as_ref()
+        .ok_or_else(|| AppError::Authentication("Not signed in".into()))?;
+    if user.permissions.iter().any(|item| item == permission) {
+        Ok(user.id)
+    } else {
+        Err(AppError::PermissionDenied(format!(
+            "The current user does not have the {permission} permission"
+        )))
+    }
+}
+
+fn authorized_conn<'a>(
+    db: &'a Database,
+    session: &SessionState,
+    permission: &str,
+) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, AppError> {
+    require_permission(session, permission)?;
+    public_conn(db)
+}
+
+/// Acquire a database connection only after proving there is a live backend
+/// session. Renderer-supplied identifiers are never sufficient authentication.
+fn authenticated_conn<'a>(
+    db: &'a Database,
+    session: &SessionState,
+) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, AppError> {
+    current_user_id(session)?;
+    public_conn(db)
+}
+
 #[tauri::command]
 pub fn ping() -> String {
     "pong".to_string()
@@ -65,7 +104,7 @@ pub fn login(
     username: String,
     password: String,
 ) -> Result<SessionUser, AppError> {
-    let guard = conn(&db)?;
+    let guard = public_conn(&db)?;
     let user = auth_service::login(&guard, &username, &password)?;
     *session
         .0
@@ -99,7 +138,7 @@ pub fn get_current_user(
     // The `default_password` flag must reflect the live database rather than
     // the login-time snapshot, so the default-password warning disappears as
     // soon as the signed-in user's password is actually changed.
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let password_hash = user_repository::get_password_hash(&guard, user.id)?;
     user.default_password = password_hash
         .map(|hash| crate::security::verify_password("admin123", &hash).unwrap_or(false))
@@ -113,194 +152,198 @@ pub fn get_current_user(
 #[tauri::command]
 pub fn create_user(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     input: CreateUserInput,
 ) -> Result<UserDetail, AppError> {
-    let guard = conn(&db)?;
-    user_admin_service::create_user(&guard, input, actor)
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    user_admin_service::create_user(&guard, input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn list_users(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<UserDetail>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authorized_conn(&db, &session, "users:manage")?;
     user_admin_service::list_users(&guard, search)
 }
 
 #[tauri::command]
 pub fn get_user(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<UserDetail, AppError> {
-    let guard = conn(&db)?;
+    let guard = authorized_conn(&db, &session, "users:manage")?;
     user_admin_service::get_user(&guard, id)
 }
 
 #[tauri::command]
 pub fn update_user(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
     input: UpdateUserInput,
 ) -> Result<UserDetail, AppError> {
-    let guard = conn(&db)?;
-    user_admin_service::update_user(&guard, id, input, actor)
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    user_admin_service::update_user(&guard, id, input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn set_user_status(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
     status: String,
 ) -> Result<UserDetail, AppError> {
-    let guard = conn(&db)?;
-    user_admin_service::set_user_status(&guard, id, &status, actor)
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    user_admin_service::set_user_status(&guard, id, &status, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn reset_user_password(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
     input: ResetPasswordInput,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    user_admin_service::reset_password(&guard, id, &input.new_password, actor)
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    user_admin_service::reset_password(
+        &guard,
+        id,
+        &input.new_password,
+        Some(current_user_id(&session)?),
+    )
 }
 
 #[tauri::command]
 pub fn delete_user(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    user_admin_service::delete_user(&guard, id, actor)
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    user_admin_service::delete_user(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn list_roles(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<RoleWithPermissions>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authorized_conn(&db, &session, "users:manage")?;
     user_admin_service::list_roles(&guard, search)
 }
 
 #[tauri::command]
 pub fn get_role(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<RoleWithPermissions, AppError> {
-    let guard = conn(&db)?;
+    let guard = authorized_conn(&db, &session, "users:manage")?;
     user_admin_service::get_role(&guard, id)
 }
 
 #[tauri::command]
 pub fn create_role(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     input: CreateRoleInput,
 ) -> Result<RoleWithPermissions, AppError> {
-    let guard = conn(&db)?;
-    user_admin_service::create_role(&guard, input, actor)
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    user_admin_service::create_role(&guard, input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn update_role(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
     input: UpdateRoleInput,
 ) -> Result<RoleWithPermissions, AppError> {
-    let guard = conn(&db)?;
-    user_admin_service::update_role(&guard, id, input, actor)
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    user_admin_service::update_role(&guard, id, input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn delete_role(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    user_admin_service::delete_role(&guard, id, actor)
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    user_admin_service::delete_role(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn list_permissions(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
 ) -> Result<Vec<Permission>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authorized_conn(&db, &session, "users:manage")?;
     user_admin_service::list_permissions(&guard)
 }
-
 
 #[tauri::command]
 pub fn create_member(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreateMemberInput,
 ) -> Result<Member, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     member_service::create(&guard, input)
 }
 
 #[tauri::command]
 pub fn list_members(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Member>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     member_service::list(&guard, search)
 }
 
 #[tauri::command]
 pub fn get_member(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<Member, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     member_service::get(&guard, id)
 }
 
 #[tauri::command]
 pub fn delete_member(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    member_service::soft_delete(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    member_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn update_member(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     input: CreateMemberInput,
 ) -> Result<Member, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     member_service::update(&guard, id, input)
 }
 
@@ -309,82 +352,82 @@ pub fn update_member(
 #[tauri::command]
 pub fn create_payment(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreatePaymentInput,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<Payment, AppError> {
-    let guard = conn(&db)?;
-    payment_service::create(&guard, input, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    payment_service::create(&guard, input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn list_payments(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Payment>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     payment_service::list(&guard, search)
 }
 
 #[tauri::command]
 pub fn list_member_payments(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     member_id: i64,
 ) -> Result<Vec<Payment>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     payment_service::list_by_member(&guard, member_id)
 }
 
 #[tauri::command]
 pub fn get_payment(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<Payment, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     payment_service::get(&guard, id)
 }
 
 #[tauri::command]
 pub fn delete_payment(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    payment_service::soft_delete(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    payment_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn get_member_balance(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     member_id: i64,
 ) -> Result<MemberBalance, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     payment_service::member_balance(&guard, member_id)
 }
 
 #[tauri::command]
 pub fn list_member_balances(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<MemberBalance>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     payment_service::list_balances(&guard, search)
 }
 
 #[tauri::command]
 pub fn list_customer_dues(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<MemberBalance>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     payment_service::list_customer_dues(&guard, search)
 }
 
@@ -393,151 +436,228 @@ pub fn list_customer_dues(
 #[tauri::command]
 pub fn create_supplier(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreateSupplierInput,
 ) -> Result<Supplier, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     supplier_service::create(&guard, input)
 }
 
 #[tauri::command]
 pub fn list_suppliers(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
 ) -> Result<Vec<Supplier>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     supplier_service::list(&guard)
 }
 
 #[tauri::command]
 pub fn update_supplier(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     input: CreateSupplierInput,
 ) -> Result<Supplier, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     supplier_service::update(&guard, id, input)
 }
 
 #[tauri::command]
 pub fn delete_supplier(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    supplier_service::soft_delete(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    supplier_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
 
 // ---- Phone Inventory ----
 
 #[tauri::command]
-pub fn save_product_image(app: tauri::AppHandle, _session: State<SessionState>, bytes: Vec<u8>, extension: String) -> Result<String, AppError> {
+pub fn save_product_image(
+    app: tauri::AppHandle,
+    session: State<SessionState>,
+    bytes: Vec<u8>,
+    extension: String,
+) -> Result<String, AppError> {
+    use rand_core::{OsRng, RngCore};
     use tauri::Manager;
-    if bytes.is_empty() || bytes.len() > 10 * 1024 * 1024 { return Err(AppError::validation("Product image must be between 1 byte and 10 MB")); }
-    let ext = match extension.to_ascii_lowercase().as_str() { "jpg"|"jpeg" => "jpg", "png" => "png", "webp" => "webp", _ => return Err(AppError::validation("Only JPG, PNG and WebP images are supported")) };
-    let relative = format!("product_images/{}_{}.{}", chrono::Utc::now().timestamp_millis(), std::process::id(), ext);
-    let path = app.path().app_data_dir().map_err(|e| AppError::file(format!("Could not resolve application data folder: {e}")))?.join(&relative);
-    if let Some(parent)=path.parent(){std::fs::create_dir_all(parent).map_err(|e|AppError::file(format!("Could not create image folder: {e}")))?;}
-    std::fs::write(&path, bytes).map_err(|e|AppError::file(format!("Could not save product image: {e}")))?;
+    current_user_id(&session)?;
+    if bytes.is_empty() || bytes.len() > 10 * 1024 * 1024 {
+        return Err(AppError::validation(
+            "Product image must be between 1 byte and 10 MB",
+        ));
+    }
+    let ext = match extension.to_ascii_lowercase().as_str() {
+        "jpg" | "jpeg" => "jpg",
+        "png" => "png",
+        "webp" => "webp",
+        _ => {
+            return Err(AppError::validation(
+                "Only JPG, PNG and WebP images are supported",
+            ))
+        }
+    };
+    let detected = if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "jpg"
+    } else if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        "png"
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "webp"
+    } else {
+        return Err(AppError::validation(
+            "The selected file is not a valid JPG, PNG or WebP image",
+        ));
+    };
+    if detected != ext {
+        return Err(AppError::validation(
+            "Image contents do not match the file extension",
+        ));
+    }
+    let mut random = [0_u8; 16];
+    OsRng.fill_bytes(&mut random);
+    let relative = format!("product_images/{}.{}", hex::encode(random), ext);
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::file(format!("Could not resolve application data folder: {e}")))?
+        .join(&relative);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::file(format!("Could not create image folder: {e}")))?;
+    }
+    std::fs::write(&path, bytes)
+        .map_err(|e| AppError::file(format!("Could not save product image: {e}")))?;
     Ok(relative.replace('\\', "/"))
 }
 
 #[tauri::command]
-pub fn read_product_image(app: tauri::AppHandle, _session: State<SessionState>, relative_path: String) -> Result<String, AppError> {
+pub fn read_product_image(
+    app: tauri::AppHandle,
+    session: State<SessionState>,
+    relative_path: String,
+) -> Result<String, AppError> {
     use base64::Engine;
     use tauri::Manager;
-    if relative_path.contains("..") || !relative_path.replace('\\', "/").starts_with("product_images/") { return Err(AppError::validation("Invalid product image path")); }
-    let path=app.path().app_data_dir().map_err(|e|AppError::file(format!("Could not resolve application data folder: {e}")))?.join(&relative_path);
-    let bytes=std::fs::read(&path).map_err(|e|AppError::file(format!("Could not read product image: {e}")))?;
-    let mime=if relative_path.ends_with(".png"){"image/png"}else if relative_path.ends_with(".webp"){"image/webp"}else{"image/jpeg"};
-    Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    current_user_id(&session)?;
+    if relative_path.contains("..")
+        || !relative_path
+            .replace('\\', "/")
+            .starts_with("product_images/")
+    {
+        return Err(AppError::validation("Invalid product image path"));
+    }
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::file(format!("Could not resolve application data folder: {e}")))?
+        .join(&relative_path);
+    let bytes = std::fs::read(&path)
+        .map_err(|e| AppError::file(format!("Could not read product image: {e}")))?;
+    let mime = if relative_path.ends_with(".png") {
+        "image/png"
+    } else if relative_path.ends_with(".webp") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    };
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 #[tauri::command]
 pub fn create_phone(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreatePhoneInput,
 ) -> Result<Phone, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     phone_service::create(&guard, input)
 }
 
 #[tauri::command]
 pub fn list_phones(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Phone>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     phone_service::list(&guard, search)
 }
 
 #[tauri::command]
 pub fn get_phone(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<Phone, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     phone_service::get(&guard, id)
 }
 
 #[tauri::command]
 pub fn update_phone(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     input: CreatePhoneInput,
 ) -> Result<Phone, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     phone_service::update(&guard, id, input)
 }
 
 #[tauri::command]
 pub fn delete_phone(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    phone_service::soft_delete(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    phone_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn restock_phone(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     quantity: i64,
     imeis: Vec<String>,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    phone_service::restock(&guard, id, quantity, imeis, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    phone_service::restock(
+        &guard,
+        id,
+        quantity,
+        imeis,
+        Some(current_user_id(&session)?),
+    )
 }
 
 #[tauri::command]
 pub fn add_phone_imei(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: AddPhoneImeiInput,
 ) -> Result<PhoneImei, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     phone_service::add_imei(&guard, input)
 }
 
 #[tauri::command]
 pub fn list_phone_imeis(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     phone_id: i64,
 ) -> Result<Vec<PhoneImei>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     phone_service::list_imei(&guard, phone_id)
 }
 
@@ -546,65 +666,65 @@ pub fn list_phone_imeis(
 #[tauri::command]
 pub fn create_accessory(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreateAccessoryInput,
 ) -> Result<Accessory, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     accessory_service::create(&guard, input)
 }
 
 #[tauri::command]
 pub fn list_accessories(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Accessory>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     accessory_service::list(&guard, search)
 }
 
 #[tauri::command]
 pub fn get_accessory(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<Accessory, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     accessory_service::get(&guard, id)
 }
 
 #[tauri::command]
 pub fn update_accessory(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     input: CreateAccessoryInput,
 ) -> Result<Accessory, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     accessory_service::update(&guard, id, input)
 }
 
 #[tauri::command]
 pub fn delete_accessory(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    accessory_service::soft_delete(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    accessory_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn restock_accessory(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     quantity: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    accessory_service::restock(&guard, id, quantity, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    accessory_service::restock(&guard, id, quantity, Some(current_user_id(&session)?))
 }
 
 // ---- Sales ----
@@ -612,31 +732,31 @@ pub fn restock_accessory(
 #[tauri::command]
 pub fn create_sale(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreateSaleInput,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<Sale, AppError> {
-    let guard = conn(&db)?;
-    sale_service::create(&guard, input, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    sale_service::create(&guard, input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn list_sales(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Sale>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     sale_service::list(&guard, search)
 }
 
 #[tauri::command]
 pub fn get_sale(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<Sale, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     sale_service::get(&guard, id)
 }
 
@@ -645,12 +765,12 @@ pub fn get_sale(
 #[tauri::command]
 pub fn create_category(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreateCategoryInput,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<Category, AppError> {
-    let guard = conn(&db)?;
-    let id = expense_service::create_category(&guard, &input, actor)?;
+    let guard = authenticated_conn(&db, &session)?;
+    let id = expense_service::create_category(&guard, &input, Some(current_user_id(&session)?))?;
     expense_service::list_categories(&guard)?
         .into_iter()
         .find(|c| c.id == id)
@@ -660,33 +780,33 @@ pub fn create_category(
 #[tauri::command]
 pub fn list_categories(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
 ) -> Result<Vec<Category>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     expense_service::list_categories(&guard)
 }
 
 #[tauri::command]
 pub fn update_category(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     input: CreateCategoryInput,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<Category, AppError> {
-    let guard = conn(&db)?;
-    expense_service::update_category(&guard, id, &input, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    expense_service::update_category(&guard, id, &input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn delete_category(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    expense_service::delete_category(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    expense_service::delete_category(&guard, id, Some(current_user_id(&session)?))
 }
 
 // ---- Product Categories (phones & accessories) ----
@@ -694,12 +814,16 @@ pub fn delete_category(
 #[tauri::command]
 pub fn create_product_category(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreateProductCategoryInput,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<ProductCategory, AppError> {
-    let guard = conn(&db)?;
-    let id = product_category_service::create_category(&guard, &input, actor)?;
+    let guard = authenticated_conn(&db, &session)?;
+    let id = product_category_service::create_category(
+        &guard,
+        &input,
+        Some(current_user_id(&session)?),
+    )?;
     product_category_service::list_categories(&guard)?
         .into_iter()
         .find(|c| c.id == id)
@@ -709,99 +833,99 @@ pub fn create_product_category(
 #[tauri::command]
 pub fn list_product_categories(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
 ) -> Result<Vec<ProductCategory>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     product_category_service::list_categories(&guard)
 }
 
 #[tauri::command]
 pub fn update_product_category(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     input: CreateProductCategoryInput,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<ProductCategory, AppError> {
-    let guard = conn(&db)?;
-    product_category_service::update_category(&guard, id, &input, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    product_category_service::update_category(&guard, id, &input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn delete_product_category(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    product_category_service::delete_category(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    product_category_service::delete_category(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn create_expense(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreateExpenseInput,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<Expense, AppError> {
-    let guard = conn(&db)?;
-    let id = expense_service::create_expense(&guard, &input, actor)?;
+    let guard = authenticated_conn(&db, &session)?;
+    let id = expense_service::create_expense(&guard, &input, Some(current_user_id(&session)?))?;
     expense_service::get_expense(&guard, id)
 }
 
 #[tauri::command]
 pub fn list_expenses(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     category_id: Option<i64>,
     from: Option<String>,
     to: Option<String>,
 ) -> Result<Vec<Expense>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     expense_service::list_expenses(&guard, category_id, from, to)
 }
 
 #[tauri::command]
 pub fn get_expense(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<Expense, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     expense_service::get_expense(&guard, id)
 }
 
 #[tauri::command]
 pub fn delete_expense(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    actor: Option<i64>,
+    _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    expense_service::delete_expense(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    expense_service::delete_expense(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn expense_category_totals(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     from: String,
     to: String,
 ) -> Result<Vec<CategoryTotal>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     expense_service::category_expense_totals(&guard, &from, &to)
 }
 
 #[tauri::command]
 pub fn total_expenses_in_range(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     from: String,
     to: String,
 ) -> Result<f64, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     expense_service::total_in_range(&guard, &from, &to)
 }
 
@@ -810,96 +934,96 @@ pub fn total_expenses_in_range(
 #[tauri::command]
 pub fn get_dashboard_summary(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     months: Option<i64>,
 ) -> Result<DashboardSummary, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::dashboard(&guard, months.unwrap_or(12))
 }
 
 #[tauri::command]
 pub fn get_revenue_series(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     months: Option<i64>,
 ) -> Result<Vec<MonthlyPoint>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::revenue_series(&guard, months.unwrap_or(12))
 }
 
 #[tauri::command]
 pub fn get_expense_series(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     months: Option<i64>,
 ) -> Result<Vec<MonthlyPoint>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::expense_series(&guard, months.unwrap_or(12))
 }
 
 #[tauri::command]
 pub fn get_recent_activity(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     limit: Option<i64>,
 ) -> Result<Vec<ActivityLog>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::recent_activity(&guard, limit.unwrap_or(10))
 }
 
 #[tauri::command]
 pub fn get_period_summary(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     from: String,
     to: String,
 ) -> Result<PeriodSummary, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::period_summary(&guard, &from, &to)
 }
 
 #[tauri::command]
 pub fn get_sales_series(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     from: String,
     to: String,
 ) -> Result<Vec<SalePoint>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::sales_series(&guard, &from, &to)
 }
 
 #[tauri::command]
 pub fn get_top_sellers(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     from: String,
     to: String,
     limit: Option<i64>,
 ) -> Result<Vec<TopSeller>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::top_sellers(&guard, &from, &to, limit.unwrap_or(5))
 }
 
 #[tauri::command]
 pub fn get_payment_breakdown(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     from: String,
     to: String,
 ) -> Result<Vec<PaymentBreakdown>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::payment_breakdown(&guard, &from, &to)
 }
 
 #[tauri::command]
 pub fn get_profit_loss(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     from: String,
     to: String,
 ) -> Result<ProfitLoss, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::profit_loss(&guard, &from, &to)
 }
 
@@ -908,22 +1032,22 @@ pub fn get_profit_loss(
 #[tauri::command]
 pub fn get_all_settings(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
 ) -> Result<Vec<crate::models::setting::Setting>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     settings_service::get_all(&guard)
 }
 
 #[tauri::command]
 pub fn update_setting(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     key: String,
     value: String,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    settings_service::update_setting(&guard, actor, &key, &value)
+    let guard = authenticated_conn(&db, &session)?;
+    settings_service::update_setting(&guard, Some(current_user_id(&session)?), &key, &value)
 }
 
 // ---- License & Activation ----
@@ -933,7 +1057,7 @@ pub fn get_license_status(
     db: State<Database>,
     _session: State<SessionState>,
 ) -> Result<LicenseStatus, AppError> {
-    let guard = conn(&db)?;
+    let guard = public_conn(&db)?;
     license_service::status(&guard)
 }
 
@@ -941,21 +1065,21 @@ pub fn get_license_status(
 pub fn activate_license(
     db: State<Database>,
     _session: State<SessionState>,
-    actor: Option<i64>,
+    __actor: Option<i64>,
     input: ActivateLicenseInput,
 ) -> Result<LicenseStatus, AppError> {
-    let guard = conn(&db)?;
-    license_service::activate(&guard, actor, input)
+    let guard = public_conn(&db)?;
+    license_service::activate(&guard, None, input)
 }
 
 #[tauri::command]
 pub fn deactivate_license(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
 ) -> Result<LicenseStatus, AppError> {
-    let guard = conn(&db)?;
-    license_service::deactivate(&guard, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    license_service::deactivate(&guard, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
@@ -963,17 +1087,16 @@ pub fn get_hardware_id() -> String {
     crate::security::get_hardware_id()
 }
 
-
 // ---- Notifications ----
 
 /// Create a notification for a user (e.g. system/automated messages).
 #[tauri::command]
 pub fn create_notification(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: CreateNotificationInput,
 ) -> Result<AppNotification, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     notification_service::create(&guard, input)
 }
 
@@ -985,7 +1108,7 @@ pub fn list_notifications(
     unread_only: Option<bool>,
     limit: Option<i64>,
 ) -> Result<Vec<AppNotification>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let user_id = current_user_id(&session)?;
     notification_service::list(&guard, user_id, unread_only, limit)
 }
@@ -995,7 +1118,7 @@ pub fn get_notification_count(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<NotificationCount, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let user_id = current_user_id(&session)?;
     notification_service::unread_count(&guard, user_id)
 }
@@ -1007,7 +1130,7 @@ pub fn mark_notification_read(
     session: State<SessionState>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let user_id = current_user_id(&session)?;
     notification_service::mark_read(&guard, user_id, id)
 }
@@ -1018,7 +1141,7 @@ pub fn mark_all_notifications_read(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<i64, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let user_id = current_user_id(&session)?;
     notification_service::mark_all_read(&guard, user_id)
 }
@@ -1030,7 +1153,7 @@ pub fn delete_notification(
     session: State<SessionState>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let user_id = current_user_id(&session)?;
     notification_service::delete(&guard, user_id, id)
 }
@@ -1041,7 +1164,7 @@ pub fn clear_read_notifications(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<i64, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let user_id = current_user_id(&session)?;
     notification_service::clear_read(&guard, user_id)
 }
@@ -1049,10 +1172,10 @@ pub fn clear_read_notifications(
 #[tauri::command]
 pub fn list_activity_logs(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     limit: Option<i64>,
 ) -> Result<Vec<ActivityLog>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     report_service::recent_activity(&guard, limit.unwrap_or(100))
 }
 
@@ -1061,124 +1184,177 @@ pub fn list_activity_logs(
 #[tauri::command]
 pub fn create_backup(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
 ) -> Result<crate::models::backup::Backup, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let dir = backup_service::backup_dir(&guard)?;
     backup_service::create_backup(
         &guard,
         &dir,
-        actor,
+        Some(current_user_id(&session)?),
         crate::models::backup::BackupType::Full,
     )
 }
 
 #[tauri::command]
-pub fn list_backup_modules(_session: State<SessionState>) -> Vec<crate::models::backup::BackupModule> {
-    backup_service::available_modules()
+pub fn list_backup_modules(
+    session: State<SessionState>,
+) -> Result<Vec<crate::models::backup::BackupModule>, AppError> {
+    current_user_id(&session)?;
+    Ok(backup_service::available_modules())
 }
 
 #[tauri::command]
-pub fn pick_backup_folder(app: tauri::AppHandle, db: State<Database>, _session: State<SessionState>) -> Result<Option<String>, AppError> {
+pub fn pick_backup_folder(
+    app: tauri::AppHandle,
+    db: State<Database>,
+    session: State<SessionState>,
+) -> Result<Option<String>, AppError> {
     use tauri_plugin_dialog::DialogExt;
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     let folder = backup_service::backup_dir(&guard)?;
-    let picked = app.dialog().file().set_title("Choose Backup Location").set_directory(&folder).blocking_pick_folder();
-    match picked { Some(fp) => Ok(Some(fp.into_path().map_err(|e| AppError::validation(format!("Invalid path: {e}")))?.to_string_lossy().to_string())), None => Ok(None) }
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Choose Backup Location")
+        .set_directory(&folder)
+        .blocking_pick_folder();
+    match picked {
+        Some(fp) => Ok(Some(
+            fp.into_path()
+                .map_err(|e| AppError::validation(format!("Invalid path: {e}")))?
+                .to_string_lossy()
+                .to_string(),
+        )),
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]
-pub fn create_selective_backup(db: State<Database>, _session: State<SessionState>, actor: Option<i64>, modules: Vec<String>, folder: Option<String>) -> Result<crate::models::backup::Backup, AppError> {
-    let guard = conn(&db)?;
-    let dir = folder.filter(|f| !f.trim().is_empty()).map(std::path::PathBuf::from).unwrap_or(backup_service::backup_dir(&guard)?);
-    backup_service::create_selective_backup(&guard, &dir, actor, modules)
+pub fn create_selective_backup(
+    db: State<Database>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
+    modules: Vec<String>,
+    folder: Option<String>,
+) -> Result<crate::models::backup::Backup, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    let dir = folder
+        .filter(|f| !f.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or(backup_service::backup_dir(&guard)?);
+    backup_service::create_selective_backup(&guard, &dir, Some(current_user_id(&session)?), modules)
 }
 
 #[tauri::command]
-pub fn inspect_backup(id: Option<i64>, file_path: Option<String>, db: State<Database>, _session: State<SessionState>) -> Result<crate::models::backup::BackupInspection, AppError> {
-    let guard = conn(&db)?;
-    let path = if let Some(id) = id { backup_service::get_backup(&guard, id)?.ok_or_else(|| AppError::validation(format!("Backup #{id} not found")))?.file_path } else { file_path.ok_or_else(|| AppError::validation("Backup path is required"))? };
+pub fn inspect_backup(
+    id: Option<i64>,
+    file_path: Option<String>,
+    db: State<Database>,
+    session: State<SessionState>,
+) -> Result<crate::models::backup::BackupInspection, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    let path = if let Some(id) = id {
+        backup_service::get_backup(&guard, id)?
+            .ok_or_else(|| AppError::validation(format!("Backup #{id} not found")))?
+            .file_path
+    } else {
+        file_path.ok_or_else(|| AppError::validation("Backup path is required"))?
+    };
     backup_service::inspect_backup(std::path::Path::new(&path))
 }
 
 #[tauri::command]
-pub fn open_backup_folder(path: String, _session: State<SessionState>) -> Result<(), AppError> {
+pub fn open_backup_folder(path: String, session: State<SessionState>) -> Result<(), AppError> {
+    current_user_id(&session)?;
     let target = std::path::PathBuf::from(path);
-    let folder = if target.is_dir() { target } else { target.parent().ok_or_else(|| AppError::validation("Invalid backup path"))?.to_path_buf() };
-    std::process::Command::new("explorer.exe").arg(&folder).spawn().map_err(|e| AppError::file(format!("Could not open backup folder: {e}")))?;
+    let folder = if target.is_dir() {
+        target
+    } else {
+        target
+            .parent()
+            .ok_or_else(|| AppError::validation("Invalid backup path"))?
+            .to_path_buf()
+    };
+    std::process::Command::new("explorer.exe")
+        .arg(&folder)
+        .spawn()
+        .map_err(|e| AppError::file(format!("Could not open backup folder: {e}")))?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn list_backups(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
 ) -> Result<Vec<crate::models::backup::Backup>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     backup_service::list_backups(&guard)
 }
 
 #[tauri::command]
 pub fn get_backup(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<Option<crate::models::backup::Backup>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     backup_service::get_backup(&guard, id)
 }
 
 #[tauri::command]
 pub fn delete_backup(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    backup_service::delete_backup(&guard, actor, id)
+    let guard = authenticated_conn(&db, &session)?;
+    backup_service::delete_backup(&guard, Some(current_user_id(&session)?), id)
 }
 
 #[tauri::command]
 pub fn verify_backup(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    let item = backup_service::get_backup(&guard, id)?.ok_or_else(|| {
-        AppError::validation(format!("Backup #{id} not found"))
-    })?;
+    let guard = authenticated_conn(&db, &session)?;
+    let item = backup_service::get_backup(&guard, id)?
+        .ok_or_else(|| AppError::validation(format!("Backup #{id} not found")))?;
     backup_service::verify_backup_entry(std::path::Path::new(&item.file_path))
 }
 
 #[tauri::command]
 pub fn restore_backup(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let mut guard = conn(&db)?;
-    let item = backup_service::get_backup(&guard, id)?.ok_or_else(|| {
-        AppError::validation(format!("Backup #{id} not found"))
-    })?;
+    let mut guard = authenticated_conn(&db, &session)?;
+    let item = backup_service::get_backup(&guard, id)?
+        .ok_or_else(|| AppError::validation(format!("Backup #{id} not found")))?;
     let dir = backup_service::backup_dir(&guard)?;
     backup_service::restore_backup(
         &mut guard,
         &dir,
-        actor,
+        Some(current_user_id(&session)?),
         std::path::Path::new(&item.file_path),
     )
 }
 
 #[tauri::command]
-pub fn pick_backup_file(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+pub fn pick_backup_file(
+    app: tauri::AppHandle,
+    session: State<SessionState>,
+) -> Result<Option<String>, AppError> {
     use tauri_plugin_dialog::DialogExt;
 
-    let folder = backup_service::desktop_folder()
-        .unwrap_or_else(|_| std::env::temp_dir());
+    current_user_id(&session)?;
+
+    let folder = backup_service::desktop_folder().unwrap_or_else(|_| std::env::temp_dir());
     let picked = app
         .dialog()
         .file()
@@ -1201,15 +1377,15 @@ pub fn pick_backup_file(app: tauri::AppHandle) -> Result<Option<String>, AppErro
 #[tauri::command]
 pub fn restore_backup_from_path(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     app: tauri::AppHandle,
-    actor: Option<i64>,
+    _actor: Option<i64>,
     file_path: String,
 ) -> Result<(), AppError> {
     use std::path::PathBuf;
 
     let source = PathBuf::from(&file_path);
-    let mut guard = conn(&db)?;
+    let mut guard = authenticated_conn(&db, &session)?;
     let dir = backup_service::backup_dir(&guard)?;
     let file_name = source
         .file_name()
@@ -1220,7 +1396,7 @@ pub fn restore_backup_from_path(
     backup_service::validate_archive(&source)?;
 
     // 2) Restore into the live database.
-    backup_service::restore_backup(&mut guard, &dir, actor, &source)?;
+    backup_service::restore_backup(&mut guard, &dir, Some(current_user_id(&session)?), &source)?;
 
     // 3) Record the restoration in the backups table so it appears in history.
     let size = std::fs::metadata(&source)
@@ -1240,7 +1416,7 @@ pub fn restore_backup_from_path(
         &source.to_string_lossy(),
         size,
         BackupStatus::Success,
-        actor,
+        Some(current_user_id(&session)?),
     );
 
     let _ = app.emit("database-restored", "");
@@ -1250,29 +1426,29 @@ pub fn restore_backup_from_path(
 #[tauri::command]
 pub fn get_backup_config(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
 ) -> Result<crate::models::backup_config::BackupConfig, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     backup_service::get_config(&guard)
 }
 
 #[tauri::command]
 pub fn update_backup_config(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     input: crate::models::backup_config::UpdateBackupConfigInput,
 ) -> Result<crate::models::backup_config::BackupConfig, AppError> {
-    let guard = conn(&db)?;
-    backup_service::update_config(&guard, actor, input)
+    let guard = authenticated_conn(&db, &session)?;
+    backup_service::update_config(&guard, Some(current_user_id(&session)?), input)
 }
 
 #[tauri::command]
 pub fn get_backup_status(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
 ) -> Result<crate::models::backup_config::BackupStatusInfo, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     backup_service::status_info(&guard)
 }
 
@@ -1282,31 +1458,31 @@ pub fn get_backup_status(
 #[tauri::command]
 pub fn create_purchase(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     input: CreatePurchaseInput,
 ) -> Result<Purchase, AppError> {
-    let guard = conn(&db)?;
-    purchase_service::create_purchase(&guard, input, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    purchase_service::create_purchase(&guard, input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn list_purchases(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Purchase>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     purchase_service::list(&guard, search)
 }
 
 #[tauri::command]
 pub fn get_purchase(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
 ) -> Result<Purchase, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     purchase_service::get(&guard, id)
 }
 
@@ -1316,72 +1492,72 @@ pub fn get_purchase(
 #[tauri::command]
 pub fn create_supplier_payment(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     input: CreateSupplierPaymentInput,
 ) -> Result<SupplierPayment, AppError> {
-    let guard = conn(&db)?;
-    purchase_service::create_supplier_payment(&guard, input, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    purchase_service::create_supplier_payment(&guard, input, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn list_supplier_payments(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<SupplierPayment>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     purchase_service::list_supplier_payments(&guard, search)
 }
 
 #[tauri::command]
 pub fn list_supplier_payments_by_supplier(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     supplier_id: i64,
 ) -> Result<Vec<SupplierPayment>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     purchase_service::list_supplier_payments_by_supplier(&guard, supplier_id)
 }
 
 #[tauri::command]
 pub fn delete_supplier_payment(
     db: State<Database>,
-    _session: State<SessionState>,
-    actor: Option<i64>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
-    purchase_service::delete_supplier_payment(&guard, id, actor)
+    let guard = authenticated_conn(&db, &session)?;
+    purchase_service::delete_supplier_payment(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
 pub fn get_supplier_balance(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     supplier_id: i64,
 ) -> Result<SupplierBalance, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     purchase_service::supplier_balance(&guard, supplier_id)
 }
 
 #[tauri::command]
 pub fn list_supplier_balances(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<SupplierBalance>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     purchase_service::list_supplier_balances(&guard, search)
 }
 
 #[tauri::command]
 pub fn list_supplier_dues(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<SupplierBalance>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     purchase_service::list_supplier_dues(&guard, search)
 }
 
@@ -1390,10 +1566,10 @@ pub fn list_supplier_dues(
 #[tauri::command]
 pub fn list_phone_options(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     option_type: Option<String>,
 ) -> Result<Vec<crate::models::phone::PhoneOption>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     if let Some(t) = option_type {
         crate::services::phone_option_service::list_by_type(&guard, &t)
     } else {
@@ -1404,46 +1580,46 @@ pub fn list_phone_options(
 #[tauri::command]
 pub fn create_phone_option(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: crate::models::phone::CreatePhoneOptionInput,
-    _actor: Option<i64>,
+    __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     crate::services::phone_option_service::create(&guard, input)
 }
 
 #[tauri::command]
 pub fn update_phone_option(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     input: crate::models::phone::CreatePhoneOptionInput,
-    _actor: Option<i64>,
+    __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     crate::services::phone_option_service::update(&guard, id, input)
 }
 
 #[tauri::command]
 pub fn delete_phone_option(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    _actor: Option<i64>,
+    __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     crate::services::phone_option_service::delete(&guard, id)
 }
 
 #[tauri::command]
 pub fn set_phone_option_active(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     is_active: bool,
-    _actor: Option<i64>,
+    __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     crate::services::phone_option_service::set_active(&guard, id, is_active)
 }
 
@@ -1452,10 +1628,10 @@ pub fn set_phone_option_active(
 #[tauri::command]
 pub fn list_accessory_options(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     option_type: Option<String>,
 ) -> Result<Vec<crate::models::phone::PhoneOption>, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     if let Some(t) = option_type {
         crate::services::phone_option_service::list_by_type(&guard, &t)
     } else {
@@ -1466,45 +1642,45 @@ pub fn list_accessory_options(
 #[tauri::command]
 pub fn create_accessory_option(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     input: crate::models::phone::CreatePhoneOptionInput,
-    _actor: Option<i64>,
+    __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     crate::services::phone_option_service::create(&guard, input)
 }
 
 #[tauri::command]
 pub fn update_accessory_option(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     input: crate::models::phone::CreatePhoneOptionInput,
-    _actor: Option<i64>,
+    __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     crate::services::phone_option_service::update(&guard, id, input)
 }
 
 #[tauri::command]
 pub fn delete_accessory_option(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
-    _actor: Option<i64>,
+    __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     crate::services::phone_option_service::delete(&guard, id)
 }
 
 #[tauri::command]
 pub fn set_accessory_option_active(
     db: State<Database>,
-    _session: State<SessionState>,
+    session: State<SessionState>,
     id: i64,
     is_active: bool,
-    _actor: Option<i64>,
+    __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     crate::services::phone_option_service::set_active(&guard, id, is_active)
 }

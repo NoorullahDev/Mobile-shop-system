@@ -18,12 +18,15 @@ pub struct StoredLicense {
     pub activated_at: String,
 }
 
-pub fn get_last_valid_time(conn: &Connection) -> Result<Option<(String,String)>, AppError> {
-    let Some(time) = settings_repository::get(conn, KEY_LAST_VALID_TIME)? else { return Ok(None) };
+pub fn get_last_valid_time(conn: &Connection) -> Result<Option<(String, String)>, AppError> {
+    let Some(time) = settings_repository::get(conn, KEY_LAST_VALID_TIME)? else {
+        return Ok(None);
+    };
     let seal = settings_repository::get(conn, KEY_LAST_VALID_SEAL)?.unwrap_or_default();
     Ok(Some((time, seal)))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn save_last_valid_time(conn: &Connection, time: &str, seal: &str) -> Result<(), AppError> {
     settings_repository::set(conn, KEY_LAST_VALID_TIME, time)?;
     settings_repository::set(conn, KEY_LAST_VALID_SEAL, seal)?;
@@ -35,13 +38,12 @@ pub fn get(conn: &Connection) -> Result<Option<StoredLicense>, AppError> {
         Some(k) => k,
         None => return Ok(None),
     };
-    let customer = settings_repository::get(conn, KEY_LICENSE_CUSTOMER)?
-        .unwrap_or_default();
+    let customer = settings_repository::get(conn, KEY_LICENSE_CUSTOMER)?.unwrap_or_default();
     let granted_days = settings_repository::get(conn, KEY_LICENSE_GRANTED_DAYS)?
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(0);
-    let activated_at = settings_repository::get(conn, KEY_LICENSE_ACTIVATED_AT)?
-        .unwrap_or_default();
+    let activated_at =
+        settings_repository::get(conn, KEY_LICENSE_ACTIVATED_AT)?.unwrap_or_default();
     Ok(Some(StoredLicense {
         key,
         customer,
