@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Banknote,
+  BriefcaseBusiness,
   KeyRound,
   Pencil,
   Shield,
@@ -22,13 +24,14 @@ import { useSessionStore } from "../store/session";
 import { useUserStore } from "../store/users";
 import * as userService from "../services/userService";
 import { can } from "../lib/permissions";
+import { SalarySection, StaffSection } from "./StaffSalarySections";
 import type {
   Permission,
   RoleWithPermissions,
   UserDetail,
 } from "../types/user";
 
-type Tab = "users" | "roles";
+type Tab = "users" | "staff" | "salary" | "roles";
 
 export function UsersPage() {
   const session = useSessionStore((s) => s.user);
@@ -114,6 +117,12 @@ export function UsersPage() {
       <div className="mb-5 flex gap-2">
         <TabButton active={tab === "users"} onClick={() => setTab("users")} icon={<Users className="h-3.5 w-3.5" />}>
           Users
+        </TabButton>
+        <TabButton active={tab === "staff"} onClick={() => setTab("staff")} icon={<BriefcaseBusiness className="h-3.5 w-3.5" />}>
+          Staff
+        </TabButton>
+        <TabButton active={tab === "salary"} onClick={() => setTab("salary")} icon={<Banknote className="h-3.5 w-3.5" />}>
+          Salary
         </TabButton>
         <TabButton active={tab === "roles"} onClick={() => setTab("roles")} icon={<Shield className="h-3.5 w-3.5" />}>
           Roles
@@ -229,6 +238,10 @@ export function UsersPage() {
             </table>
           )}
         </Card>
+      ) : tab === "staff" ? (
+        <StaffSection users={activeUsers} actor={actor} />
+      ) : tab === "salary" ? (
+        <SalarySection actor={actor} />
       ) : (
         <Card
           title={`Roles (${roles.length})`}

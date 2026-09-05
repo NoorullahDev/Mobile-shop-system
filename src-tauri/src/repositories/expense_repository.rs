@@ -136,3 +136,21 @@ pub fn soft_delete(conn: &Connection, id: i64) -> Result<bool, AppError> {
     )?;
     Ok(affected > 0)
 }
+
+pub fn update_linked_salary_expense(
+    conn: &Connection,
+    id: i64,
+    category_id: i64,
+    amount: f64,
+    description: &str,
+    expense_date: &str,
+    user_id: Option<i64>,
+) -> Result<bool, AppError> {
+    let affected = conn.execute(
+        "UPDATE expenses SET category_id = ?1, amount = ?2, description = ?3,
+         expense_date = ?4, created_by = COALESCE(created_by, ?5), is_deleted = 0
+         WHERE id = ?6",
+        params![category_id, amount, description, expense_date, user_id, id],
+    )?;
+    Ok(affected > 0)
+}

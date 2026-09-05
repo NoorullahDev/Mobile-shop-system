@@ -13,6 +13,7 @@ pub mod purchase_repository;
 pub mod report_repository;
 pub mod sale_repository;
 pub mod settings_repository;
+pub mod staff_repository;
 pub mod supplier_repository;
 pub mod user_admin_repository;
 pub mod user_repository;

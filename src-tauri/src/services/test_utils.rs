@@ -52,6 +52,42 @@ CREATE TABLE expenses (
     created_by INTEGER, is_deleted INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE staff_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    position TEXT NOT NULL,
+    joining_date TEXT NOT NULL,
+    monthly_salary REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    notes TEXT,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE salary_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL,
+    salary_month TEXT NOT NULL,
+    base_salary REAL NOT NULL DEFAULT 0,
+    bonus REAL NOT NULL DEFAULT 0,
+    deduction REAL NOT NULL DEFAULT 0,
+    net_salary REAL NOT NULL DEFAULT 0,
+    amount_paid REAL NOT NULL DEFAULT 0,
+    remaining_balance REAL NOT NULL DEFAULT 0,
+    payment_status TEXT NOT NULL DEFAULT 'Unpaid',
+    payment_date TEXT,
+    payment_time TEXT,
+    payment_method TEXT,
+    notes TEXT,
+    expense_id INTEGER UNIQUE,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX idx_salary_staff_month_active
+    ON salary_records(staff_id, salary_month) WHERE is_deleted = 0;
 CREATE TABLE report_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, columns TEXT, filters TEXT,
     created_by INTEGER, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

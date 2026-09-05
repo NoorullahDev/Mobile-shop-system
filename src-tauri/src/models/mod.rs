@@ -13,4 +13,5 @@ pub mod purchase;
 pub mod report;
 pub mod sale;
 pub mod setting;
+pub mod staff;
 pub mod user;

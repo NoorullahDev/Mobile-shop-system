@@ -960,6 +960,60 @@ const MIGRATIONS: &[(&str, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_accessories_sku ON accessories(sku);
         "#,
     ),
+    (
+        "0020_staff_salary_management",
+        r#"
+        CREATE TABLE IF NOT EXISTS staff_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            position TEXT NOT NULL,
+            joining_date TEXT NOT NULL,
+            monthly_salary REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'active',
+            notes TEXT,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS salary_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            staff_id INTEGER NOT NULL,
+            salary_month TEXT NOT NULL,
+            base_salary REAL NOT NULL DEFAULT 0,
+            bonus REAL NOT NULL DEFAULT 0,
+            deduction REAL NOT NULL DEFAULT 0,
+            net_salary REAL NOT NULL DEFAULT 0,
+            amount_paid REAL NOT NULL DEFAULT 0,
+            remaining_balance REAL NOT NULL DEFAULT 0,
+            payment_status TEXT NOT NULL DEFAULT 'Unpaid',
+            payment_date TEXT,
+            payment_time TEXT,
+            payment_method TEXT,
+            notes TEXT,
+            expense_id INTEGER UNIQUE,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (staff_id) REFERENCES staff_members(id),
+            FOREIGN KEY (expense_id) REFERENCES expenses(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_staff_name ON staff_members(name);
+        CREATE INDEX IF NOT EXISTS idx_staff_status ON staff_members(status);
+        CREATE INDEX IF NOT EXISTS idx_staff_user ON staff_members(user_id);
+        CREATE INDEX IF NOT EXISTS idx_salary_staff ON salary_records(staff_id);
+        CREATE INDEX IF NOT EXISTS idx_salary_month ON salary_records(salary_month);
+        CREATE INDEX IF NOT EXISTS idx_salary_status ON salary_records(payment_status);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_salary_staff_month_active
+            ON salary_records(staff_id, salary_month) WHERE is_deleted = 0;
+
+        INSERT OR IGNORE INTO categories (name, type) VALUES ('Salary', 'expense');
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

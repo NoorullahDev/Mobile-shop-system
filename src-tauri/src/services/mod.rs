@@ -13,6 +13,7 @@ pub mod purchase_service;
 pub mod report_service;
 pub mod sale_service;
 pub mod settings_service;
+pub mod staff_service;
 pub mod supplier_service;
 pub mod user_admin_service;
 

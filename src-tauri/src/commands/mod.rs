@@ -23,6 +23,7 @@ use crate::models::report::{
     SalePoint, TopSeller,
 };
 use crate::models::sale::{CreateSaleInput, Sale};
+use crate::models::staff::{SalaryInput, SalaryRecord, StaffInput, StaffMember};
 use crate::models::user::{
     CreateRoleInput, CreateUserInput, Permission, ResetPasswordInput, RoleWithPermissions,
     SessionUser, UpdateRoleInput, UpdateUserInput, UserDetail,
@@ -32,8 +33,8 @@ use crate::security::SessionState;
 use crate::services::{
     accessory_service, auth_service, backup_service, expense_service, license_service,
     member_service, notification_service, payment_service, phone_service, product_category_service,
-    purchase_service, report_service, sale_service, settings_service, supplier_service,
-    user_admin_service,
+    purchase_service, report_service, sale_service, settings_service, staff_service,
+    supplier_service, user_admin_service,
 };
 
 /// Acquire the database connection for commands that are intentionally
@@ -293,6 +294,100 @@ pub fn list_permissions(
 ) -> Result<Vec<Permission>, AppError> {
     let guard = authorized_conn(&db, &session, "users:manage")?;
     user_admin_service::list_permissions(&guard)
+}
+
+// ---- Staff & Salary Management ----
+
+#[tauri::command]
+pub fn create_staff_member(
+    db: State<Database>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
+    input: StaffInput,
+) -> Result<StaffMember, AppError> {
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    staff_service::create_staff(&guard, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn list_staff_members(
+    db: State<Database>,
+    session: State<SessionState>,
+    search: Option<String>,
+    status: Option<String>,
+) -> Result<Vec<StaffMember>, AppError> {
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    staff_service::list_staff(&guard, search, status)
+}
+
+#[tauri::command]
+pub fn update_staff_member(
+    db: State<Database>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
+    id: i64,
+    input: StaffInput,
+) -> Result<StaffMember, AppError> {
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    staff_service::update_staff(&guard, id, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn delete_staff_member(
+    db: State<Database>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
+    id: i64,
+) -> Result<(), AppError> {
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    staff_service::delete_staff(&guard, id, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn create_salary_record(
+    db: State<Database>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
+    input: SalaryInput,
+) -> Result<SalaryRecord, AppError> {
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    staff_service::create_salary(&guard, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn list_salary_records(
+    db: State<Database>,
+    session: State<SessionState>,
+    search: Option<String>,
+    month: Option<String>,
+    status: Option<String>,
+    staff_id: Option<i64>,
+) -> Result<Vec<SalaryRecord>, AppError> {
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    staff_service::list_salaries(&guard, search, month, status, staff_id)
+}
+
+#[tauri::command]
+pub fn update_salary_record(
+    db: State<Database>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
+    id: i64,
+    input: SalaryInput,
+) -> Result<SalaryRecord, AppError> {
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    staff_service::update_salary(&guard, id, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn delete_salary_record(
+    db: State<Database>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
+    id: i64,
+) -> Result<(), AppError> {
+    let guard = authorized_conn(&db, &session, "users:manage")?;
+    staff_service::delete_salary(&guard, id, Some(current_user_id(&session)?))
 }
 
 #[tauri::command]
