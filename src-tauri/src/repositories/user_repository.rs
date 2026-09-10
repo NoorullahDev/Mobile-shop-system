@@ -44,11 +44,9 @@ pub fn get_password_hash(conn: &Connection, id: i64) -> Result<Option<String>, A
 
 pub fn get_role_name(conn: &Connection, role_id: i64) -> Result<Option<String>, AppError> {
     let name = conn
-        .query_row(
-            "SELECT name FROM roles WHERE id = ?1",
-            [role_id],
-            |r| r.get(0),
-        )
+        .query_row("SELECT name FROM roles WHERE id = ?1", [role_id], |r| {
+            r.get(0)
+        })
         .optional()?;
     Ok(name)
 }

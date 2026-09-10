@@ -1,7 +1,9 @@
 use rusqlite::Connection;
 
 use crate::errors::AppError;
-use crate::models::expense::{Category, CategoryTotal, CreateCategoryInput, CreateExpenseInput, Expense};
+use crate::models::expense::{
+    Category, CategoryTotal, CreateCategoryInput, CreateExpenseInput, Expense,
+};
 use crate::repositories::{category_repository, expense_repository};
 use crate::services::record_activity;
 
@@ -22,7 +24,9 @@ fn validate_amount(amount: f64) -> Result<(), AppError> {
         return Err(AppError::validation("Expense amount is invalid"));
     }
     if amount <= 0.0 {
-        return Err(AppError::validation("Expense amount must be greater than zero"));
+        return Err(AppError::validation(
+            "Expense amount must be greater than zero",
+        ));
     }
     Ok(())
 }
@@ -62,7 +66,8 @@ pub fn update_category(
     }
     category_repository::update(conn, id, input)?;
     record_activity(conn, user_id, "expenses", "category_update", Some(id))?;
-    category_repository::get_by_id(conn, id)?.ok_or_else(|| AppError::validation("Category not found"))
+    category_repository::get_by_id(conn, id)?
+        .ok_or_else(|| AppError::validation("Category not found"))
 }
 
 pub fn delete_category(conn: &Connection, id: i64, user_id: Option<i64>) -> Result<(), AppError> {
@@ -127,7 +132,11 @@ pub fn delete_expense(conn: &Connection, id: i64, user_id: Option<i64>) -> Resul
     Ok(())
 }
 
-pub fn category_expense_totals(conn: &Connection, from: &str, to: &str) -> Result<Vec<CategoryTotal>, AppError> {
+pub fn category_expense_totals(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<CategoryTotal>, AppError> {
     expense_repository::category_totals(conn, from, to)
 }
 

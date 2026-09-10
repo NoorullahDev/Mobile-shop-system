@@ -9,6 +9,7 @@ pub mod payment_service;
 pub mod phone_option_service;
 pub mod phone_service;
 pub mod product_category_service;
+pub mod product_return_service;
 pub mod purchase_service;
 pub mod report_service;
 pub mod sale_service;

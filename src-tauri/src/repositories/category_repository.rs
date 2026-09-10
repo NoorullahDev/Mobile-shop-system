@@ -23,7 +23,10 @@ fn map_unique(e: AppError, name: &str) -> AppError {
 pub fn insert(conn: &Connection, input: &CreateCategoryInput) -> Result<i64, AppError> {
     match conn.execute(
         "INSERT INTO categories (name, type) VALUES (?1, ?2)",
-        params![input.name, input.category_type.as_deref().unwrap_or("expense")],
+        params![
+            input.name,
+            input.category_type.as_deref().unwrap_or("expense")
+        ],
     ) {
         Ok(_) => Ok(conn.last_insert_rowid()),
         Err(e) => Err(map_unique(AppError::from(e), &input.name)),
@@ -42,9 +45,8 @@ pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<Category>, AppErro
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<Category>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, type AS category_type FROM categories ORDER BY name",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, type AS category_type FROM categories ORDER BY name")?;
     let rows = stmt.query_map([], from_row)?;
     let mut out = Vec::new();
     for r in rows {
@@ -56,7 +58,11 @@ pub fn list(conn: &Connection) -> Result<Vec<Category>, AppError> {
 pub fn update(conn: &Connection, id: i64, input: &CreateCategoryInput) -> Result<bool, AppError> {
     match conn.execute(
         "UPDATE categories SET name = ?1, type = ?2 WHERE id = ?3",
-        params![input.name, input.category_type.as_deref().unwrap_or("expense"), id],
+        params![
+            input.name,
+            input.category_type.as_deref().unwrap_or("expense"),
+            id
+        ],
     ) {
         Ok(affected) => Ok(affected > 0),
         Err(e) => Err(map_unique(AppError::from(e), &input.name)),

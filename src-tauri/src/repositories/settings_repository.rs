@@ -19,11 +19,9 @@ pub fn get_all(conn: &Connection) -> Result<Vec<Setting>, AppError> {
 
 pub fn get(conn: &Connection, key: &str) -> Result<Option<String>, AppError> {
     let value = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            [key],
-            |r| r.get::<_, Option<String>>(0),
-        )
+        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+            r.get::<_, Option<String>>(0)
+        })
         .optional()?;
     Ok(value.flatten())
 }

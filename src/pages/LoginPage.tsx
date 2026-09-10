@@ -5,10 +5,13 @@ import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Alert } from "../components/Alert";
 import { useSessionStore } from "../store/session";
+import { useSettingsStore } from "../store/settings";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login, error } = useSessionStore();
+  const businessName = useSettingsStore((s) => s.businessName);
+  const logo = useSettingsStore((s) => s.logo);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -55,33 +58,46 @@ export function LoginPage() {
       >
         {/* Brand Header */}
         <div style={{ textAlign: "center", marginBottom: "28px" }}>
-          {/* Icon */}
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "40px",
-              height: "40px",
-              borderRadius: "8px",
-              background: "#1B2A4A",
-              marginBottom: "14px",
-            }}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#FFFFFF"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {logo ? (
+            <img
+              src={logo}
+              alt={`${businessName || "Shop"} logo`}
+              style={{
+                width: "56px",
+                height: "56px",
+                objectFit: "contain",
+                borderRadius: "8px",
+                marginBottom: "14px",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "40px",
+                height: "40px",
+                borderRadius: "8px",
+                background: "#1B2A4A",
+                marginBottom: "14px",
+              }}
             >
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-          </div>
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#FFFFFF"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
+            </div>
+          )}
           <div
             style={{
               fontSize: "17px",
@@ -91,7 +107,7 @@ export function LoginPage() {
               lineHeight: 1.3,
             }}
           >
-            Mobile Shop Manager
+            {businessName || "Mobile Shop Manager"}
           </div>
           <div
             style={{

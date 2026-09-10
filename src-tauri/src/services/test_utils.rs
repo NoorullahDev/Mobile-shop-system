@@ -184,6 +184,27 @@ CREATE TABLE notifications (
     is_read INTEGER NOT NULL DEFAULT 0, read_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE returns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, return_no TEXT NOT NULL UNIQUE,
+    sale_id INTEGER NOT NULL, member_id INTEGER, customer_name TEXT, customer_phone TEXT,
+    receipt_no TEXT, total_sale_price REAL NOT NULL DEFAULT 0,
+    deduction_amount REAL NOT NULL DEFAULT 0, refund_amount REAL NOT NULL DEFAULT 0,
+    return_charge_percent REAL NOT NULL DEFAULT 0, refund_method TEXT NOT NULL DEFAULT 'cash',
+    return_date TEXT, reason TEXT, condition TEXT NOT NULL DEFAULT 'sellable',
+    status TEXT NOT NULL DEFAULT 'processed', notes TEXT, created_by INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE return_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, return_id INTEGER NOT NULL,
+    sale_item_id INTEGER NOT NULL, item_type TEXT NOT NULL,
+    phone_id INTEGER, accessory_id INTEGER, imei_id INTEGER,
+    product_name TEXT, imei TEXT, serial_no TEXT,
+    quantity INTEGER NOT NULL DEFAULT 1, unit_price REAL NOT NULL DEFAULT 0,
+    line_total REAL NOT NULL DEFAULT 0, deduction_amount REAL NOT NULL DEFAULT 0,
+    refund_amount REAL NOT NULL DEFAULT 0, reason TEXT,
+    condition TEXT NOT NULL DEFAULT 'sellable', restocked INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE backups (
     id INTEGER PRIMARY KEY AUTOINCREMENT, file_name TEXT NOT NULL,
     backup_type TEXT NOT NULL DEFAULT 'database', file_path TEXT NOT NULL,

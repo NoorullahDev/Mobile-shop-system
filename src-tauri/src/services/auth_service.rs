@@ -35,8 +35,8 @@ pub fn login(conn: &Connection, username: &str, password: &str) -> Result<Sessio
         ));
     }
 
-    let role = user_repository::get_role_name(conn, user.role_id)?
-        .unwrap_or_else(|| "Unknown".into());
+    let role =
+        user_repository::get_role_name(conn, user.role_id)?.unwrap_or_else(|| "Unknown".into());
     let permissions = user_repository::get_permissions(conn, user.role_id)?;
     let login_time = chrono::Local::now().to_rfc3339();
     let default_password = security::verify_password("admin123", &user.password_hash)?;
@@ -87,19 +87,19 @@ mod tests {
         )
         .unwrap();
         let hash = hash_password("Secret123!").unwrap();
-        conn.execute(
-            "INSERT INTO roles (id, name) VALUES (1, 'Admin')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO roles (id, name) VALUES (1, 'Admin')", [])
+            .unwrap();
         conn.execute(
             "INSERT INTO users (username, password_hash, role_id, status) VALUES ('admin', ?1, 1, ?2)",
             rusqlite::params![hash, status],
         )
         .unwrap();
         if has_permissions {
-            conn.execute("INSERT INTO permissions (name) VALUES ('members:create')", [])
-                .unwrap();
+            conn.execute(
+                "INSERT INTO permissions (name) VALUES ('members:create')",
+                [],
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO role_permissions (role_id, permission_id) VALUES (1, 1)",
                 [],

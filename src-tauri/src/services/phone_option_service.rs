@@ -25,7 +25,11 @@ pub fn list_all(conn: &Connection) -> Result<Vec<PhoneOption>, AppError> {
     phone_option_repository::list_all(conn)
 }
 
-pub fn update(conn: &Connection, id: i64, input: CreatePhoneOptionInput) -> Result<PhoneOption, AppError> {
+pub fn update(
+    conn: &Connection,
+    id: i64,
+    input: CreatePhoneOptionInput,
+) -> Result<PhoneOption, AppError> {
     if input.option_type.trim().is_empty() {
         return Err(AppError::validation("Option type is required"));
     }
@@ -36,7 +40,7 @@ pub fn update(conn: &Connection, id: i64, input: CreatePhoneOptionInput) -> Resu
     if !phone_option_repository::update(conn, id, &input)? {
         return Err(AppError::validation("Phone option not found"));
     }
-    
+
     phone_option_repository::get_by_id(conn, id)?
         .ok_or_else(|| AppError::validation("Failed to retrieve updated phone option"))
 }

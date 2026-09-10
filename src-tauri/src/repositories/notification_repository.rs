@@ -58,7 +58,11 @@ pub fn list(
     Ok(rows)
 }
 
-pub fn get_for_user(conn: &Connection, notification_id: i64, user_id: i64) -> Result<Option<AppNotification>, AppError> {
+pub fn get_for_user(
+    conn: &Connection,
+    notification_id: i64,
+    user_id: i64,
+) -> Result<Option<AppNotification>, AppError> {
     conn.query_row(
         "SELECT id, user_id, title, message, type, priority, is_read, read_at, created_at
          FROM notifications

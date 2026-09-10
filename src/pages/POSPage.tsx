@@ -21,7 +21,6 @@ import { Select } from "../components/Select";
 import { Modal } from "../components/Modal";
 import { EmptyState } from "../components/EmptyState";
 import { Alert } from "../components/Alert";
-import { SaleReceipt } from "./SaleReceipt";
 import { useSaleStore } from "../store/sales";
 import { useInventoryStore } from "../store/inventory";
 import { useMemberStore } from "../store/members";
@@ -29,9 +28,10 @@ import { useSessionStore } from "../store/session";
 import { formatMoney, formatMoneyCompact, roundMoney } from "../lib/format";
 import * as inventoryService from "../services/inventoryService";
 import * as memberService from "../services/memberService";
+import { ReceiptModal } from "./ReceiptModal";
 import type { PhoneImei, Product } from "../types/inventory";
 import type { CreateMemberInput } from "../types/member";
-import type { CreateSaleInput } from "../types/sale";
+import type { CreateSaleInput, Sale } from "../types/sale";
 import { PAYMENT_METHODS } from "../types/sale";
 
 const methodLabels: Record<string, { label: string; icon: typeof Banknote }> = {
@@ -69,7 +69,7 @@ export function POSPage() {
   const [paidAmount, setPaidAmount] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [justCreated, setJustCreated] = useState<Awaited<ReturnType<typeof add>>>(null);
+  const [justSold, setJustSold] = useState<Sale | null>(null);
 
   useEffect(() => {
     loadInventory();
@@ -202,7 +202,8 @@ export function POSPage() {
     try {
       const created = await add(input, user?.id ?? null);
       await loadInventory();
-      setJustCreated(created);
+      clearCart();
+      setJustSold(created);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -637,9 +638,7 @@ export function POSPage() {
               onClick={handleCheckout}
               icon={<CircleCheck className="h-4 w-4" />}
             >
-              {paymentMethod === "cash" && Number.isFinite(paidNum) && paidNum >= total
-                ? "Complete Sale & Print Receipt"
-                : "Complete Sale"}
+              Complete Sale
             </Button>
           </div>
         </div>
@@ -656,24 +655,12 @@ export function POSPage() {
         <NewCustomerForm onSave={createCustomer} onCancel={() => setNewCustomerOpen(false)} />
       </Modal>
 
-      {/* Receipt Modal */}
-      <Modal
-        open={justCreated !== null}
-        title="Sale Completed!"
-        subtitle="Invoice generated successfully"
-        onClose={() => setJustCreated(null)}
-        size="xl"
-      >
-        {justCreated && (
-          <SaleReceipt
-            sale={justCreated}
-            onClose={() => {
-              setJustCreated(null);
-              clearCart();
-            }}
-          />
-        )}
-      </Modal>
+      {/* Receipt preview + print after a completed sale */}
+      <ReceiptModal
+        open={justSold != null}
+        sale={justSold}
+        onClose={() => setJustSold(null)}
+      />
     </PageContainer>
   );
 }

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::errors::AppError;
 use crate::models::sale::{CreateSaleInput, Sale};
-use crate::repositories::{member_repository, sale_repository};
+use crate::repositories::{member_repository, product_return_repository, sale_repository};
 use crate::services;
 
 fn round2(v: f64) -> f64 {
@@ -15,7 +15,9 @@ pub fn create(
     actor: Option<i64>,
 ) -> Result<Sale, AppError> {
     if input.items.is_empty() {
-        return Err(AppError::validation("A sale must contain at least one item"));
+        return Err(AppError::validation(
+            "A sale must contain at least one item",
+        ));
     }
     if input.discount < 0.0 {
         return Err(AppError::validation("Discount cannot be negative"));
@@ -42,31 +44,38 @@ pub fn create(
     for item in &input.items {
         let item_type = match item.item_type.as_str() {
             "phone" | "accessory" => item.item_type.clone(),
-            _ => return Err(AppError::validation("Item type must be 'phone' or 'accessory'")),
+            _ => {
+                return Err(AppError::validation(
+                    "Item type must be 'phone' or 'accessory'",
+                ))
+            }
         };
         if item.quantity < 1 {
             return Err(AppError::validation("Item quantity must be at least 1"));
         }
         let Some(stock) = sale_repository::item_quantity(conn, &item_type, item.item_id)? else {
-            return Err(AppError::validation(
-                if item_type == "phone" { "Phone not found" } else { "Accessory not found" },
-            ));
+            return Err(AppError::validation(if item_type == "phone" {
+                "Phone not found"
+            } else {
+                "Accessory not found"
+            }));
         };
         if item.quantity > stock {
-            return Err(AppError::validation(
-                "Not enough stock for this item",
-            ));
+            return Err(AppError::validation("Not enough stock for this item"));
         }
 
         let unit_price = match item.unit_price {
             Some(p) if p > 0.0 => p,
             _ => {
-                let p = sale_repository::item_price(conn, &item_type, item.item_id)?
-                    .ok_or_else(|| {
-                        AppError::validation(
-                            if item_type == "phone" { "Phone not found" } else { "Accessory not found" },
-                        )
-                    })?;
+                let p = sale_repository::item_price(conn, &item_type, item.item_id)?.ok_or_else(
+                    || {
+                        AppError::validation(if item_type == "phone" {
+                            "Phone not found"
+                        } else {
+                            "Accessory not found"
+                        })
+                    },
+                )?;
                 if p > 0.0 {
                     p
                 } else {
@@ -80,14 +89,16 @@ pub fn create(
         if item_type == "phone" {
             if let Some(imei_id) = item.imei_id {
                 if !sale_repository::imei_available(conn, imei_id, item.item_id)? {
-                    return Err(AppError::validation(
-                        "IMEI is not available for this item",
-                    ));
+                    return Err(AppError::validation("IMEI is not available for this item"));
                 }
             }
         }
 
-        let line_imei = if item_type == "phone" { item.imei_id } else { None };
+        let line_imei = if item_type == "phone" {
+            item.imei_id
+        } else {
+            None
+        };
 
         let line_total = round2(unit_price * item.quantity as f64);
         subtotal += line_total;
@@ -180,15 +191,17 @@ pub fn list(conn: &Connection, search: Option<String>) -> Result<Vec<Sale>, AppE
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Sale, AppError> {
-    sale_repository::get_sale_with_items(conn, id)?
-        .ok_or_else(|| AppError::validation("Sale not found"))
+    let mut sale = sale_repository::get_sale_with_items(conn, id)?
+        .ok_or_else(|| AppError::validation("Sale not found"))?;
+    sale.returns = product_return_repository::returns_for_sale(conn, id)?;
+    Ok(sale)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::sale::SaleItemInput;
     use crate::models::phone::CreatePhoneInput;
+    use crate::models::sale::SaleItemInput;
     use crate::services::{phone_service, test_utils::in_memory_conn};
 
     fn phone(conn: &Connection, qty: i64, price: f64) -> i64 {
@@ -286,7 +299,10 @@ mod tests {
         let id = phone(&conn, 1, 100.0);
         let imei = phone_service::add_imei(
             &conn,
-            AddPhoneImeiInput { phone_id: id, imei: "111111111111111".into() },
+            AddPhoneImeiInput {
+                phone_id: id,
+                imei: "111111111111111".into(),
+            },
         )
         .unwrap();
 
@@ -305,7 +321,10 @@ mod tests {
         let id = phone(&conn, 3, 100.0);
         let imei = phone_service::add_imei(
             &conn,
-            AddPhoneImeiInput { phone_id: id, imei: "999999999999999".into() },
+            AddPhoneImeiInput {
+                phone_id: id,
+                imei: "999999999999999".into(),
+            },
         )
         .unwrap();
 

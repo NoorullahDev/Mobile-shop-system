@@ -25,9 +25,18 @@ pub fn create(conn: &Connection, input: CreateMemberInput) -> Result<Member, App
     let normalized = CreateMemberInput {
         name,
         phone: input.phone.map(|p| p.trim().to_string()),
-        cnic: input.cnic.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
-        address: input.address.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()),
-        notes: input.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+        cnic: input
+            .cnic
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty()),
+        address: input
+            .address
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty()),
+        notes: input
+            .notes
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty()),
     };
 
     let id = member_repository::insert(conn, &normalized)?;
@@ -42,15 +51,10 @@ pub fn list(conn: &Connection, search: Option<String>) -> Result<Vec<Member>, Ap
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Member, AppError> {
-    member_repository::get_by_id(conn, id)?
-        .ok_or_else(|| AppError::validation("Member not found"))
+    member_repository::get_by_id(conn, id)?.ok_or_else(|| AppError::validation("Member not found"))
 }
 
-pub fn update(
-    conn: &Connection,
-    id: i64,
-    input: CreateMemberInput,
-) -> Result<Member, AppError> {
+pub fn update(conn: &Connection, id: i64, input: CreateMemberInput) -> Result<Member, AppError> {
     let name = input.name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::validation("Member name is required"));
@@ -70,9 +74,18 @@ pub fn update(
     let normalized = CreateMemberInput {
         name,
         phone: input.phone.map(|p| p.trim().to_string()),
-        cnic: input.cnic.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
-        address: input.address.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()),
-        notes: input.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+        cnic: input
+            .cnic
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty()),
+        address: input
+            .address
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty()),
+        notes: input
+            .notes
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty()),
     };
 
     let updated = member_repository::update(conn, id, &normalized)?;
@@ -251,7 +264,13 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
-        assert_eq!(get(&conn, first.id).unwrap().phone.as_deref(), Some("03001111111"));
-        assert_eq!(get(&conn, second.id).unwrap().phone.as_deref(), Some("03002222222"));
+        assert_eq!(
+            get(&conn, first.id).unwrap().phone.as_deref(),
+            Some("03001111111")
+        );
+        assert_eq!(
+            get(&conn, second.id).unwrap().phone.as_deref(),
+            Some("03002222222")
+        );
     }
 }

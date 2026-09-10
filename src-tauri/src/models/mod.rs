@@ -9,6 +9,7 @@ pub mod member;
 pub mod notification;
 pub mod payment;
 pub mod product_category;
+pub mod product_return;
 pub mod purchase;
 pub mod report;
 pub mod sale;

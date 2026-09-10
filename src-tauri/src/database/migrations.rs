@@ -1014,6 +1014,80 @@ const MIGRATIONS: &[(&str, &str)] = &[
         INSERT OR IGNORE INTO categories (name, type) VALUES ('Salary', 'expense');
         "#,
     ),
+    (
+        "0021_returns",
+        r#"
+        -- =====================================================================
+        -- Product Returns (phones + accessories).
+        --
+        -- A return is issued against an existing sale. Each returned line is
+        -- recorded in return_items (snapshot of the product, its IMEI/serial and
+        -- the sale unit price) so the history stays intact even if the product
+        -- or sale is later edited. Item-level deduction + refund let the fixed
+        -- percentage or fixed-deduction rule be applied per line.
+        -- =====================================================================
+
+        CREATE TABLE IF NOT EXISTS returns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            return_no TEXT NOT NULL UNIQUE,
+            sale_id INTEGER NOT NULL,
+            member_id INTEGER,
+            customer_name TEXT,
+            customer_phone TEXT,
+            receipt_no TEXT,
+            total_sale_price REAL NOT NULL DEFAULT 0,
+            deduction_amount REAL NOT NULL DEFAULT 0,
+            refund_amount REAL NOT NULL DEFAULT 0,
+            return_charge_percent REAL NOT NULL DEFAULT 0,
+            refund_method TEXT NOT NULL DEFAULT 'cash',
+            return_date TEXT,
+            reason TEXT,
+            condition TEXT NOT NULL DEFAULT 'sellable',
+            status TEXT NOT NULL DEFAULT 'processed',
+            notes TEXT,
+            created_by INTEGER,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (sale_id) REFERENCES sales(id),
+            FOREIGN KEY (member_id) REFERENCES members(id),
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS return_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            return_id INTEGER NOT NULL,
+            sale_item_id INTEGER NOT NULL,
+            item_type TEXT NOT NULL,
+            phone_id INTEGER,
+            accessory_id INTEGER,
+            imei_id INTEGER,
+            product_name TEXT,
+            imei TEXT,
+            serial_no TEXT,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            unit_price REAL NOT NULL DEFAULT 0,
+            line_total REAL NOT NULL DEFAULT 0,
+            deduction_amount REAL NOT NULL DEFAULT 0,
+            refund_amount REAL NOT NULL DEFAULT 0,
+            reason TEXT,
+            condition TEXT NOT NULL DEFAULT 'sellable',
+            restocked INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (return_id) REFERENCES returns(id) ON DELETE CASCADE,
+            FOREIGN KEY (sale_item_id) REFERENCES sale_items(id),
+            FOREIGN KEY (phone_id) REFERENCES phones(id),
+            FOREIGN KEY (accessory_id) REFERENCES accessories(id),
+            FOREIGN KEY (imei_id) REFERENCES phone_imeis(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_returns_sale ON returns(sale_id);
+        CREATE INDEX IF NOT EXISTS idx_returns_created_at ON returns(created_at);
+        CREATE INDEX IF NOT EXISTS idx_returns_receipt_no ON returns(receipt_no);
+        CREATE INDEX IF NOT EXISTS idx_returns_member ON returns(member_id);
+        CREATE INDEX IF NOT EXISTS idx_return_items_return ON return_items(return_id);
+        CREATE INDEX IF NOT EXISTS idx_return_items_sale_item ON return_items(sale_item_id);
+        CREATE INDEX IF NOT EXISTS idx_return_items_imei ON return_items(imei_id);
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

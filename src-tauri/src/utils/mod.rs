@@ -10,12 +10,7 @@ pub mod logging {
             .init();
     }
 
-    pub fn log_activity(
-        module: &str,
-        action: &str,
-        user_id: Option<i64>,
-        record_id: Option<i64>,
-    ) {
+    pub fn log_activity(module: &str, action: &str, user_id: Option<i64>, record_id: Option<i64>) {
         log::info!(
             target: "activity",
             "[activity] module={} action={} user={} record={}",

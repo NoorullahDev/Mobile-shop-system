@@ -12,9 +12,18 @@ pub fn create(conn: &Connection, input: CreateSupplierInput) -> Result<Supplier,
     }
     let normalized = CreateSupplierInput {
         name,
-        phone: input.phone.map(|p| p.trim().to_string()).filter(|v| !v.is_empty()),
-        email: input.email.map(|e| e.trim().to_string()).filter(|v| !v.is_empty()),
-        address: input.address.map(|a| a.trim().to_string()).filter(|v| !v.is_empty()),
+        phone: input
+            .phone
+            .map(|p| p.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        email: input
+            .email
+            .map(|e| e.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        address: input
+            .address
+            .map(|a| a.trim().to_string())
+            .filter(|v| !v.is_empty()),
     };
     let id = supplier_repository::insert(conn, &normalized)?;
     services::record_activity(conn, None, "supplier", "create", Some(id))?;
@@ -37,9 +46,18 @@ pub fn update(
     }
     let normalized = CreateSupplierInput {
         name,
-        phone: input.phone.map(|p| p.trim().to_string()).filter(|v| !v.is_empty()),
-        email: input.email.map(|e| e.trim().to_string()).filter(|v| !v.is_empty()),
-        address: input.address.map(|a| a.trim().to_string()).filter(|v| !v.is_empty()),
+        phone: input
+            .phone
+            .map(|p| p.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        email: input
+            .email
+            .map(|e| e.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        address: input
+            .address
+            .map(|a| a.trim().to_string())
+            .filter(|v| !v.is_empty()),
     };
     let updated = supplier_repository::update(conn, id, &normalized)?;
     if !updated {

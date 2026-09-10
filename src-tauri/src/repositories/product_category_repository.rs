@@ -53,9 +53,8 @@ pub fn get_by_name(conn: &Connection, name: &str) -> Result<Option<ProductCatego
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<ProductCategory>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, created_at FROM product_categories ORDER BY name",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, created_at FROM product_categories ORDER BY name")?;
     let rows = stmt.query_map([], from_row)?;
     let mut out = Vec::new();
     for r in rows {
@@ -64,7 +63,11 @@ pub fn list(conn: &Connection) -> Result<Vec<ProductCategory>, AppError> {
     Ok(out)
 }
 
-pub fn update(conn: &Connection, id: i64, input: &CreateProductCategoryInput) -> Result<bool, AppError> {
+pub fn update(
+    conn: &Connection,
+    id: i64,
+    input: &CreateProductCategoryInput,
+) -> Result<bool, AppError> {
     match conn.execute(
         "UPDATE product_categories SET name = ?1 WHERE id = ?2",
         params![input.name.trim(), id],

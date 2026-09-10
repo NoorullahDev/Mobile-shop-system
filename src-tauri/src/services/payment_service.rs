@@ -18,7 +18,10 @@ fn validate_status(s: Option<&str>) -> String {
     match s {
         Some(v) => {
             let v = v.trim().to_lowercase();
-            if matches!(v.as_str(), "completed" | "pending" | "cancelled" | "refunded") {
+            if matches!(
+                v.as_str(),
+                "completed" | "pending" | "cancelled" | "refunded"
+            ) {
                 v
             } else {
                 "completed".into()
@@ -54,10 +57,19 @@ pub fn create(
         member_id: input.member_id,
         amount,
         payment_method: normalize_method(&input.payment_method),
-        payment_type: input.payment_type.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
+        payment_type: input
+            .payment_type
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty()),
         status: Some(validate_status(input.status.as_deref())),
-        reference: input.reference.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()),
-        notes: input.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+        reference: input
+            .reference
+            .map(|r| r.trim().to_string())
+            .filter(|r| !r.is_empty()),
+        notes: input
+            .notes
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty()),
         payment_date: input.payment_date,
     };
 
@@ -101,11 +113,17 @@ pub fn member_balance(conn: &Connection, member_id: i64) -> Result<MemberBalance
     payment_repository::member_balance(conn, member_id)
 }
 
-pub fn list_balances(conn: &Connection, search: Option<String>) -> Result<Vec<MemberBalance>, AppError> {
+pub fn list_balances(
+    conn: &Connection,
+    search: Option<String>,
+) -> Result<Vec<MemberBalance>, AppError> {
     payment_repository::list_balances(conn, search.as_deref())
 }
 
-pub fn list_customer_dues(conn: &Connection, search: Option<String>) -> Result<Vec<MemberBalance>, AppError> {
+pub fn list_customer_dues(
+    conn: &Connection,
+    search: Option<String>,
+) -> Result<Vec<MemberBalance>, AppError> {
     payment_repository::list_customer_dues(conn, search.as_deref())
 }
 
@@ -237,6 +255,8 @@ mod tests {
         assert!((dues[0].balance - 200.0).abs() < 0.001);
 
         let all = list_balances(&conn, None).unwrap();
-        assert!(all.iter().any(|b| b.member_id == mid && (b.balance - 200.0).abs() < 0.001));
+        assert!(all
+            .iter()
+            .any(|b| b.member_id == mid && (b.balance - 200.0).abs() < 0.001));
     }
 }

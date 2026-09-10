@@ -102,11 +102,7 @@ pub fn soft_delete(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(affected > 0)
 }
 
-pub fn update(
-    conn: &Connection,
-    id: i64,
-    input: &CreateMemberInput,
-) -> Result<bool, AppError> {
+pub fn update(conn: &Connection, id: i64, input: &CreateMemberInput) -> Result<bool, AppError> {
     let affected = conn.execute(
         "UPDATE members SET name = ?1, phone = ?2, cnic = ?3, address = ?4, notes = ?5, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?6 AND is_deleted = 0",

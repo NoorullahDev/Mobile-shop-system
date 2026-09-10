@@ -32,7 +32,10 @@ pub fn create(
     let normalized = CreateNotificationInput {
         user_id: input.user_id,
         title: title.to_string(),
-        message: input.message.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+        message: input
+            .message
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty()),
         kind: normalize_enum(&input.kind, KINDS, "general"),
         priority: normalize_enum(&input.priority, PRIORITIES, "normal"),
     };

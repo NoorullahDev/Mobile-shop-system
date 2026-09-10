@@ -10,6 +10,7 @@ type BadgeColor = "green" | "red" | "amber" | "blue" | "purple" | "orange" | "gr
 interface StatusBadgeProps {
   status: string;
   className?: string;
+  label?: string;
 }
 
 function resolveColor(status: string): BadgeColor {
@@ -19,6 +20,10 @@ function resolveColor(status: string): BadgeColor {
     case "active":
     case "success":
     case "verified":
+    case "sellable":
+    case "processed":
+    case "good":
+    case "full":
       return "green";
     case "credit":
     case "professional":
@@ -30,6 +35,9 @@ function resolveColor(status: string): BadgeColor {
     case "basic":
     case "warning":
     case "enterprise":
+    case "mixed":
+    case "used":
+    case "pending":
       return "amber";
     case "pta approved":
     case "approved":
@@ -40,6 +48,9 @@ function resolveColor(status: string): BadgeColor {
     case "out of stock":
     case "overdue":
     case "failed":
+    case "damaged":
+    case "defective":
+    case "nonsellable":
       return "red";
     case "grey":
     case "returned":
@@ -63,7 +74,7 @@ const colorMap: Record<BadgeColor, { bg: string; color: string }> = {
   gray:   { bg: "#E2E8F0", color: "#475569" },
 };
 
-export function StatusBadge({ status, className }: StatusBadgeProps) {
+export function StatusBadge({ status, className, label }: StatusBadgeProps) {
   const color = resolveColor(status);
   const { bg, color: textColor } = colorMap[color];
 
@@ -81,7 +92,7 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
         textTransform: "uppercase",
       }}
     >
-      {status}
+      {label ?? status}
     </span>
   );
 }

@@ -863,6 +863,27 @@ pub fn backup_dir(conn: &Connection) -> Result<PathBuf, AppError> {
     get_config(conn).map(|c| PathBuf::from(&c.backup_folder))
 }
 
+/// Records an archive (already written and verified by its caller) into the
+/// backups history table so it appears in the Backup Manager list. Used by the
+/// on-close backup, which writes the zip separately.
+pub fn record_exit_backup(
+    conn: &Connection,
+    file_name: &str,
+    file_path: &Path,
+    size: i64,
+) -> Result<(), AppError> {
+    backup_repository::insert(
+        conn,
+        file_name,
+        BackupType::Database,
+        &file_path.to_string_lossy(),
+        size,
+        BackupStatus::Success,
+        None,
+    )?;
+    Ok(())
+}
+
 /// Aggregate status info for the Backup UI.
 pub fn status_info(conn: &Connection) -> Result<BackupStatusInfo, AppError> {
     let config = get_config(conn)?;

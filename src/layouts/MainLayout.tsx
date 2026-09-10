@@ -39,7 +39,8 @@ export function MainLayout() {
   }, [location.pathname]);
 
   const showLicenseWarning = unlicensed && !licenseDismissed;
-  const showDefaultPasswordHint = !!user?.default_password && !pwDismissed;
+  const showDefaultPasswordHint =
+    import.meta.env.DEV && !!user?.default_password && !pwDismissed;
 
   const handleDismissLicense = () => {
     setLicenseDismissed(true);

@@ -60,7 +60,13 @@ fn validate_category(conn: &Connection, category: &str) -> Result<(), AppError> 
 pub fn create(conn: &Connection, input: CreateAccessoryInput) -> Result<Accessory, AppError> {
     let normalized = normalize(input)?;
     validate_category(conn, &normalized.accessory_type)?;
-    if let Some(serial)=&normalized.serial_number { if accessory_repository::serial_taken(conn, serial, None)? { return Err(AppError::validation(format!("Serial Number {serial} is already in use"))); } }
+    if let Some(serial) = &normalized.serial_number {
+        if accessory_repository::serial_taken(conn, serial, None)? {
+            return Err(AppError::validation(format!(
+                "Serial Number {serial} is already in use"
+            )));
+        }
+    }
     let id = accessory_repository::insert(conn, &normalized)?;
     services::record_activity(conn, None, "accessory", "create", Some(id))?;
     accessory_repository::get_by_id(conn, id)?
@@ -83,7 +89,13 @@ pub fn update(
 ) -> Result<Accessory, AppError> {
     let normalized = normalize(input)?;
     validate_category(conn, &normalized.accessory_type)?;
-    if let Some(serial)=&normalized.serial_number { if accessory_repository::serial_taken(conn, serial, Some(id))? { return Err(AppError::validation(format!("Serial Number {serial} is already in use"))); } }
+    if let Some(serial) = &normalized.serial_number {
+        if accessory_repository::serial_taken(conn, serial, Some(id))? {
+            return Err(AppError::validation(format!(
+                "Serial Number {serial} is already in use"
+            )));
+        }
+    }
     let updated = accessory_repository::update(conn, id, &normalized)?;
     if !updated {
         return Err(AppError::validation("Accessory not found"));
@@ -159,13 +171,22 @@ mod tests {
         seed_product_categories(&conn);
         let mut i = sample();
         i.brand = "  ".into();
-        assert!(matches!(create(&conn, i).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, i).unwrap_err(),
+            AppError::Validation(_)
+        ));
         let mut i = sample();
         i.product_name = "".into();
-        assert!(matches!(create(&conn, i).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, i).unwrap_err(),
+            AppError::Validation(_)
+        ));
         let mut i = sample();
         i.accessory_type = "  ".into();
-        assert!(matches!(create(&conn, i).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, i).unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[test]
@@ -194,10 +215,19 @@ mod tests {
 
     #[test]
     fn optional_serial_is_unique_and_searchable() {
-        let conn=in_memory_conn(); seed_product_categories(&conn); let mut first=sample(); first.serial_number=Some(" ear-001 ".into()); create(&conn,first).unwrap();
-        assert_eq!(list(&conn,Some("EAR-001".into())).unwrap().len(),1);
-        let mut duplicate=sample(); duplicate.product_name="Other".into(); duplicate.serial_number=Some("ear-001".into());
-        assert!(matches!(create(&conn,duplicate).unwrap_err(),AppError::Validation(_)));
+        let conn = in_memory_conn();
+        seed_product_categories(&conn);
+        let mut first = sample();
+        first.serial_number = Some(" ear-001 ".into());
+        create(&conn, first).unwrap();
+        assert_eq!(list(&conn, Some("EAR-001".into())).unwrap().len(), 1);
+        let mut duplicate = sample();
+        duplicate.product_name = "Other".into();
+        duplicate.serial_number = Some("ear-001".into());
+        assert!(matches!(
+            create(&conn, duplicate).unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[test]

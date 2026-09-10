@@ -15,11 +15,8 @@ fn month_key(d: &chrono::NaiveDate) -> String {
 /// Month keys are UTC to match `monthly_revenue`/`monthly_expenses` grouping.
 fn series(months: i64, rows: Vec<(String, f64)>) -> Vec<MonthlyPoint> {
     let now = chrono::Utc::now().date_naive();
-    let first = chrono::NaiveDate::parse_from_str(
-        &now.format("%Y-%m-01").to_string(),
-        "%Y-%m-%d",
-    )
-    .unwrap_or(now);
+    let first = chrono::NaiveDate::parse_from_str(&now.format("%Y-%m-01").to_string(), "%Y-%m-%d")
+        .unwrap_or(now);
     let mut labels: Vec<String> = Vec::new();
     let mut d = first;
     for _ in 0..months {
@@ -110,7 +107,12 @@ pub fn sales_series(conn: &Connection, from: &str, to: &str) -> Result<Vec<SaleP
         .collect())
 }
 
-pub fn top_sellers(conn: &Connection, from: &str, to: &str, limit: i64) -> Result<Vec<TopSeller>, AppError> {
+pub fn top_sellers(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+    limit: i64,
+) -> Result<Vec<TopSeller>, AppError> {
     report_repository::top_sellers(conn, from, to, limit)
 }
 
@@ -162,14 +164,22 @@ mod tests {
     use crate::services::test_utils::in_memory_conn;
 
     fn local_today() -> String {
-        chrono::Local::now().date_naive().format("%Y-%m-%d").to_string()
+        chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string()
     }
 
     fn seed_sale(conn: &Connection, total: f64, member_id: Option<i64>) -> i64 {
         seed_sale_on(conn, total, member_id, None)
     }
 
-    fn seed_sale_on(conn: &Connection, total: f64, member_id: Option<i64>, on: Option<&str>) -> i64 {
+    fn seed_sale_on(
+        conn: &Connection,
+        total: f64,
+        member_id: Option<i64>,
+        on: Option<&str>,
+    ) -> i64 {
         conn.execute(
             "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method, created_at)
              VALUES (?1, ?2, ?3, ?3, 'cash', COALESCE(?4, CURRENT_TIMESTAMP))",
@@ -302,7 +312,10 @@ mod tests {
         )
         .unwrap();
 
-        let from = chrono::Local::now().date_naive().format("%Y-%m-01").to_string();
+        let from = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-01")
+            .to_string();
         let to = today;
 
         let p = period_summary(&conn, &from, &to).unwrap();
@@ -324,7 +337,10 @@ mod tests {
 
         let breakdown = payment_breakdown(&conn, &from, &to).unwrap();
         assert_eq!(breakdown.len(), 2);
-        let cash = breakdown.iter().find(|b| b.payment_method == "cash").unwrap();
+        let cash = breakdown
+            .iter()
+            .find(|b| b.payment_method == "cash")
+            .unwrap();
         assert_eq!(cash.total, 650.0);
     }
 
@@ -360,7 +376,10 @@ mod tests {
         )
         .unwrap();
 
-        let from = chrono::Local::now().date_naive().format("%Y-%m-01").to_string();
+        let from = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-01")
+            .to_string();
         let to = today;
 
         let pl = profit_loss(&conn, &from, &to).unwrap();

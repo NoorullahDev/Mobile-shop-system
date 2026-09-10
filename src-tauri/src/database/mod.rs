@@ -15,14 +15,12 @@ pub struct Database {
 
 impl Database {
     pub fn open(app_data_dir: &Path) -> Result<Self, rusqlite::Error> {
-        fs::create_dir_all(app_data_dir).map_err(|e| {
-            rusqlite::Error::InvalidParameterName(e.to_string())
-        })?;
+        fs::create_dir_all(app_data_dir)
+            .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
 
         let backups_dir = app_data_dir.join("backups");
-        fs::create_dir_all(&backups_dir).map_err(|e| {
-            rusqlite::Error::InvalidParameterName(e.to_string())
-        })?;
+        fs::create_dir_all(&backups_dir)
+            .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
 
         let db_path = app_data_dir.join("business_management.db");
         let conn = Connection::open(&db_path)?;
@@ -98,6 +96,8 @@ mod tests {
             "sale_items",
             "purchases",
             "purchase_items",
+            "returns",
+            "return_items",
             "backups",
         ] {
             let exists: i64 = conn
@@ -113,7 +113,11 @@ mod tests {
         // seed is idempotent
         seed::seed(&conn).expect("seed runs again");
         let admin_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM users WHERE username='admin'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE username='admin'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(admin_count, 1);
     }
@@ -141,11 +145,8 @@ mod tests {
             .unwrap();
         assert_eq!(visible_before, 1);
 
-        conn.execute(
-            "UPDATE members SET is_deleted = 1 WHERE id = ?1",
-            [id],
-        )
-        .unwrap();
+        conn.execute("UPDATE members SET is_deleted = 1 WHERE id = ?1", [id])
+            .unwrap();
 
         let visible_after: i64 = conn
             .query_row(

@@ -16,17 +16,22 @@ use tauri::Manager;
 use tauri::WindowEvent;
 use utils::logging;
 
-/// Creates a zip backup of the database file to Desktop/Software Backup/.
-/// Returns Ok(()) on success, Err(message) on failure.
+/// Creates a zip backup of the database file into the configured backup folder
+/// (falls back to Desktop/Software Backup when none is selected) and records it
+/// in the backup history. Returns Ok(()) on success, Err(message) on failure.
 fn create_exit_backup(db: &Database) -> Result<(), String> {
     use std::fs;
     use std::io::Write;
 
-    // 1. Determine Desktop path from USERPROFILE env var (works in dev + production)
-    let user_profile = std::env::var("USERPROFILE")
-        .map_err(|_| "Could not determine USERPROFILE".to_string())?;
-    let desktop = std::path::PathBuf::from(&user_profile).join("Desktop");
-    let backup_dir = desktop.join("Software Backup");
+    let conn = db
+        .conn
+        .lock()
+        .map_err(|_| "Database lock unavailable".to_string())?;
+
+    // 1. Resolve the selected backup folder (read from settings every time, so a
+    //    folder chosen in Backup Manager is always honoured on close).
+    let backup_dir = services::backup_service::backup_dir(&conn)
+        .map_err(|e| format!("Could not resolve backup folder: {e}"))?;
     fs::create_dir_all(&backup_dir)
         .map_err(|e| format!("Could not create backup directory: {e}"))?;
 
@@ -37,11 +42,8 @@ fn create_exit_backup(db: &Database) -> Result<(), String> {
 
     // 3. Take a consistent snapshot of the live database to a temp file
     let temp_db = backup_dir.join(format!(".tmp_backup_{stamp}.db"));
-    {
-        let conn = db.conn.lock().expect("db lock for exit backup");
-        services::backup_service::write_backup(&conn, &temp_db)
-            .map_err(|e| format!("DB snapshot failed: {e}"))?;
-    }
+    services::backup_service::write_backup(&conn, &temp_db)
+        .map_err(|e| format!("DB snapshot failed: {e}"))?;
 
     // 4. Compress the snapshot into a zip file
     let zip_file = fs::File::create(&zip_path)
@@ -66,6 +68,12 @@ fn create_exit_backup(db: &Database) -> Result<(), String> {
 
     // 5. Clean up the temp snapshot
     let _ = fs::remove_file(&temp_db);
+
+    // 6. Record in the backup history so it appears in Backup Manager.
+    let size = fs::metadata(&zip_path).map(|m| m.len() as i64).unwrap_or(0);
+    if let Err(e) = services::backup_service::record_exit_backup(&conn, &zip_name, &zip_path, size) {
+        log::warn!("Exit backup could not be recorded in history: {e}");
+    }
 
     log::info!("Exit backup created: {}", zip_path.display());
     Ok(())
@@ -174,6 +182,9 @@ pub fn run() {
             commands::create_sale,
             commands::list_sales,
             commands::get_sale,
+            commands::create_return,
+            commands::list_returns,
+            commands::get_return,
             commands::create_category,
             commands::list_categories,
             commands::update_category,

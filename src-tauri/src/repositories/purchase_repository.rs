@@ -84,7 +84,11 @@ pub fn update_last_purchase_cost(
     item_id: i64,
     unit_cost: f64,
 ) -> Result<(), AppError> {
-    let table = if item_type == "phone" { "phones" } else { "accessories" };
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
     conn.execute(
         &format!(
             "UPDATE {table} SET last_purchase_cost = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND is_deleted = 0"
@@ -95,15 +99,21 @@ pub fn update_last_purchase_cost(
 }
 
 pub fn next_purchase_no(conn: &Connection) -> Result<String, AppError> {
-    let max: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM purchases", [], |r| r.get(0))?;
+    let max: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM purchases", [], |r| {
+        r.get(0)
+    })?;
     Ok(format!("PO-{:06}", max + 1))
 }
 
 pub fn item_quantity(conn: &Connection, item_type: &str, id: i64) -> Result<Option<i64>, AppError> {
-    let table = if item_type == "phone" { "phones" } else { "accessories" };
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
     let q: Option<i64> = conn
         .query_row(
-            &format!("SELECT quantity FROM {table} WHERE id = ?1 AND is_deleted = 0", ),
+            &format!("SELECT quantity FROM {table} WHERE id = ?1 AND is_deleted = 0",),
             [id],
             |r| r.get(0),
         )
@@ -112,10 +122,14 @@ pub fn item_quantity(conn: &Connection, item_type: &str, id: i64) -> Result<Opti
 }
 
 pub fn item_cost(conn: &Connection, item_type: &str, id: i64) -> Result<Option<f64>, AppError> {
-    let table = if item_type == "phone" { "phones" } else { "accessories" };
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
     let c: Option<f64> = conn
         .query_row(
-            &format!("SELECT cost_price FROM {table} WHERE id = ?1 AND is_deleted = 0", ),
+            &format!("SELECT cost_price FROM {table} WHERE id = ?1 AND is_deleted = 0",),
             [id],
             |r| r.get(0),
         )
@@ -123,8 +137,17 @@ pub fn item_cost(conn: &Connection, item_type: &str, id: i64) -> Result<Option<f
     Ok(c)
 }
 
-pub fn increment_stock(conn: &Connection, item_type: &str, item_id: i64, qty: i64) -> Result<(), AppError> {
-    let table = if item_type == "phone" { "phones" } else { "accessories" };
+pub fn increment_stock(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    qty: i64,
+) -> Result<(), AppError> {
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
     conn.execute(
         &format!(
             "UPDATE {table} SET quantity = quantity + ?1, updated_at = CURRENT_TIMESTAMP
@@ -137,7 +160,10 @@ pub fn increment_stock(conn: &Connection, item_type: &str, item_id: i64, qty: i6
 
 /// Returns the subset of the given IMEIs that are already registered (used by
 /// any phone), so callers can validate all IMEIs in a single query.
-pub fn imeis_in_use(conn: &Connection, imeis: &[String]) -> Result<std::collections::HashSet<String>, AppError> {
+pub fn imeis_in_use(
+    conn: &Connection,
+    imeis: &[String],
+) -> Result<std::collections::HashSet<String>, AppError> {
     let mut out = std::collections::HashSet::new();
     if imeis.is_empty() {
         return Ok(out);
@@ -252,7 +278,8 @@ pub fn get_purchase_with_items(conn: &Connection, id: i64) -> Result<Option<Purc
     let sql = format!(
         "SELECT {PURCHASE_COLS} {PURCHASE_JOIN} WHERE p.id = ?1 ORDER BY p.created_at DESC LIMIT 1"
     );
-    let mut purchase: Option<Purchase> = conn.query_row(&sql, [id], purchase_from_row).optional()?;
+    let mut purchase: Option<Purchase> =
+        conn.query_row(&sql, [id], purchase_from_row).optional()?;
     if let Some(p) = purchase.as_mut() {
         p.items = list_items(conn, id)?;
     }
@@ -285,7 +312,8 @@ fn list_items_for_purchases<T: IntoIterator<Item = i64>>(
     purchase_ids: T,
 ) -> Result<std::collections::HashMap<i64, Vec<PurchaseItem>>, AppError> {
     let ids: Vec<i64> = purchase_ids.into_iter().collect();
-    let mut map: std::collections::HashMap<i64, Vec<PurchaseItem>> = std::collections::HashMap::new();
+    let mut map: std::collections::HashMap<i64, Vec<PurchaseItem>> =
+        std::collections::HashMap::new();
     if ids.is_empty() {
         return Ok(map);
     }
@@ -477,7 +505,10 @@ pub fn insert_supplier_payment(
     Ok(conn.last_insert_rowid())
 }
 
-pub fn get_supplier_payment(conn: &Connection, id: i64) -> Result<Option<SupplierPayment>, AppError> {
+pub fn get_supplier_payment(
+    conn: &Connection,
+    id: i64,
+) -> Result<Option<SupplierPayment>, AppError> {
     let sql = format!("SELECT {SP_COLS} {SP_JOIN} AND sp.id = ?1 LIMIT 1");
     let row = conn.query_row(&sql, [id], sp_from_row).optional()?;
     Ok(row)

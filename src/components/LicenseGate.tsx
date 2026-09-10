@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import * as licenseService from "../services/licenseService";
 import { Button } from "../components/Button";
+import { useSettingsStore } from "../store/settings";
 import type { LicenseStatus } from "../types/license";
 
 function CopyButton({ text }: { text: string }) {
@@ -63,6 +64,7 @@ export function LicenseGate({
 }) {
   const isExpired = status.expired;
   const hwId = status.hardware_id;
+  const logo = useSettingsStore((s) => s.logo);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,8 +106,8 @@ export function LicenseGate({
             </div>
           ) : (
             <img
-              src="/logo.png"
-              alt="Mobile Shop System logo"
+              src={logo || "/logo.png"}
+              alt="Shop logo"
               className="mb-3 h-16 w-16 object-contain"
             />
           )}

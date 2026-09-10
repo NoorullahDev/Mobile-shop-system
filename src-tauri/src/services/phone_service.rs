@@ -85,9 +85,15 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
     })
 }
 
-fn reject_if_imei_taken(conn: &Connection, imei: &str, exclude_id: Option<i64>) -> Result<(), AppError> {
+fn reject_if_imei_taken(
+    conn: &Connection,
+    imei: &str,
+    exclude_id: Option<i64>,
+) -> Result<(), AppError> {
     if phone_repository::imei_taken(conn, imei, exclude_id)? {
-        return Err(AppError::validation(format!("IMEI {imei} is already in use")));
+        return Err(AppError::validation(format!(
+            "IMEI {imei} is already in use"
+        )));
     }
     Ok(())
 }
@@ -103,7 +109,13 @@ pub fn create(conn: &Connection, input: CreatePhoneInput) -> Result<Phone, AppEr
     if let Some(imei2) = &normalized.imei2 {
         reject_if_imei_taken(conn, imei2, None)?;
     }
-    if let Some(serial) = &normalized.serial_number { if phone_repository::serial_taken(conn, serial, None)? { return Err(AppError::validation(format!("Serial Number {serial} is already in use"))); } }
+    if let Some(serial) = &normalized.serial_number {
+        if phone_repository::serial_taken(conn, serial, None)? {
+            return Err(AppError::validation(format!(
+                "Serial Number {serial} is already in use"
+            )));
+        }
+    }
     let id = phone_repository::insert(conn, &normalized)?;
     services::record_activity(conn, None, "phone", "create", Some(id))?;
     phone_repository::get_by_id(conn, id)?
@@ -115,8 +127,7 @@ pub fn list(conn: &Connection, search: Option<String>) -> Result<Vec<Phone>, App
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Phone, AppError> {
-    phone_repository::get_by_id(conn, id)?
-        .ok_or_else(|| AppError::validation("Phone not found"))
+    phone_repository::get_by_id(conn, id)?.ok_or_else(|| AppError::validation("Phone not found"))
 }
 
 pub fn update(conn: &Connection, id: i64, input: CreatePhoneInput) -> Result<Phone, AppError> {
@@ -130,7 +141,13 @@ pub fn update(conn: &Connection, id: i64, input: CreatePhoneInput) -> Result<Pho
     if let Some(imei2) = &normalized.imei2 {
         reject_if_imei_taken(conn, imei2, Some(id))?;
     }
-    if let Some(serial) = &normalized.serial_number { if phone_repository::serial_taken(conn, serial, Some(id))? { return Err(AppError::validation(format!("Serial Number {serial} is already in use"))); } }
+    if let Some(serial) = &normalized.serial_number {
+        if phone_repository::serial_taken(conn, serial, Some(id))? {
+            return Err(AppError::validation(format!(
+                "Serial Number {serial} is already in use"
+            )));
+        }
+    }
     let updated = phone_repository::update(conn, id, &normalized)?;
     if !updated {
         return Err(AppError::validation("Phone not found"));
@@ -162,14 +179,17 @@ pub fn restock(
     let tx = conn.unchecked_transaction()?;
     phone_repository::add_quantity(&tx, id, quantity)?;
 
-    for imei in imeis.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+    for imei in imeis
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
         if phone_repository::imei_exists(&tx, &imei)? {
-            return Err(AppError::validation(format!("IMEI {imei} is already in use")));
+            return Err(AppError::validation(format!(
+                "IMEI {imei} is already in use"
+            )));
         }
-        phone_repository::insert_imei(
-            &tx,
-            &AddPhoneImeiInput { phone_id: id, imei },
-        )?;
+        phone_repository::insert_imei(&tx, &AddPhoneImeiInput { phone_id: id, imei })?;
     }
     tx.commit()?;
     services::record_activity(conn, actor, "phone", "restock", Some(id))
@@ -184,13 +204,18 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
         return Err(AppError::validation("Phone not found"));
     }
     if phone_repository::imei_exists(conn, &imei)? {
-        return Err(AppError::validation(format!("IMEI {imei} is already in use")));
+        return Err(AppError::validation(format!(
+            "IMEI {imei} is already in use"
+        )));
     }
 
     let tx = conn.unchecked_transaction()?;
     let imei_id = phone_repository::insert_imei(
         &tx,
-        &AddPhoneImeiInput { phone_id: input.phone_id, imei: imei.clone() },
+        &AddPhoneImeiInput {
+            phone_id: input.phone_id,
+            imei: imei.clone(),
+        },
     )?;
     phone_repository::add_quantity(&tx, input.phone_id, 1)?;
     tx.commit()?;
@@ -246,7 +271,10 @@ mod tests {
         let conn = in_memory_conn();
         let mut input = sample();
         input.brand = "   ".into();
-        assert!(matches!(create(&conn, input).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, input).unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[test]
@@ -269,7 +297,10 @@ mod tests {
         let mut b = sample();
         b.model = "S25".into();
         b.imei = Some("111222333444555".into());
-        assert!(matches!(create(&conn, b).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, b).unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[test]
@@ -281,7 +312,10 @@ mod tests {
         let mut b = sample();
         b.model = "S25".into();
         b.imei2 = Some("111222333444555".into());
-        assert!(matches!(create(&conn, b).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, b).unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[test]
@@ -290,7 +324,10 @@ mod tests {
         let mut a = sample();
         a.imei = Some("111222333444555".into());
         a.imei2 = Some("111222333444555".into());
-        assert!(matches!(create(&conn, a).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, a).unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[test]
@@ -314,14 +351,18 @@ mod tests {
         assert_eq!(got.condition_rating.as_deref(), Some("8/10"));
         assert_eq!(got.body_condition.as_deref(), Some("Minor Scratches"));
         assert_eq!(got.battery_health.as_deref(), Some("86%"));
-        assert_eq!(got.condition_notes.as_deref(), Some("Charger cable slightly worn."));
+        assert_eq!(
+            got.condition_notes.as_deref(),
+            Some("Charger cable slightly worn.")
+        );
 
         let updated = update(&conn, p.id, {
             let mut u = sample();
             u.condition = Some("Refurbished".into());
             u.battery_health = Some("90%".into());
             u
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(updated.battery_health.as_deref(), Some("90%"));
         assert_eq!(updated.condition.as_deref(), Some("Refurbished"));
         assert_eq!(updated.condition_rating, None);
@@ -340,10 +381,18 @@ mod tests {
 
     #[test]
     fn serial_number_is_unique_and_searchable() {
-        let conn=in_memory_conn(); let mut first=sample(); first.serial_number=Some(" sn-phone-001 ".into()); create(&conn,first).unwrap();
-        assert_eq!(list(&conn,Some("SN-PHONE-001".into())).unwrap().len(),1);
-        let mut duplicate=sample(); duplicate.model="Other".into(); duplicate.serial_number=Some("sn-phone-001".into());
-        assert!(matches!(create(&conn,duplicate).unwrap_err(),AppError::Validation(_)));
+        let conn = in_memory_conn();
+        let mut first = sample();
+        first.serial_number = Some(" sn-phone-001 ".into());
+        create(&conn, first).unwrap();
+        assert_eq!(list(&conn, Some("SN-PHONE-001".into())).unwrap().len(), 1);
+        let mut duplicate = sample();
+        duplicate.model = "Other".into();
+        duplicate.serial_number = Some("sn-phone-001".into());
+        assert!(matches!(
+            create(&conn, duplicate).unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[test]
@@ -359,7 +408,14 @@ mod tests {
     fn restock_adds_quantity_and_imei() {
         let conn = in_memory_conn();
         let p = create(&conn, sample()).unwrap();
-        restock(&conn, p.id, 3, vec!["111111111111111".into(), "222222222222222".into()], None).unwrap();
+        restock(
+            &conn,
+            p.id,
+            3,
+            vec!["111111111111111".into(), "222222222222222".into()],
+            None,
+        )
+        .unwrap();
         assert_eq!(get(&conn, p.id).unwrap().quantity, 8);
         assert_eq!(list_imei(&conn, p.id).unwrap().len(), 2);
     }
@@ -368,7 +424,14 @@ mod tests {
     fn restock_rejects_duplicate_imei_atomically() {
         let conn = in_memory_conn();
         let p = create(&conn, sample()).unwrap();
-        restock(&conn, p.id, 2, vec!["111111111111111".into(), "111111111111111".into()], None).unwrap_err();
+        restock(
+            &conn,
+            p.id,
+            2,
+            vec!["111111111111111".into(), "111111111111111".into()],
+            None,
+        )
+        .unwrap_err();
         assert_eq!(get(&conn, p.id).unwrap().quantity, 5);
         assert!(list_imei(&conn, p.id).unwrap().is_empty());
     }
@@ -377,7 +440,14 @@ mod tests {
     fn add_imei_increments_quantity() {
         let conn = in_memory_conn();
         let p = create(&conn, sample()).unwrap();
-        let imei = add_imei(&conn, AddPhoneImeiInput { phone_id: p.id, imei: "999999999999999".into() }).unwrap();
+        let imei = add_imei(
+            &conn,
+            AddPhoneImeiInput {
+                phone_id: p.id,
+                imei: "999999999999999".into(),
+            },
+        )
+        .unwrap();
         assert_eq!(imei.status, "in_stock");
         assert_eq!(get(&conn, p.id).unwrap().quantity, 6);
     }
@@ -387,7 +457,10 @@ mod tests {
         let conn = in_memory_conn();
         let mut input = sample();
         input.imei = Some("12345".into());
-        assert!(matches!(create(&conn, input).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, input).unwrap_err(),
+            AppError::Validation(_)
+        ));
     }
 
     #[test]
@@ -398,11 +471,17 @@ mod tests {
 
         let mut bad = sample();
         bad.category = Some("Not Real".into());
-        assert!(matches!(create(&conn, bad).unwrap_err(), AppError::Validation(_)));
+        assert!(matches!(
+            create(&conn, bad).unwrap_err(),
+            AppError::Validation(_)
+        ));
 
         let mut good = sample();
         good.category = Some("Charger".into());
         let p = create(&conn, good).unwrap();
-        assert_eq!(get(&conn, p.id).unwrap().category.as_deref(), Some("Charger"));
+        assert_eq!(
+            get(&conn, p.id).unwrap().category.as_deref(),
+            Some("Charger")
+        );
     }
 }

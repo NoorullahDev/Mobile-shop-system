@@ -48,11 +48,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Supplier>, AppError> {
     Ok(out)
 }
 
-pub fn update(
-    conn: &Connection,
-    id: i64,
-    input: &CreateSupplierInput,
-) -> Result<bool, AppError> {
+pub fn update(conn: &Connection, id: i64, input: &CreateSupplierInput) -> Result<bool, AppError> {
     let affected = conn.execute(
         "UPDATE suppliers SET name = ?1, phone = ?2, email = ?3, address = ?4 WHERE id = ?5 AND is_deleted = 0",
         params![input.name, input.phone, input.email, input.address, id],

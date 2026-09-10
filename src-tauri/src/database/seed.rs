@@ -6,11 +6,7 @@ pub fn seed(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     let mut missing_roles: Vec<String> = vec![];
     for role in ["Admin", "Staff", "Accountant"] {
         let exists: Option<bool> = conn
-            .query_row(
-                "SELECT 1 FROM roles WHERE name = ?1",
-                [role],
-                |_| Ok(true),
-            )
+            .query_row("SELECT 1 FROM roles WHERE name = ?1", [role], |_| Ok(true))
             .optional()?;
         if exists.is_none() {
             missing_roles.push(role.to_string());
@@ -18,7 +14,10 @@ pub fn seed(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     for role in missing_roles {
-        conn.execute("INSERT INTO roles (name, description) VALUES (?1, ?2)", (&role, None::<String>))?;
+        conn.execute(
+            "INSERT INTO roles (name, description) VALUES (?1, ?2)",
+            (&role, None::<String>),
+        )?;
         log::info!("Seeded role: {}", role);
     }
 
@@ -63,7 +62,9 @@ pub fn seed(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let admin_exists: Option<bool> = conn
-        .query_row("SELECT 1 FROM users WHERE username = 'admin'", [], |_| Ok(true))
+        .query_row("SELECT 1 FROM users WHERE username = 'admin'", [], |_| {
+            Ok(true)
+        })
         .optional()?;
 
     if admin_exists.is_none() {

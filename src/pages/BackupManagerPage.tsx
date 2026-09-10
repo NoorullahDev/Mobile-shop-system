@@ -124,6 +124,39 @@ export function BackupManagerPage() {
     }
   };
 
+  const currentInterval = () =>
+    backupFrequency === "custom"
+      ? customInterval
+      : backupFrequency === "every_time"
+      ? autoInterval
+      : Number(backupFrequency);
+
+  const handleChooseFolder = async () => {
+    setSavingConfig(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const folder = await backupService.pickBackupFolder();
+      if (!folder) return;
+      const cfg = await backupService.updateBackupConfig(
+        {
+          auto_backup_enabled: autoEnabled,
+          auto_backup_interval_minutes: currentInterval(),
+          backup_frequency: backupFrequency,
+          backup_folder: folder,
+        },
+        actor,
+      );
+      setStatus((prev) => (prev ? { ...prev, config: cfg } : prev));
+      setAutoInterval(cfg.auto_backup_interval_minutes);
+      setMessage(`Backup folder updated to ${folder}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
   const handleCreate = () => setCreateOpen(true);
 
   const handleConfirmCreate = async () => {
@@ -277,7 +310,7 @@ export function BackupManagerPage() {
         <Alert
           variant="info"
           title="How backups work"
-          message="Backups are saved as .zip archives to your Desktop (Software Backup folder). They include your database, settings, configuration and embedded data. Automatic backups run on your chosen schedule; a backup is also taken automatically whenever you close the app."
+          message={`Backups are saved as .zip archives to the folder shown below (${status?.config.backup_folder ?? "Desktop\\Software Backup by default"}). They include your database, settings, configuration and embedded data. Automatic backups run on your chosen schedule; a backup is also taken automatically whenever you close the app.`}
         />
       </div>
 
@@ -345,22 +378,41 @@ export function BackupManagerPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-t p-4" style={{ borderColor: "#E2E8F0" }}>
-            <div className="flex items-center gap-2">
-              <FolderOpen className="h-4 w-4" style={{ color: "#64748B" }} />
-              <span style={{ fontSize: "12px", color: "#64748B" }}>
-                Backup folder:{" "}
-                <span style={{ fontFamily: "monospace", color: "#0F172A" }}>{status?.config.backup_folder ?? "Desktop\\Software Backup"}</span>
-              </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t p-4" style={{ borderColor: "#E2E8F0" }}>
+            <div className="flex min-w-0 items-center gap-2">
+              <FolderOpen className="h-4 w-4 shrink-0" style={{ color: "#64748B" }} />
+              <div className="min-w-0 leading-tight">
+                <div className="text-[12px] font-semibold" style={{ color: "#475569" }}>
+                  Backup folder
+                </div>
+                <div
+                  className="truncate font-mono text-[12px]"
+                  style={{ color: "#0F172A" }}
+                  title={status?.config.backup_folder ?? "Desktop\\Software Backup"}
+                >
+                  {status?.config.backup_folder ?? "Desktop\\Software Backup (default)"}
+                </div>
+              </div>
             </div>
-            <Button
-              size="sm"
-              onClick={handleSaveConfig}
-              loading={savingConfig}
-              icon={savingConfig ? <RefreshCcw className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
-            >
-              Save Settings
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                size="xs"
+                variant="secondary"
+                onClick={handleChooseFolder}
+                loading={savingConfig}
+                icon={<FolderOpen className="h-3.5 w-3.5" />}
+              >
+                Browse
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveConfig}
+                loading={savingConfig}
+                icon={savingConfig ? <RefreshCcw className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+              >
+                Save Settings
+              </Button>
+            </div>
           </div>
         </Card>
       </div>
@@ -394,7 +446,7 @@ export function BackupManagerPage() {
 
       {/* List */}
       <div className="mt-4">
-        <Card title="Saved Backups" subtitle={`${backups.length} stored in ${status?.config.backup_folder ?? "backup folder"}`} noPadding>
+        <Card title="Saved Backups" subtitle={`${backups.length} stored in ${status?.config.backup_folder ?? "Desktop\\Software Backup"}`} noPadding>
           {loading ? (
             <div className="py-16 text-center text-[13px]" style={{ color: "#64748B" }}>
               Loading backups...

@@ -27,7 +27,11 @@ const SELECT_COLS: &str = "id, option_type, value, sort_order, is_active, create
 
 pub fn insert(conn: &Connection, input: &CreatePhoneOptionInput) -> Result<i64, AppError> {
     let sort = input.sort_order.unwrap_or(0);
-    let active = if input.is_active.unwrap_or(true) { 1 } else { 0 };
+    let active = if input.is_active.unwrap_or(true) {
+        1
+    } else {
+        0
+    };
     match conn.execute(
         "INSERT INTO phone_options (option_type, value, sort_order, is_active) VALUES (?1, ?2, ?3, ?4)",
         params![input.option_type.trim(), input.value.trim(), sort, active],
@@ -40,9 +44,7 @@ pub fn insert(conn: &Connection, input: &CreatePhoneOptionInput) -> Result<i64, 
 pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<PhoneOption>, AppError> {
     let row = conn
         .query_row(
-            &format!(
-                "SELECT {SELECT_COLS} FROM phone_options WHERE id = ?1"
-            ),
+            &format!("SELECT {SELECT_COLS} FROM phone_options WHERE id = ?1"),
             [id],
             from_row,
         )
@@ -74,7 +76,11 @@ pub fn list_all(conn: &Connection) -> Result<Vec<PhoneOption>, AppError> {
     Ok(out)
 }
 
-pub fn update(conn: &Connection, id: i64, input: &CreatePhoneOptionInput) -> Result<bool, AppError> {
+pub fn update(
+    conn: &Connection,
+    id: i64,
+    input: &CreatePhoneOptionInput,
+) -> Result<bool, AppError> {
     let sort = input.sort_order.unwrap_or(0);
     match conn.execute(
         "UPDATE phone_options SET option_type = ?1, value = ?2, sort_order = ?3 WHERE id = ?4",

@@ -11,11 +11,13 @@ import { PurchasesPage } from "./pages/PurchasesPage";
 import { SupplierDuesPage } from "./pages/SupplierDuesPage";
 import { PaymentsPage } from "./pages/PaymentsPage";
 import { SalesPage } from "./pages/SalesPage";
+import { ReturnsPage } from "./pages/ReturnsPage";
 import { POSPage } from "./pages/POSPage";
 import { ExpensesPage } from "./pages/ExpensesPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { ProfitLossPage } from "./pages/ProfitLossPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { ReceiptSettingsPage } from "./pages/ReceiptSettingsPage";
 import { UsersPage } from "./pages/UsersPage";
 import { ActivityLogsPage } from "./pages/ActivityLogsPage";
 import { LicensePage } from "./pages/LicensePage";
@@ -95,10 +97,12 @@ export default function App() {
             <Route path="inventory" element={<InventoryPage />} />
             <Route path="suppliers" element={<SuppliersPage />} />
             <Route path="sales" element={<SalesPage />} />
+            <Route path="returns" element={<ReturnsPage />} />
             <Route path="payments" element={<PaymentsPage />} />
             <Route path="expenses" element={<ExpensesPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="settings/receipt" element={<ReceiptSettingsPage />} />
             <Route path="license" element={<LicensePage />} />
           </Route>
 

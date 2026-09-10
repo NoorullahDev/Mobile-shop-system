@@ -1,9 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::errors::AppError;
-use crate::models::user::{
-    Permission, Role, RoleWithPermissions, UserDetail,
-};
+use crate::models::user::{Permission, Role, RoleWithPermissions, UserDetail};
 
 fn user_detail_from_row(r: &Row) -> rusqlite::Result<UserDetail> {
     Ok(UserDetail {
@@ -73,11 +71,9 @@ pub fn username_exists(conn: &Connection, username: &str) -> Result<bool, AppErr
 }
 
 pub fn role_exists(conn: &Connection, role_id: i64) -> Result<bool, AppError> {
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM roles WHERE id = ?1",
-        [role_id],
-        |r| r.get(0),
-    )?;
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM roles WHERE id = ?1", [role_id], |r| {
+        r.get(0)
+    })?;
     Ok(n > 0)
 }
 
@@ -260,11 +256,9 @@ pub fn get_role(conn: &Connection, id: i64) -> Result<Option<Role>, AppError> {
 }
 
 pub fn role_name_exists(conn: &Connection, name: &str) -> Result<bool, AppError> {
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM roles WHERE name = ?1",
-        [name],
-        |r| r.get(0),
-    )?;
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM roles WHERE name = ?1", [name], |r| {
+        r.get(0)
+    })?;
     Ok(n > 0)
 }
 
@@ -281,7 +275,11 @@ pub fn role_name_exists_excluding(
     Ok(n > 0)
 }
 
-pub fn insert_role(conn: &Connection, name: &str, description: Option<&str>) -> Result<i64, AppError> {
+pub fn insert_role(
+    conn: &Connection,
+    name: &str,
+    description: Option<&str>,
+) -> Result<i64, AppError> {
     conn.execute(
         "INSERT INTO roles (name, description, is_builtin) VALUES (?1, ?2, 0)",
         params![name, description],
@@ -307,11 +305,12 @@ pub fn delete_role(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(affected > 0)
 }
 
-pub fn set_role_permissions(conn: &Connection, role_id: i64, perms: &[String]) -> Result<(), AppError> {
-    conn.execute(
-        "DELETE FROM role_permissions WHERE role_id = ?1",
-        [role_id],
-    )?;
+pub fn set_role_permissions(
+    conn: &Connection,
+    role_id: i64,
+    perms: &[String],
+) -> Result<(), AppError> {
+    conn.execute("DELETE FROM role_permissions WHERE role_id = ?1", [role_id])?;
     for name in perms {
         conn.execute(
             "INSERT OR IGNORE INTO role_permissions (role_id, permission_id)

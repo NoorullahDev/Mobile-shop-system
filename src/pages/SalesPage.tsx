@@ -3,8 +3,9 @@ import {
   Plus,
   Search,
   Receipt as ReceiptIcon,
-  Eye,
   ShoppingCart,
+  Printer,
+  Eye,
   X,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
@@ -16,7 +17,8 @@ import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Button";
 import { StatusBadge } from "../components/StatusBadge";
 import { SaleForm } from "./SaleForm";
-import { SaleReceipt } from "./SaleReceipt";
+import { ReceiptModal } from "./ReceiptModal";
+import { SaleDetailModal } from "./SaleDetailModal";
 import { useSaleStore } from "../store/sales";
 import { useInventoryStore } from "../store/inventory";
 import { useMemberStore } from "../store/members";
@@ -27,6 +29,12 @@ function formatPKR(n: number) {
   return `Rs. ${n.toLocaleString("en-PK")}`;
 }
 
+function returnStatusLabel(s?: string) {
+  if (s === "full") return "Fully Returned";
+  if (s === "partial") return "Partially Returned";
+  return "No Return";
+}
+
 export function SalesPage() {
   const { sales, loading, error, load, add } = useSaleStore();
   const { products, load: loadInventory } = useInventoryStore();
@@ -34,8 +42,8 @@ export function SalesPage() {
   const user = useSessionStore((s) => s.user);
   const [search, setSearch] = useState("");
   const [saleOpen, setSaleOpen] = useState(false);
+  const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
   const [viewSale, setViewSale] = useState<Sale | null>(null);
-  const [justCreated, setJustCreated] = useState<Sale | null>(null);
 
   useEffect(() => {
     load();
@@ -46,10 +54,9 @@ export function SalesPage() {
   const doSearch = () => load(search);
 
   const handleCreate = async (input: Parameters<typeof add>[0]) => {
-    const created = await add(input, user?.id ?? null);
+    await add(input, user?.id ?? null);
     await loadInventory();
     setSaleOpen(false);
-    if (created) setJustCreated(created);
   };
 
   return (
@@ -164,18 +171,15 @@ export function SalesPage() {
                   <th>Customer</th>
                   <th>Items</th>
                   <th className="text-right">Total</th>
+                  <th>Return</th>
                   <th>Payment</th>
                   <th>Date & Time</th>
-                  <th className="text-right">Actions</th>
+                  <th className="text-center">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {sales.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="cursor-pointer"
-                    onClick={() => setViewSale(s)}
-                  >
+                  <tr key={s.id}>
                     {/* Invoice No */}
                     <td>
                       <span
@@ -212,6 +216,22 @@ export function SalesPage() {
                       </span>
                     </td>
 
+                    {/* Return status */}
+                    <td>
+                      <div className="flex flex-col items-start gap-0.5">
+                        <StatusBadge
+                          status={s.return_status ?? "none"}
+                          label={returnStatusLabel(s.return_status)}
+                        />
+                        {s.return_status !== "none" && s.return_status != null && (
+                          <span className="text-[11px]" style={{ color: "#475569" }}>
+                            {formatPKR(s.returned_amount ?? 0)} refunded
+                            {(s.return_count ?? 0) > 1 && ` · ${s.return_count} returns`}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
                     {/* Payment method */}
                     <td>
                       <StatusBadge status={s.payment_method} />
@@ -229,17 +249,26 @@ export function SalesPage() {
                     </td>
 
                     {/* Actions */}
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div className="flex justify-end">
-                        <button
-                          type="button"
+                    <td className="text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => setViewSale(s)}
-                          className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50"
-                          style={{ color: "#3B6FD4" }}
-                          title="View receipt"
+                          icon={<Eye className="h-3.5 w-3.5" />}
+                          title={`View details for ${s.receipt_no}`}
                         >
-                          <Eye className="h-3.5 w-3.5" />
-                        </button>
+                          View
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setReceiptSale(s)}
+                          icon={<Printer className="h-3.5 w-3.5" />}
+                          title={`View & print receipt for ${s.receipt_no}`}
+                        >
+                          Print
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -266,27 +295,19 @@ export function SalesPage() {
         />
       </Modal>
 
-      {/* Receipt Modal */}
-      <Modal
-        open={viewSale !== null || justCreated !== null}
-        title={justCreated ? "Sale Completed!" : "Sale Receipt"}
-        subtitle={justCreated ? "Invoice generated successfully" : undefined}
-        onClose={() => {
-          setViewSale(null);
-          setJustCreated(null);
-        }}
-        size="xl"
-      >
-        {(viewSale ?? justCreated) && (
-          <SaleReceipt
-            sale={(viewSale ?? justCreated)!}
-            onClose={() => {
-              setViewSale(null);
-              setJustCreated(null);
-            }}
-          />
-        )}
-      </Modal>
+      {/* Receipt preview + print */}
+      <ReceiptModal
+        open={receiptSale != null}
+        sale={receiptSale}
+        onClose={() => setReceiptSale(null)}
+      />
+
+      {/* Sale detail with return visibility */}
+      <SaleDetailModal
+        open={viewSale != null}
+        saleId={viewSale?.id ?? null}
+        onClose={() => setViewSale(null)}
+      />
     </div>
   );
 }

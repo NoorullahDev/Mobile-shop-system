@@ -71,7 +71,9 @@ mod tests {
     use crate::services::test_utils::{in_memory_conn, seed_product_categories};
 
     fn cat_input(name: &str) -> CreateProductCategoryInput {
-        CreateProductCategoryInput { name: name.to_string() }
+        CreateProductCategoryInput {
+            name: name.to_string(),
+        }
     }
 
     #[test]

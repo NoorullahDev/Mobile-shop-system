@@ -18,6 +18,7 @@ use crate::models::product_category::{CreateProductCategoryInput, ProductCategor
 use crate::models::purchase::{
     CreatePurchaseInput, CreateSupplierPaymentInput, Purchase, SupplierBalance, SupplierPayment,
 };
+use crate::models::product_return::{CreateReturnInput, ProductReturn, ReturnSummary};
 use crate::models::report::{
     ActivityLog, DashboardSummary, MonthlyPoint, PaymentBreakdown, PeriodSummary, ProfitLoss,
     SalePoint, TopSeller,
@@ -33,8 +34,8 @@ use crate::security::SessionState;
 use crate::services::{
     accessory_service, auth_service, backup_service, expense_service, license_service,
     member_service, notification_service, payment_service, phone_service, product_category_service,
-    purchase_service, report_service, sale_service, settings_service, staff_service,
-    supplier_service, user_admin_service,
+    product_return_service, purchase_service, report_service, sale_service, settings_service,
+    staff_service, supplier_service, user_admin_service,
 };
 
 /// Acquire the database connection for commands that are intentionally
@@ -853,6 +854,39 @@ pub fn get_sale(
 ) -> Result<Sale, AppError> {
     let guard = authenticated_conn(&db, &session)?;
     sale_service::get(&guard, id)
+}
+
+// ---- Product Returns ----
+
+#[tauri::command]
+pub fn create_return(
+    db: State<Database>,
+    session: State<SessionState>,
+    input: CreateReturnInput,
+    _actor: Option<i64>,
+) -> Result<ProductReturn, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    product_return_service::create(&guard, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn list_returns(
+    db: State<Database>,
+    session: State<SessionState>,
+    search: Option<String>,
+) -> Result<Vec<ReturnSummary>, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    product_return_service::list(&guard, search)
+}
+
+#[tauri::command]
+pub fn get_return(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+) -> Result<ProductReturn, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    product_return_service::get(&guard, id)
 }
 
 // ---- Categories & Expenses ----

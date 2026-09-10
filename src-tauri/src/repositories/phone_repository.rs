@@ -91,10 +91,7 @@ pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<Phone>, AppError> 
     Ok(row)
 }
 
-pub fn list(
-    conn: &Connection,
-    search: Option<&str>,
-) -> Result<Vec<Phone>, AppError> {
+pub fn list(conn: &Connection, search: Option<&str>) -> Result<Vec<Phone>, AppError> {
     let base = format!(
         "SELECT {COLS} FROM phones p LEFT JOIN suppliers s ON s.id = p.supplier_id \
          WHERE p.is_deleted = 0"
@@ -115,7 +112,10 @@ pub fn list(
     let sql = if clauses.is_empty() {
         format!("{base} ORDER BY p.brand, p.model LIMIT 1000")
     } else {
-        format!("{base} AND {} ORDER BY p.brand, p.model LIMIT 1000", clauses.join(" AND "))
+        format!(
+            "{base} AND {} ORDER BY p.brand, p.model LIMIT 1000",
+            clauses.join(" AND ")
+        )
     };
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
@@ -129,11 +129,7 @@ pub fn list(
     Ok(out)
 }
 
-pub fn update(
-    conn: &Connection,
-    id: i64,
-    input: &CreatePhoneInput,
-) -> Result<bool, AppError> {
+pub fn update(conn: &Connection, id: i64, input: &CreatePhoneInput) -> Result<bool, AppError> {
     let affected = conn.execute(
         "UPDATE phones SET brand=?1, model=?2, color=?3, storage=?4, ram=?5, processor=?6, chipset=?7, network_type=?8, battery_capacity=?9, imei=?10, imei2=?11, serial_number=?12, image_paths=?13, category=?14, condition=?15, variant=?16, sku=?17,
          condition_rating=?18, body_condition=?19, screen_condition=?20, battery_health=?21, camera_condition=?22, face_id=?23, speaker=?24, charger=?25, box_condition=?26, warranty=?27, condition_notes=?28,
@@ -153,13 +149,30 @@ pub fn update(
     Ok(affected > 0)
 }
 
-pub fn serial_taken(conn: &Connection, serial: &str, exclude_id: Option<i64>) -> Result<bool, AppError> {
-    let sql = if exclude_id.is_some() { "SELECT 1 FROM phones WHERE serial_number=?1 AND id!=?2 AND is_deleted=0" } else { "SELECT 1 FROM phones WHERE serial_number=?1 AND is_deleted=0" };
-    let found = if let Some(id)=exclude_id { conn.query_row(sql, params![serial,id], |_|Ok(true)).optional()? } else { conn.query_row(sql,[serial], |_|Ok(true)).optional()? };
+pub fn serial_taken(
+    conn: &Connection,
+    serial: &str,
+    exclude_id: Option<i64>,
+) -> Result<bool, AppError> {
+    let sql = if exclude_id.is_some() {
+        "SELECT 1 FROM phones WHERE serial_number=?1 AND id!=?2 AND is_deleted=0"
+    } else {
+        "SELECT 1 FROM phones WHERE serial_number=?1 AND is_deleted=0"
+    };
+    let found = if let Some(id) = exclude_id {
+        conn.query_row(sql, params![serial, id], |_| Ok(true))
+            .optional()?
+    } else {
+        conn.query_row(sql, [serial], |_| Ok(true)).optional()?
+    };
     Ok(found.is_some())
 }
 
-pub fn imei_taken(conn: &Connection, imei: &str, exclude_id: Option<i64>) -> Result<bool, AppError> {
+pub fn imei_taken(
+    conn: &Connection,
+    imei: &str,
+    exclude_id: Option<i64>,
+) -> Result<bool, AppError> {
     let exists: Option<bool> = match exclude_id {
         Some(id) => conn
             .query_row(

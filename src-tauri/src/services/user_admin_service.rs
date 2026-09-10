@@ -24,19 +24,27 @@ fn clean_opt(s: Option<String>) -> Option<String> {
 
 // ----- Users -----
 
-pub fn create_user(conn: &Connection, input: CreateUserInput, actor: Option<i64>) -> Result<UserDetail, AppError> {
+pub fn create_user(
+    conn: &Connection,
+    input: CreateUserInput,
+    actor: Option<i64>,
+) -> Result<UserDetail, AppError> {
     let username = input.username.trim().to_lowercase();
     if username.is_empty() {
         return Err(AppError::validation("Username is required"));
     }
     if input.password.len() < 6 {
-        return Err(AppError::validation("Password must be at least 6 characters"));
+        return Err(AppError::validation(
+            "Password must be at least 6 characters",
+        ));
     }
     if !repo::role_exists(conn, input.role_id)? {
         return Err(AppError::validation("Role not found"));
     }
     if repo::username_exists(conn, &username)? {
-        return Err(AppError::validation("A user with this username already exists"));
+        return Err(AppError::validation(
+            "A user with this username already exists",
+        ));
     }
 
     let hash = hash_password(&input.password)?;
@@ -73,7 +81,8 @@ pub fn update_user(
     input: UpdateUserInput,
     actor: Option<i64>,
 ) -> Result<UserDetail, AppError> {
-    let current = repo::get_user(conn, id)?.ok_or_else(|| AppError::validation("User not found"))?;
+    let current =
+        repo::get_user(conn, id)?.ok_or_else(|| AppError::validation("User not found"))?;
 
     let role_id = input.role_id.unwrap_or(current.role_id);
     if !repo::role_exists(conn, role_id)? {
@@ -93,7 +102,14 @@ pub fn update_user(
         }
     }
 
-    let ok = repo::update_user_fields(conn, id, full_name.as_deref(), email.as_deref(), role_id, &status)?;
+    let ok = repo::update_user_fields(
+        conn,
+        id,
+        full_name.as_deref(),
+        email.as_deref(),
+        role_id,
+        &status,
+    )?;
     if !ok {
         return Err(AppError::validation("User not found"));
     }
@@ -102,7 +118,12 @@ pub fn update_user(
         .ok_or_else(|| AppError::Internal("Updated user could not be retrieved".into()))
 }
 
-pub fn set_user_status(conn: &Connection, id: i64, status: &str, actor: Option<i64>) -> Result<UserDetail, AppError> {
+pub fn set_user_status(
+    conn: &Connection,
+    id: i64,
+    status: &str,
+    actor: Option<i64>,
+) -> Result<UserDetail, AppError> {
     let status = normalize_status(Some(status.into()));
     if status == "disabled" && repo::is_admin_user(conn, id)? {
         let active_admins = repo::active_admin_count(conn)?;
@@ -121,9 +142,16 @@ pub fn set_user_status(conn: &Connection, id: i64, status: &str, actor: Option<i
         .ok_or_else(|| AppError::Internal("Updated user could not be retrieved".into()))
 }
 
-pub fn reset_password(conn: &Connection, id: i64, new_password: &str, actor: Option<i64>) -> Result<(), AppError> {
+pub fn reset_password(
+    conn: &Connection,
+    id: i64,
+    new_password: &str,
+    actor: Option<i64>,
+) -> Result<(), AppError> {
     if new_password.len() < 6 {
-        return Err(AppError::validation("Password must be at least 6 characters"));
+        return Err(AppError::validation(
+            "Password must be at least 6 characters",
+        ));
     }
     let hash = hash_password(new_password)?;
     let ok = repo::set_password_hash(conn, id, &hash)?;
@@ -151,7 +179,10 @@ pub fn delete_user(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(),
 
 // ----- Roles -----
 
-pub fn list_roles(conn: &Connection, search: Option<String>) -> Result<Vec<RoleWithPermissions>, AppError> {
+pub fn list_roles(
+    conn: &Connection,
+    search: Option<String>,
+) -> Result<Vec<RoleWithPermissions>, AppError> {
     repo::list_roles_with_permissions(conn, search.as_deref())
 }
 
@@ -177,7 +208,11 @@ pub fn get_role(conn: &Connection, id: i64) -> Result<RoleWithPermissions, AppEr
     })
 }
 
-pub fn create_role(conn: &Connection, input: CreateRoleInput, actor: Option<i64>) -> Result<RoleWithPermissions, AppError> {
+pub fn create_role(
+    conn: &Connection,
+    input: CreateRoleInput,
+    actor: Option<i64>,
+) -> Result<RoleWithPermissions, AppError> {
     let name = input.name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::validation("Role name is required"));
@@ -198,7 +233,8 @@ pub fn update_role(
     input: UpdateRoleInput,
     actor: Option<i64>,
 ) -> Result<RoleWithPermissions, AppError> {
-    let _current = repo::get_role(conn, id)?.ok_or_else(|| AppError::validation("Role not found"))?;
+    let _current =
+        repo::get_role(conn, id)?.ok_or_else(|| AppError::validation("Role not found"))?;
     let name = input.name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::validation("Role name is required"));
@@ -278,7 +314,11 @@ mod tests {
         assert_eq!(u.status, "active");
         // password must not be returned & must be hashed in DB
         let stored: String = conn
-            .query_row("SELECT password_hash FROM users WHERE id = ?1", [u.id], |r| r.get(0))
+            .query_row(
+                "SELECT password_hash FROM users WHERE id = ?1",
+                [u.id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_ne!(stored, "secret123");
     }

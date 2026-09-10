@@ -25,7 +25,8 @@ const COLS: &str = "p.id, p.member_id, m.name AS member_name, p.amount, p.paymen
      p.payment_type, p.status, p.reference, p.notes, p.payment_date, p.created_by, p.created_at, \
      p.is_deleted";
 
-const JOIN: &str = "FROM payments p LEFT JOIN members m ON m.id = p.member_id WHERE p.is_deleted = 0";
+const JOIN: &str =
+    "FROM payments p LEFT JOIN members m ON m.id = p.member_id WHERE p.is_deleted = 0";
 
 pub fn insert(
     conn: &Connection,
@@ -51,7 +52,9 @@ pub fn insert(
 }
 
 pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<Payment>, AppError> {
-    let sql = format!("SELECT {COLS} {JOIN} AND p.id = ?1 ORDER BY p.payment_date DESC, p.id DESC LIMIT 1");
+    let sql = format!(
+        "SELECT {COLS} {JOIN} AND p.id = ?1 ORDER BY p.payment_date DESC, p.id DESC LIMIT 1"
+    );
     let row = conn.query_row(&sql, [id], payment_from_row).optional()?;
     Ok(row)
 }
@@ -136,7 +139,10 @@ pub fn member_balance(conn: &Connection, member_id: i64) -> Result<MemberBalance
     })
 }
 
-pub fn list_balances(conn: &Connection, search: Option<&str>) -> Result<Vec<MemberBalance>, AppError> {
+pub fn list_balances(
+    conn: &Connection,
+    search: Option<&str>,
+) -> Result<Vec<MemberBalance>, AppError> {
     let has_search = search.map(|s| !s.trim().is_empty()).unwrap_or(false);
     let mut sql = String::from(
         "SELECT m.id AS member_id, m.name AS member_name, m.phone AS phone,
@@ -166,7 +172,10 @@ pub fn list_balances(conn: &Connection, search: Option<&str>) -> Result<Vec<Memb
     Ok(out)
 }
 
-pub fn list_customer_dues(conn: &Connection, search: Option<&str>) -> Result<Vec<MemberBalance>, AppError> {
+pub fn list_customer_dues(
+    conn: &Connection,
+    search: Option<&str>,
+) -> Result<Vec<MemberBalance>, AppError> {
     let all = list_balances(conn, search)?;
     Ok(all.into_iter().filter(|b| b.balance > 0.001).collect())
 }

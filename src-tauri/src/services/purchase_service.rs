@@ -24,7 +24,10 @@ fn validate_sp_status(s: Option<&str>) -> String {
     match s {
         Some(v) => {
             let v = v.trim().to_lowercase();
-            if matches!(v.as_str(), "completed" | "pending" | "cancelled" | "refunded") {
+            if matches!(
+                v.as_str(),
+                "completed" | "pending" | "cancelled" | "refunded"
+            ) {
                 v
             } else {
                 "completed".into()
@@ -40,7 +43,9 @@ pub fn create_purchase(
     actor: Option<i64>,
 ) -> Result<Purchase, AppError> {
     if input.items.is_empty() {
-        return Err(AppError::validation("A purchase must contain at least one item"));
+        return Err(AppError::validation(
+            "A purchase must contain at least one item",
+        ));
     }
     if input.discount < 0.0 {
         return Err(AppError::validation("Discount cannot be negative"));
@@ -72,21 +77,26 @@ pub fn create_purchase(
     for item in &input.items {
         let item_type = match item.item_type.as_str() {
             "phone" | "accessory" => item.item_type.clone(),
-            _ => return Err(AppError::validation("Item type must be 'phone' or 'accessory'")),
+            _ => {
+                return Err(AppError::validation(
+                    "Item type must be 'phone' or 'accessory'",
+                ))
+            }
         };
         if item.quantity < 1 {
             return Err(AppError::validation("Item quantity must be at least 1"));
         }
         if purchase_repository::item_quantity(conn, &item_type, item.item_id)?.is_none() {
-            return Err(AppError::validation(
-                if item_type == "phone" { "Phone not found" } else { "Accessory not found" },
-            ));
+            return Err(AppError::validation(if item_type == "phone" {
+                "Phone not found"
+            } else {
+                "Accessory not found"
+            }));
         }
 
         let unit_cost = match item.unit_cost {
             Some(c) if c > 0.0 => c,
-            _ => purchase_repository::item_cost(conn, &item_type, item.item_id)?
-                .unwrap_or(0.0),
+            _ => purchase_repository::item_cost(conn, &item_type, item.item_id)?.unwrap_or(0.0),
         };
         if unit_cost < 0.0 {
             return Err(AppError::validation("Unit cost cannot be negative"));
@@ -126,7 +136,9 @@ pub fn create_purchase(
 
         subtotal += round2(unit_cost * item.quantity as f64);
         let trim = |s: &Option<String>| -> Option<String> {
-            s.as_deref().map(|x| x.trim().to_string()).filter(|x| !x.is_empty())
+            s.as_deref()
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
         };
         lines.push(Line {
             item_type,
@@ -152,7 +164,9 @@ pub fn create_purchase(
         let mut used = purchase_repository::imeis_in_use(conn, &all_imeis)?;
         used.retain(|u| seen_global.contains(u));
         if let Some(first) = used.into_iter().next() {
-            return Err(AppError::validation(format!("IMEI {first} is already in use")));
+            return Err(AppError::validation(format!(
+                "IMEI {first} is already in use"
+            )));
         }
     }
 
@@ -260,7 +274,9 @@ pub fn create_supplier_payment(
     actor: Option<i64>,
 ) -> Result<SupplierPayment, AppError> {
     if !input.amount.is_finite() || input.amount <= 0.0 {
-        return Err(AppError::validation("Payment amount must be greater than zero"));
+        return Err(AppError::validation(
+            "Payment amount must be greater than zero",
+        ));
     }
     let amount = round2(input.amount);
     if let Some(sid) = input.supplier_id {
@@ -276,8 +292,14 @@ pub fn create_supplier_payment(
             input.payment_method.as_deref().unwrap_or("cash"),
         )),
         status: Some(validate_sp_status(input.status.as_deref())),
-        reference: input.reference.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()),
-        notes: input.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+        reference: input
+            .reference
+            .map(|r| r.trim().to_string())
+            .filter(|r| !r.is_empty()),
+        notes: input
+            .notes
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty()),
         payment_date: input.payment_date,
     };
 
@@ -428,7 +450,11 @@ mod tests {
 
         // Last purchase cost is recorded on the phone row.
         let lpc: Option<f64> = conn
-            .query_row("SELECT last_purchase_cost FROM phones WHERE id = ?1", params![iid], |r| r.get(0))
+            .query_row(
+                "SELECT last_purchase_cost FROM phones WHERE id = ?1",
+                params![iid],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(lpc, Some(100.0));
     }
