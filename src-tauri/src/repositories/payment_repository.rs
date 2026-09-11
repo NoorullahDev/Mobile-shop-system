@@ -134,7 +134,7 @@ pub fn member_balance(conn: &Connection, member_id: i64) -> Result<MemberBalance
         phone,
         total_credit,
         total_paid,
-        balance: round2(total_credit - total_paid),
+        balance: utils::round2(total_credit - total_paid),
         payment_count: count.unwrap_or(0),
     })
 }
@@ -189,11 +189,10 @@ fn balance_from_row(r: &Row) -> rusqlite::Result<MemberBalance> {
         phone: r.get("phone")?,
         total_credit,
         total_paid,
-        balance: round2(total_credit - total_paid),
+        balance: utils::round2(total_credit - total_paid),
         payment_count: r.get("payment_count")?,
     })
 }
 
-fn round2(n: f64) -> f64 {
-    (n * 100.0).round() / 100.0
-}
+use crate::utils;
+

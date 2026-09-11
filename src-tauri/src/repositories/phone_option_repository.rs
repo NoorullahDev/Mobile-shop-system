@@ -14,15 +14,6 @@ fn from_row(r: &Row) -> rusqlite::Result<PhoneOption> {
     })
 }
 
-fn map_unique(e: AppError, value: &str) -> AppError {
-    if matches!(&e, AppError::Database(rusqlite::Error::SqliteFailure(f, _)) if f.code == rusqlite::ErrorCode::ConstraintViolation)
-    {
-        AppError::validation(format!("Option '{value}' already exists"))
-    } else {
-        e
-    }
-}
-
 const SELECT_COLS: &str = "id, option_type, value, sort_order, is_active, created_at";
 
 pub fn insert(conn: &Connection, input: &CreatePhoneOptionInput) -> Result<i64, AppError> {
@@ -37,7 +28,7 @@ pub fn insert(conn: &Connection, input: &CreatePhoneOptionInput) -> Result<i64, 
         params![input.option_type.trim(), input.value.trim(), sort, active],
     ) {
         Ok(_) => Ok(conn.last_insert_rowid()),
-        Err(e) => Err(map_unique(AppError::from(e), &input.value)),
+        Err(e) => Err(AppError::from(e).map_unique(&format!("option '{}'", input.value))),
     }
 }
 
@@ -87,7 +78,7 @@ pub fn update(
         params![input.option_type.trim(), input.value.trim(), sort, id],
     ) {
         Ok(affected) => Ok(affected > 0),
-        Err(e) => Err(map_unique(AppError::from(e), &input.value)),
+        Err(e) => Err(AppError::from(e).map_unique(&format!("option '{}'", input.value))),
     }
 }
 

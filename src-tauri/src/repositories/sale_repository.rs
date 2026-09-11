@@ -105,19 +105,7 @@ pub fn insert_sale_item(
 
 /// Returns Some(current_quantity) if the phone/accessory item exists and is not deleted.
 pub fn item_quantity(conn: &Connection, item_type: &str, id: i64) -> Result<Option<i64>, AppError> {
-    let table = if item_type == "phone" {
-        "phones"
-    } else {
-        "accessories"
-    };
-    let q: Option<i64> = conn
-        .query_row(
-            &format!("SELECT quantity FROM {table} WHERE id = ?1 AND is_deleted = 0"),
-            [id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(q)
+    super::inventory_repository::item_quantity(conn, item_type, id)
 }
 
 /// Returns Some(sale_price) if the phone/accessory item exists.

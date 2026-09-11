@@ -9,6 +9,7 @@ export function ProductImageInput({ value, onChange, disabled }: { value: string
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState<string|null>(null);
   useEffect(()=>{ value.filter(p=>!previews[p]).forEach(async p=>{try{const url=await inventoryService.readProductImage(p);setPreviews(v=>({...v,[p]:url}))}catch{}}); },[value]);
+  useEffect(()=>{ return()=>{ Object.values(previews).forEach(u=>{ try{ URL.revokeObjectURL(u); }catch{} }); }; },[]);
   const choose=async(e:React.ChangeEvent<HTMLInputElement>)=>{
     const files=Array.from(e.target.files??[]).slice(0,Math.max(0,5-value.length));
     if(!files.length)return; setBusy(true);setError(null);

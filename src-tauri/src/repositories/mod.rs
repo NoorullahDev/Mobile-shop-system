@@ -2,6 +2,7 @@ pub mod accessory_repository;
 pub mod category_repository;
 pub mod backup_repository;
 pub mod expense_repository;
+pub mod inventory_repository;
 pub mod license_repository;
 pub mod member_repository;
 pub mod notification_repository;

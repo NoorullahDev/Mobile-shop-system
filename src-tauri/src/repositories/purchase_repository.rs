@@ -106,19 +106,7 @@ pub fn next_purchase_no(conn: &Connection) -> Result<String, AppError> {
 }
 
 pub fn item_quantity(conn: &Connection, item_type: &str, id: i64) -> Result<Option<i64>, AppError> {
-    let table = if item_type == "phone" {
-        "phones"
-    } else {
-        "accessories"
-    };
-    let q: Option<i64> = conn
-        .query_row(
-            &format!("SELECT quantity FROM {table} WHERE id = ?1 AND is_deleted = 0",),
-            [id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(q)
+    super::inventory_repository::item_quantity(conn, item_type, id)
 }
 
 pub fn item_cost(conn: &Connection, item_type: &str, id: i64) -> Result<Option<f64>, AppError> {
@@ -143,19 +131,7 @@ pub fn increment_stock(
     item_id: i64,
     qty: i64,
 ) -> Result<(), AppError> {
-    let table = if item_type == "phone" {
-        "phones"
-    } else {
-        "accessories"
-    };
-    conn.execute(
-        &format!(
-            "UPDATE {table} SET quantity = quantity + ?1, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?2 AND is_deleted = 0"
-        ),
-        params![qty, item_id],
-    )?;
-    Ok(())
+    super::inventory_repository::increment_stock(conn, item_type, item_id, qty)
 }
 
 /// Returns the subset of the given IMEIs that are already registered (used by
@@ -368,9 +344,7 @@ pub fn list_purchases(conn: &Connection, search: Option<&str>) -> Result<Vec<Pur
     Ok(out)
 }
 
-fn round2(n: f64) -> f64 {
-    (n * 100.0).round() / 100.0
-}
+use crate::utils;
 
 // ----- Supplier balance / dues -----
 
@@ -398,7 +372,7 @@ pub fn supplier_balance(conn: &Connection, supplier_id: i64) -> Result<SupplierB
         phone,
         total_purchases,
         total_paid,
-        balance: round2(total_purchases - total_paid),
+        balance: utils::round2(total_purchases - total_paid),
         payment_count: count.unwrap_or(0),
     })
 }
@@ -412,7 +386,7 @@ fn balance_from_row(r: &Row) -> rusqlite::Result<SupplierBalance> {
         phone: r.get("phone")?,
         total_purchases,
         total_paid,
-        balance: round2(total_purchases - total_paid),
+        balance: utils::round2(total_purchases - total_paid),
         payment_count: r.get("payment_count")?,
     })
 }

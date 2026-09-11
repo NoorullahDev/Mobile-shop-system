@@ -6,10 +6,7 @@ use crate::errors::AppError;
 use crate::models::product_return::{CreateReturnInput, ProductReturn, ReturnSummary};
 use crate::repositories::{product_return_repository, sale_repository};
 use crate::services;
-
-fn round2(v: f64) -> f64 {
-    f64::round(v * 100.0) / 100.0
-}
+use crate::utils;
 
 /// Return conditions that keep the item sellable, so its stock (and phone
 /// IMEI) is automatically restored to inventory.
@@ -143,8 +140,8 @@ pub fn create(
 
         let condition = normalize_condition(&item.condition)?;
         let restock = is_sellable_condition(&condition);
-        let unit_price = round2(si.unit_price);
-        let line_total = round2(unit_price * item.quantity as f64);
+        let unit_price = utils::round2(si.unit_price);
+        let line_total = utils::round2(unit_price * item.quantity as f64);
         total_value += line_total;
         lines.push(Line {
             sale_item_id: si.id,
@@ -177,9 +174,9 @@ pub fn create(
     // ----- Deduction rule: a fixed amount overrides the percentage -----
     let fixed_deduction = input.fixed_deduction.unwrap_or(0.0);
     let target_deduction = if fixed_deduction > 0.0 {
-        round2(fixed_deduction)
+        utils::round2(fixed_deduction)
     } else {
-        round2(total_value * input.return_charge_percent / 100.0)
+        utils::round2(total_value * input.return_charge_percent / 100.0)
     };
     if target_deduction > total_value {
         return Err(AppError::validation("Deduction cannot exceed the returned value"));
@@ -192,21 +189,21 @@ pub fn create(
     let n = lines.len();
     for (i, line) in lines.iter_mut().enumerate() {
         line.deduction = if i == n - 1 {
-            round2(target_deduction - allocated)
+            utils::round2(target_deduction - allocated)
         } else {
-            let d = round2((line.line_total / total_value) * target_deduction);
+            let d = utils::round2((line.line_total / total_value) * target_deduction);
             allocated += d;
             d
         };
-        let mut refund = round2(line.line_total - line.deduction);
+        let mut refund = utils::round2(line.line_total - line.deduction);
         if refund < 0.0 {
             refund = 0.0;
         }
         line.refund = refund;
     }
 
-    let deduction_amount = round2(lines.iter().map(|l| l.deduction).sum());
-    let refund_amount = round2(lines.iter().map(|l| l.refund).sum());
+    let deduction_amount = utils::round2(lines.iter().map(|l| l.deduction).sum());
+    let refund_amount = utils::round2(lines.iter().map(|l| l.refund).sum());
 
     let condition_label = if lines.iter().all(|l| l.restock) {
         "sellable".to_string()
@@ -252,7 +249,7 @@ pub fn create(
         sale.member_name.as_deref(),
         sale.member_phone.as_deref(),
         Some(&sale.receipt_no),
-        round2(total_value),
+        utils::round2(total_value),
         deduction_amount,
         refund_amount,
         input.return_charge_percent,

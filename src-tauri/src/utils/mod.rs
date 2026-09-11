@@ -21,3 +21,9 @@ pub mod logging {
         );
     }
 }
+
+/// Round a floating-point money amount to 2 decimal places.
+/// Used consistently across sale, purchase, return, and payment calculations.
+pub fn round2(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
+}

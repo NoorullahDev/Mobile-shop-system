@@ -6,10 +6,7 @@ use crate::models::purchase::{
 };
 use crate::repositories::{purchase_repository, supplier_repository};
 use crate::services;
-
-fn round2(v: f64) -> f64 {
-    f64::round(v * 100.0) / 100.0
-}
+use crate::utils;
 
 fn normalize_payment_method(m: &str) -> String {
     let m = m.trim().to_lowercase();
@@ -134,7 +131,7 @@ pub fn create_purchase(
             }
         }
 
-        subtotal += round2(unit_cost * item.quantity as f64);
+        subtotal += utils::round2(unit_cost * item.quantity as f64);
         let trim = |s: &Option<String>| -> Option<String> {
             s.as_deref()
                 .map(|x| x.trim().to_string())
@@ -144,8 +141,8 @@ pub fn create_purchase(
             item_type,
             item_id: item.item_id,
             quantity: item.quantity,
-            unit_cost: round2(unit_cost),
-            selling_price: item.selling_price.map(round2),
+            unit_cost: utils::round2(unit_cost),
+            selling_price: item.selling_price.map(utils::round2),
             warranty: trim(&item.warranty),
             condition: trim(&item.condition),
             imeis: seen,
@@ -170,7 +167,7 @@ pub fn create_purchase(
         }
     }
 
-    let total_amount = round2(subtotal - input.discount);
+    let total_amount = utils::round2(subtotal - input.discount);
     if total_amount < 0.0 {
         return Err(AppError::validation("Discount cannot exceed subtotal"));
     }
@@ -179,7 +176,7 @@ pub fn create_purchase(
             if p < 0.0 {
                 return Err(AppError::validation("Paid amount cannot be negative"));
             }
-            round2(p)
+            utils::round2(p)
         }
         None => total_amount,
     };
@@ -216,7 +213,7 @@ pub fn create_purchase(
         &purchase_no,
         input.supplier_id,
         total_amount,
-        round2(input.discount),
+        utils::round2(input.discount),
         paid_amount,
         &payment_method,
         purchase_date,
@@ -278,7 +275,7 @@ pub fn create_supplier_payment(
             "Payment amount must be greater than zero",
         ));
     }
-    let amount = round2(input.amount);
+    let amount = utils::round2(input.amount);
     if let Some(sid) = input.supplier_id {
         if supplier_repository::get_by_id(conn, sid)?.is_none() {
             return Err(AppError::validation("Supplier not found"));

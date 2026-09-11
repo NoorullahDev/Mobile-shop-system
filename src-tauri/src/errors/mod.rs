@@ -24,6 +24,20 @@ impl AppError {
     pub fn file(msg: impl Into<String>) -> Self {
         AppError::File(msg.into())
     }
+
+    /// Convert a SQLite UNIQUE/INSERT constraint violation into a friendly
+    /// validation error.  Non-constraint errors are returned unchanged.
+    pub fn map_unique(self, label: &str) -> Self {
+        if matches!(
+            &self,
+            AppError::Database(rusqlite::Error::SqliteFailure(f, _))
+                if f.code == rusqlite::ErrorCode::ConstraintViolation
+        ) {
+            AppError::validation(format!("{label} already exists"))
+        } else {
+            self
+        }
+    }
 }
 
 impl Serialize for AppError {

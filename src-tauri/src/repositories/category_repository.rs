@@ -11,15 +11,6 @@ fn from_row(r: &Row) -> rusqlite::Result<Category> {
     })
 }
 
-fn map_unique(e: AppError, name: &str) -> AppError {
-    if matches!(&e, AppError::Database(rusqlite::Error::SqliteFailure(f, _)) if f.code == rusqlite::ErrorCode::ConstraintViolation)
-    {
-        AppError::validation(format!("A category named '{name}' already exists"))
-    } else {
-        e
-    }
-}
-
 pub fn insert(conn: &Connection, input: &CreateCategoryInput) -> Result<i64, AppError> {
     match conn.execute(
         "INSERT INTO categories (name, type) VALUES (?1, ?2)",
@@ -29,7 +20,7 @@ pub fn insert(conn: &Connection, input: &CreateCategoryInput) -> Result<i64, App
         ],
     ) {
         Ok(_) => Ok(conn.last_insert_rowid()),
-        Err(e) => Err(map_unique(AppError::from(e), &input.name)),
+        Err(e) => Err(AppError::from(e).map_unique(&format!("category '{}'", input.name))),
     }
 }
 
@@ -65,7 +56,7 @@ pub fn update(conn: &Connection, id: i64, input: &CreateCategoryInput) -> Result
         ],
     ) {
         Ok(affected) => Ok(affected > 0),
-        Err(e) => Err(map_unique(AppError::from(e), &input.name)),
+        Err(e) => Err(AppError::from(e).map_unique(&format!("category '{}'", input.name))),
     }
 }
 

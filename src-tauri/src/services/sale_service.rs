@@ -4,10 +4,7 @@ use crate::errors::AppError;
 use crate::models::sale::{CreateSaleInput, Sale};
 use crate::repositories::{member_repository, product_return_repository, sale_repository};
 use crate::services;
-
-fn round2(v: f64) -> f64 {
-    f64::round(v * 100.0) / 100.0
-}
+use crate::utils;
 
 pub fn create(
     conn: &Connection,
@@ -100,18 +97,18 @@ pub fn create(
             None
         };
 
-        let line_total = round2(unit_price * item.quantity as f64);
+        let line_total = utils::round2(unit_price * item.quantity as f64);
         subtotal += line_total;
         lines.push(Line {
             item_type,
             item_id: item.item_id,
             quantity: item.quantity,
             imei_id: line_imei,
-            unit_price: round2(unit_price),
+            unit_price: utils::round2(unit_price),
         });
     }
 
-    let total_amount = round2(subtotal - input.discount);
+    let total_amount = utils::round2(subtotal - input.discount);
     if total_amount < 0.0 {
         return Err(AppError::validation("Discount cannot exceed subtotal"));
     }
@@ -120,7 +117,7 @@ pub fn create(
             if p < 0.0 {
                 return Err(AppError::validation("Paid amount cannot be negative"));
             }
-            round2(p)
+            utils::round2(p)
         }
         None => total_amount,
     };
@@ -147,7 +144,7 @@ pub fn create(
         &receipt_no,
         input.member_id,
         total_amount,
-        round2(input.discount),
+        utils::round2(input.discount),
         paid_amount,
         &payment_method,
         notes,

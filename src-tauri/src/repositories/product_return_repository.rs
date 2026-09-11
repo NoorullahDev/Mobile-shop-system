@@ -209,19 +209,7 @@ pub fn increment_stock(
     item_id: i64,
     qty: i64,
 ) -> Result<(), AppError> {
-    let table = if item_type == "phone" {
-        "phones"
-    } else {
-        "accessories"
-    };
-    conn.execute(
-        &format!(
-            "UPDATE {table} SET quantity = quantity + ?1, updated_at = CURRENT_TIMESTAMP \
-             WHERE id = ?2 AND is_deleted = 0"
-        ),
-        params![qty, item_id],
-    )?;
-    Ok(())
+    super::inventory_repository::increment_stock(conn, item_type, item_id, qty)
 }
 
 fn item_from_row(r: &Row) -> rusqlite::Result<ReturnItem> {
