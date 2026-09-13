@@ -15,3 +15,11 @@ export async function listReturns(search?: string): Promise<ReturnSummary[]> {
 export async function getReturn(id: number): Promise<ProductReturn> {
   return invoke<ProductReturn>("get_return", { id });
 }
+
+export async function updateReturn(id: number, input: CreateReturnInput, actor?: number | null): Promise<ProductReturn> {
+  return invoke<ProductReturn>("update_return", { id, input, actor: actor ?? null });
+}
+
+export async function deleteReturn(id: number, actor?: number | null): Promise<void> {
+  return invoke<void>("delete_return", { id, actor: actor ?? null });
+}

@@ -1,6 +1,7 @@
 import type { ProductReturn } from "./return";
 
 export interface SaleItemInput {
+  sale_item_id?: number | null;
   item_type: "phone" | "accessory";
   item_id: number;
   quantity: number;

@@ -8,6 +8,8 @@ interface SalesState {
   error: string | null;
   load: (search?: string) => Promise<void>;
   add: (input: CreateSaleInput, actor?: number | null) => Promise<Sale | null>;
+  update: (id: number, input: CreateSaleInput, actor?: number | null) => Promise<Sale>;
+  remove: (id: number, actor?: number | null) => Promise<void>;
 }
 
 export const useSaleStore = create<SalesState>((set) => ({
@@ -35,5 +37,16 @@ export const useSaleStore = create<SalesState>((set) => ({
       set({ error: String(e) });
       throw e;
     }
+  },
+
+  update: async (id, input, actor) => {
+    const updated = await saleService.updateSale(id, input, actor);
+    set((state) => ({ sales: state.sales.map((sale) => sale.id === id ? updated : sale) }));
+    return updated;
+  },
+
+  remove: async (id, actor) => {
+    await saleService.deleteSale(id, actor);
+    set((state) => ({ sales: state.sales.filter((sale) => sale.id !== id) }));
   },
 }));

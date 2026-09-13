@@ -377,45 +377,234 @@ h3 { font-size: 14px; font-weight: 600; line-height: 1.4;  margin: 0; }
 /* ---- Print report ---- */
 .print-report { display: none; }
 
-@media print {
-  body.printing * {
-    visibility: hidden;
+@page {
+  size: A4 portrait;
+  margin: 0 0 14mm;
+
+  @bottom-center {
+    content: "Software developed by EagleNest Creations (0346-4451505)";
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    font-size: 8px;
+    color: #64748b;
   }
-  body.printing .print-report,
-  body.printing .print-report * {
-    visibility: visible;
+
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    font-size: 8px;
+    color: #64748b;
   }
-  body.printing .print-report {
-    display: block;
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    padding: 8mm 6mm;
-    font-size: 11px;
-    color: #0f172a;
-  }
-  body.printing .print-report h1 { font-size: 18px; margin: 0 0 2px; }
-  body.printing .print-report .print-sub { color: #475569; margin-bottom: 10px; }
-  body.printing .print-report h2 { font-size: 13px; margin: 14px 0 6px; }
-  body.printing .print-report table { width: 100%; border-collapse: collapse; }
-  body.printing .print-report th,
-  body.printing .print-report td {
-    border: 1px solid #cbd5e1;
-    padding: 4px 6px;
-    text-align: left;
-    font-size: 10px;
-  }
-  body.printing .print-report th { background: #f1f5f9; font-weight: 600; }
-  body.printing .print-report .num { text-align: right; }
-  body.printing .print-report .kpis { display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0; }
-  body.printing .print-report .kpi {
-    border: 1px solid #cbd5e1;
-    border-radius: 6px;
-    padding: 6px 10px;
-    flex: 1;
-    min-width: 120px;
-  }
-  body.printing .app-content { overflow: visible !important; }
 }
 
+@media print {
+  html,
+  body.printing,
+  body.printing #root,
+  body.printing .app-shell,
+  body.printing .app-main,
+  body.printing .app-content {
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  body.printing .app-shell > aside,
+  body.printing .app-main > header,
+  body.printing .app-main > div,
+  body.printing .app-content > div > :not(.print-report) {
+    display: none !important;
+  }
+  body.printing .app-content {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.printing .print-report {
+    display: block !important;
+    position: static;
+    box-sizing: border-box;
+    width: 210mm;
+    max-width: none;
+    margin: 0;
+    padding: 10mm 10mm 5mm;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: #0f172a;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  body.printing .report-print-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    min-height: 54px;
+    padding: 0 0 9px;
+    border-bottom: 2px solid #333;
+    break-inside: avoid;
+  }
+  body.printing .report-print-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  body.printing .report-print-brand img {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    object-fit: contain;
+  }
+  body.printing .report-print-brand div,
+  body.printing .report-print-meta {
+    display: flex;
+    flex-direction: column;
+  }
+  body.printing .report-print-brand strong {
+    margin-bottom: 2px;
+    font-size: 16px;
+    color: #111827;
+  }
+  body.printing .report-print-brand span,
+  body.printing .report-print-meta span {
+    font-size: 9px;
+    color: #64748b;
+  }
+  body.printing .report-print-meta {
+    align-items: flex-end;
+    text-align: right;
+  }
+  body.printing .report-print-meta h1 {
+    margin: 0 0 3px;
+    font-size: 17px;
+    line-height: 1.2;
+    color: #1f2937;
+  }
+  body.printing .report-print-section {
+    margin-top: 11px;
+  }
+  body.printing .report-print-section h2 {
+    margin: 0 0 4px;
+    padding: 5px 7px;
+    background: #333;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    break-after: avoid;
+  }
+  body.printing .report-print-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+    gap: 7px;
+    margin-top: 10px;
+    break-inside: avoid;
+  }
+  body.printing .report-print-metric {
+    padding: 8px 9px;
+    border: 1px solid #d1d5db;
+    background: #f8fafc;
+  }
+  body.printing .report-print-metric span,
+  body.printing .report-print-totals span {
+    display: block;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: #64748b;
+  }
+  body.printing .report-print-metric strong,
+  body.printing .report-print-totals strong {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    color: #111827;
+  }
+  body.printing .report-print-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    break-inside: avoid;
+  }
+  body.printing .report-print-document table {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    table-layout: auto;
+  }
+  body.printing .report-print-document thead { display: table-header-group; }
+  body.printing .report-print-document tfoot { display: table-footer-group; }
+  body.printing .report-print-document tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  body.printing .report-print-document th,
+  body.printing .report-print-document td {
+    padding: 5px 7px;
+    border: 1px solid #d1d5db;
+    text-align: left;
+    vertical-align: top;
+    font-size: 9px;
+    overflow-wrap: anywhere;
+  }
+  body.printing .report-print-document th {
+    background: #333;
+    color: #fff;
+    font-weight: 700;
+  }
+  body.printing .report-print-document tbody tr:nth-child(even) td { background: #f7f7f7; }
+  body.printing .report-print-document .num { text-align: right; white-space: nowrap; }
+  body.printing .report-print-empty { padding: 8px; text-align: center; color: #64748b; }
+  body.printing .report-print-expenses .report-print-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  body.printing .report-print-expense-tables {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+  }
+  body.printing .report-print-expense-category {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  body.printing .report-print-expense-category-table,
+  body.printing .report-print-expense-transactions-table {
+    width: 100%;
+    table-layout: fixed;
+  }
+  body.printing .report-print-expense-category-table th,
+  body.printing .report-print-expense-category-table td,
+  body.printing .report-print-expense-transactions-table th,
+  body.printing .report-print-expense-transactions-table td {
+    padding: 6px 8px;
+    font-size: 9.5px;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  body.printing .report-print-expense-transactions-table th:first-child,
+  body.printing .report-print-expense-transactions-table td:first-child,
+  body.printing .report-print-expense-transactions-table th:last-child,
+  body.printing .report-print-expense-transactions-table td:last-child {
+    white-space: nowrap;
+  }
+  body.printing .report-print-expense-description {
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+  body.printing .report-print-totals {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+    margin-top: 8px;
+    border: 1px solid #d1d5db;
+    break-inside: avoid;
+  }
+  body.printing .report-print-totals > div {
+    padding: 8px 10px;
+    background: #f5f5f5;
+  }
+  body.printing .report-print-totals > div + div { border-left: 1px solid #d1d5db; }
+}

@@ -8,6 +8,7 @@ import {
   X,
   Trash2,
   Wallet,
+  Pencil,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -38,6 +39,7 @@ const methodLabels: Record<string, string> = {
 export function SupplierDuesPage() {
   const { suppliers, load: loadSuppliers } = useSupplierStore();
   const user = useSessionStore((s) => s.user);
+  const isAdmin = user?.role.toLowerCase() === "admin";
 
   const [dues, setDues] = useState<SupplierBalance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,12 +53,13 @@ export function SupplierDuesPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyBalance, setHistoryBalance] = useState<SupplierBalance | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [editPayment, setEditPayment] = useState<SupplierPayment | null>(null);
   const historyReq = useRef(0);
 
   const loadDues = async () => {
     setLoading(true);
     try {
-      setDues(await purchaseService.listSupplierDues(""));
+      setDues(await purchaseService.listSupplierBalances(""));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -77,7 +80,7 @@ export function SupplierDuesPage() {
   const runSearch = async () => {
     setLoading(true);
     try {
-      setDues(await purchaseService.listSupplierDues(search.trim() || undefined));
+      setDues(await purchaseService.listSupplierBalances(search.trim() || undefined));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -85,7 +88,8 @@ export function SupplierDuesPage() {
     }
   };
 
-  const totalOutstanding = dues.reduce((s, d) => s + d.balance, 0);
+  const owing = dues.filter((d) => d.balance > 0.001);
+  const totalOutstanding = owing.reduce((s, d) => s + d.balance, 0);
 
   const openHistory = async (supplierId: number) => {
     const req = ++historyReq.current;
@@ -111,6 +115,8 @@ export function SupplierDuesPage() {
     method: string,
     status: string,
     reference: string,
+    notes: string,
+    paymentDate: string,
   ) => {
     await purchaseService.createSupplierPayment(
       {
@@ -119,8 +125,8 @@ export function SupplierDuesPage() {
         payment_method: method,
         status,
         reference: reference || null,
-        notes: null,
-        payment_date: null,
+        notes: notes || null,
+        payment_date: paymentDate || null,
       },
       user?.id ?? null,
     );
@@ -159,7 +165,7 @@ export function SupplierDuesPage() {
         title="Supplier Dues"
         description="Track outstanding balances owed to suppliers and record payments"
         breadcrumb={[{ label: "Suppliers" }, { label: "Dues" }]}
-        meta={`${dues.length} supplier${dues.length !== 1 ? "s" : ""} owing`}
+        meta={`${owing.length} supplier${owing.length !== 1 ? "s" : ""} owing`}
       />
 
       {error && (
@@ -178,7 +184,7 @@ export function SupplierDuesPage() {
         />
         <KpiCard
           title="Suppliers Owing"
-          value={String(dues.length)}
+          value={String(owing.length)}
           icon={Truck}
           tone="red"
         />
@@ -249,11 +255,11 @@ export function SupplierDuesPage() {
           <div className="p-6">
             <EmptyState
               icon={CircleDollarSign}
-              title="No outstanding dues"
+              title="No supplier accounts"
               description={
                 search
                   ? "No suppliers match your search."
-                  : "All supplier balances are settled."
+                  : "No supplier purchases or payment accounts are available."
               }
             />
           </div>
@@ -349,8 +355,8 @@ export function SupplierDuesPage() {
       >
         {payFor && (
           <PaymentForm
-            onSubmit={async (amount, method, status, reference) => {
-              await handleSubmitPayment(payFor.id, amount, method, status, reference);
+            onSubmit={async (amount, method, status, reference, notes, paymentDate) => {
+              await handleSubmitPayment(payFor.id, amount, method, status, reference, notes, paymentDate);
               setPayFor(null);
             }}
             onCancel={() => setPayFor(null)}
@@ -358,6 +364,31 @@ export function SupplierDuesPage() {
               dues.find((d) => d.supplier_id === payFor.id)?.balance ??
               (historyFor === payFor.id ? historyBalance?.balance : 0)
             }
+          />
+        )}
+      </Modal>
+
+      <Modal open={editPayment !== null} title="Edit Supplier Payment" subtitle="Correct this supplier due/payment transaction" onClose={() => setEditPayment(null)} size="md">
+        {editPayment && (
+          <PaymentForm
+            key={editPayment.id}
+            initialPayment={editPayment}
+            onSubmit={async (amount, method, status, reference, notes, paymentDate) => {
+              await purchaseService.updateSupplierPayment(editPayment.id, {
+                supplier_id: editPayment.supplier_id,
+                amount,
+                payment_method: method,
+                status,
+                reference: reference || null,
+                notes: notes || null,
+                payment_date: paymentDate || null,
+              }, user?.id ?? null);
+              const supplierId = editPayment.supplier_id;
+              setEditPayment(null);
+              await loadDues();
+              if (supplierId != null) await openHistory(supplierId);
+            }}
+            onCancel={() => setEditPayment(null)}
           />
         )}
       </Modal>
@@ -420,15 +451,10 @@ export function SupplierDuesPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusBadge status={p.status} />
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDelete(p.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50"
-                        style={{ color: "#DC2626" }}
-                        title="Delete payment"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <button type="button" onClick={() => { setHistoryFor(null); setEditPayment(p); }} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit payment"><Pencil className="h-3.5 w-3.5" /></button>
+                      {isAdmin && historyBalance && historyBalance.balance <= 0.001 && (
+                        <button type="button" onClick={() => setConfirmDelete(p.id)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50" style={{ color: "#DC2626" }} title="Delete cleared payment"><Trash2 className="h-3.5 w-3.5" /></button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -457,7 +483,7 @@ export function SupplierDuesPage() {
       >
         <Alert
           variant="warning"
-          message="Are you sure you want to delete this supplier payment? This action cannot be undone."
+          message="Delete this cleared supplier payment record? The supplier balance will be recalculated and any reopened due will appear again. This cannot be undone."
         />
       </Modal>
     </div>
@@ -468,15 +494,19 @@ function PaymentForm({
   onSubmit,
   onCancel,
   balance,
+  initialPayment,
 }: {
-  onSubmit: (amount: number, method: string, status: string, reference: string) => Promise<void>;
+  onSubmit: (amount: number, method: string, status: string, reference: string, notes: string, paymentDate: string) => Promise<void>;
   onCancel: () => void;
   balance?: number | null;
+  initialPayment?: SupplierPayment | null;
 }) {
-  const [amountStr, setAmountStr] = useState("");
-  const [method, setMethod] = useState("cash");
-  const [status, setStatus] = useState("completed");
-  const [reference, setReference] = useState("");
+  const [amountStr, setAmountStr] = useState(initialPayment ? String(initialPayment.amount) : "");
+  const [method, setMethod] = useState(initialPayment?.payment_method ?? "cash");
+  const [status, setStatus] = useState(initialPayment?.status ?? "completed");
+  const [reference, setReference] = useState(initialPayment?.reference ?? "");
+  const [notes, setNotes] = useState(initialPayment?.notes ?? "");
+  const [paymentDate, setPaymentDate] = useState(initialPayment?.payment_date?.slice(0, 10) ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [amountError, setAmountError] = useState<string | null>(null);
@@ -498,7 +528,7 @@ function PaymentForm({
     setSaving(true);
     setError(null);
     try {
-      await onSubmit(amount, method, status, reference.trim());
+      await onSubmit(amount, method, status, reference.trim(), notes.trim(), paymentDate);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -554,12 +584,16 @@ function PaymentForm({
         onChange={(e) => setReference(e.target.value)}
         disabled={saving}
       />
+      <div className="grid grid-cols-2 gap-4">
+        <Input name="payment_date" label="Payment Date" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} disabled={saving} />
+        <Input name="notes" label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} disabled={saving} />
+      </div>
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onCancel} disabled={saving}>
           Cancel
         </Button>
         <Button type="submit" loading={saving}>
-          Record Payment
+          {initialPayment ? "Save Changes" : "Record Payment"}
         </Button>
       </div>
     </form>

@@ -8,6 +8,7 @@ import {
   Users,
   CircleDollarSign,
   X,
+  Pencil,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -37,9 +38,10 @@ const methodLabels: Record<string, string> = {
 };
 
 export function PaymentsPage() {
-  const { payments, loading, error, load, add, remove } = usePaymentStore();
+  const { payments, loading, error, load, add, remove, update } = usePaymentStore();
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
+  const isAdmin = user?.role.toLowerCase() === "admin";
   
   const [search, setSearch] = useState("");
   const [recordOpen, setRecordOpen] = useState(false);
@@ -49,6 +51,8 @@ export function PaymentsPage() {
   const [memberTotal, setMemberTotal] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [dues, setDues] = useState<MemberBalance[]>([]);
+  const [balances, setBalances] = useState<MemberBalance[]>([]);
+  const [editPayment, setEditPayment] = useState<Payment | null>(null);
   const historyReq = useRef(0);
 
   useEffect(() => {
@@ -58,10 +62,12 @@ export function PaymentsPage() {
 
   useEffect(() => {
     let active = true;
-    paymentService
-      .listCustomerDues()
-      .then((rows) => {
-        if (active) setDues(rows);
+    Promise.all([paymentService.listCustomerDues(), paymentService.listMemberBalances()])
+      .then(([dueRows, balanceRows]) => {
+        if (active) {
+          setDues(dueRows);
+          setBalances(balanceRows);
+        }
       })
       .catch(() => {
         /* dues are supplementary */
@@ -97,7 +103,11 @@ export function PaymentsPage() {
     if (confirmDelete === null) return;
     await remove(confirmDelete);
     setConfirmDelete(null);
+    if (historyFor != null) await openHistory(historyFor);
   };
+
+  const isCleared = (payment: Payment) => payment.member_id != null
+    && (balances.find((balance) => balance.member_id === payment.member_id)?.balance ?? Number.POSITIVE_INFINITY) <= 0.001;
 
   const historyMember = members.find((m) => m.id === historyFor);
 
@@ -140,9 +150,6 @@ export function PaymentsPage() {
                 {dues.length} owing
               </span>
             </div>
-            <Button size="sm" onClick={() => setRecordOpen(true)} icon={<Plus className="h-3.5 w-3.5" />}>
-              Record Payment
-            </Button>
           </div>
           {dues.length === 0 ? (
             <p className="px-4 py-8 text-center text-[13px]" style={{ color: "#64748B" }}>
@@ -357,15 +364,10 @@ export function PaymentsPage() {
                             <History className="h-3.5 w-3.5" />
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDelete(p.id)}
-                          className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50"
-                          style={{ color: "#DC2626" }}
-                          title="Delete payment"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <button type="button" onClick={() => setEditPayment(p)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit payment"><Pencil className="h-3.5 w-3.5" /></button>
+                        {isAdmin && isCleared(p) && (
+                          <button type="button" onClick={() => setConfirmDelete(p.id)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50" style={{ color: "#DC2626" }} title="Delete cleared payment"><Trash2 className="h-3.5 w-3.5" /></button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -392,6 +394,21 @@ export function PaymentsPage() {
           onCancel={() => setRecordOpen(false)}
           members={members}
         />
+      </Modal>
+
+      <Modal open={editPayment !== null} title="Edit Customer Payment" subtitle="Correct this due/payment transaction" onClose={() => setEditPayment(null)} size="md">
+        {editPayment && (
+          <PaymentForm
+            key={editPayment.id}
+            initialPayment={editPayment}
+            onSubmit={async (input) => {
+              await update(editPayment.id, input, user?.id ?? null);
+              setEditPayment(null);
+            }}
+            onCancel={() => setEditPayment(null)}
+            members={members}
+          />
+        )}
       </Modal>
 
       {/* History Modal */}
@@ -444,7 +461,11 @@ export function PaymentsPage() {
                         </span>
                       </div>
                     </div>
-                    <StatusBadge status={p.status} />
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={p.status} />
+                      <button type="button" onClick={() => { setHistoryFor(null); setEditPayment(p); }} className="flex h-7 w-7 items-center justify-center rounded hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit payment"><Pencil className="h-3.5 w-3.5" /></button>
+                      {isAdmin && isCleared(p) && <button type="button" onClick={() => setConfirmDelete(p.id)} className="flex h-7 w-7 items-center justify-center rounded hover:bg-red-50" style={{ color: "#DC2626" }} title="Delete cleared payment"><Trash2 className="h-3.5 w-3.5" /></button>}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -472,7 +493,7 @@ export function PaymentsPage() {
       >
         <Alert
           variant="warning"
-          message="Are you sure you want to delete this payment? This action cannot be undone."
+          message="Delete this cleared payment record? The customer balance will be recalculated and any reopened due will appear again. This cannot be undone."
         />
       </Modal>
     </div>

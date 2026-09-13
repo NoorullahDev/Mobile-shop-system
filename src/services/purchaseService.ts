@@ -29,6 +29,14 @@ export async function createSupplierPayment(
   return invoke<SupplierPayment>("create_supplier_payment", { input, actor: actor ?? null });
 }
 
+export async function updateSupplierPayment(
+  id: number,
+  input: CreateSupplierPaymentInput,
+  actor?: number | null,
+): Promise<SupplierPayment> {
+  return invoke<SupplierPayment>("update_supplier_payment", { id, input, actor: actor ?? null });
+}
+
 export async function listSupplierPayments(search?: string): Promise<SupplierPayment[]> {
   return invoke<SupplierPayment[]>("list_supplier_payments", { search: search ?? null });
 }

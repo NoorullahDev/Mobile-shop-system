@@ -4,14 +4,15 @@ import { Input } from "../components/Input";
 import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
 import type { Member } from "../types/member";
-import type { CreatePaymentInput } from "../types/payment";
-import { PAYMENT_METHODS } from "../types/payment";
+import type { CreatePaymentInput, Payment } from "../types/payment";
+import { PAYMENT_METHODS, PAYMENT_STATUSES } from "../types/payment";
 
 interface PaymentFormProps {
   onSubmit: (input: CreatePaymentInput) => Promise<void>;
   onCancel: () => void;
   members: Member[];
   initialMemberId?: number | null;
+  initialPayment?: Payment | null;
 }
 
 const methodLabels: Record<string, string> = {
@@ -21,17 +22,18 @@ const methodLabels: Record<string, string> = {
   other: "Other",
 };
 
-export function PaymentForm({ onSubmit, onCancel, members, initialMemberId }: PaymentFormProps) {
+export function PaymentForm({ onSubmit, onCancel, members, initialMemberId, initialPayment }: PaymentFormProps) {
   const [form, setForm] = useState<CreatePaymentInput>({
-    member_id: initialMemberId ?? null,
-    amount: 0,
-    payment_method: "cash",
-    payment_type: "",
-    reference: "",
-    notes: "",
-    payment_date: "",
+    member_id: initialPayment?.member_id ?? initialMemberId ?? null,
+    amount: initialPayment?.amount ?? 0,
+    payment_method: initialPayment?.payment_method ?? "cash",
+    payment_type: initialPayment?.payment_type ?? "",
+    status: initialPayment?.status ?? "completed",
+    reference: initialPayment?.reference ?? "",
+    notes: initialPayment?.notes ?? "",
+    payment_date: initialPayment?.payment_date?.slice(0, 10) ?? "",
   });
-  const [amountStr, setAmountStr] = useState("");
+  const [amountStr, setAmountStr] = useState(initialPayment ? String(initialPayment.amount) : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [amountError, setAmountError] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export function PaymentForm({ onSubmit, onCancel, members, initialMemberId }: Pa
         amount,
         payment_method: form.payment_method,
         payment_type: form.payment_type ? form.payment_type.trim() : "",
+        status: form.status ?? "completed",
         reference: form.reference ? form.reference.trim() : "",
         notes: form.notes ? form.notes.trim() : "",
         payment_date: form.payment_date || null,
@@ -105,6 +108,14 @@ export function PaymentForm({ onSubmit, onCancel, members, initialMemberId }: Pa
           disabled={saving}
         />
       </div>
+      <Select
+        name="status"
+        label="Status"
+        options={PAYMENT_STATUSES.map((status) => ({ value: status, label: status }))}
+        value={form.status ?? "completed"}
+        onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
+        disabled={saving}
+      />
       <div className="grid grid-cols-2 gap-4">
         <Input
           name="payment_type"
@@ -142,7 +153,7 @@ export function PaymentForm({ onSubmit, onCancel, members, initialMemberId }: Pa
           Cancel
         </Button>
         <Button type="submit" loading={saving}>
-          Record Payment
+          {initialPayment ? "Save Changes" : "Record Payment"}
         </Button>
       </div>
     </form>

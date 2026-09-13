@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { ReceiptText, RotateCcw } from "lucide-react";
+import { Pencil, ReceiptText, RotateCcw, Trash2 } from "lucide-react";
 import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Button";
+import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { StatusBadge } from "../components/StatusBadge";
 import * as saleService from "../services/saleService";
@@ -35,9 +36,11 @@ interface SaleDetailModalProps {
   open: boolean;
   saleId: number | null;
   onClose: () => void;
+  onEdit?: (sale: Sale) => void;
+  onDelete?: (sale: Sale) => void;
 }
 
-export function SaleDetailModal({ open, saleId, onClose }: SaleDetailModalProps) {
+export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: SaleDetailModalProps) {
   const [sale, setSale] = useState<Sale | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -284,6 +287,10 @@ export function SaleDetailModal({ open, saleId, onClose }: SaleDetailModalProps)
               No return has been recorded against this sale.
             </div>
           )}
+          <div className="flex justify-end gap-2 border-t pt-3" style={{ borderColor: "#E2E8F0" }}>
+            {onDelete && <Button variant="danger" size="sm" onClick={() => onDelete(sale)} icon={<Trash2 className="h-3.5 w-3.5" />}>Delete</Button>}
+            <Button size="sm" onClick={() => onEdit?.(sale)} icon={<Pencil className="h-3.5 w-3.5" />}>Edit Sale</Button>
+          </div>
         </div>
       ) : null}
     </Modal>

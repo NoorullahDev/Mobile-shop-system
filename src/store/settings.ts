@@ -4,6 +4,7 @@ import type { Currency } from "../lib/format";
 
 export interface BusinessProfile {
   businessName: string;
+  ownerName: string;
   logo: string | null;
   phone: string;
   email: string;
@@ -19,6 +20,7 @@ interface SettingsState extends BusinessProfile {
 
 export const useSettingsStore = create<SettingsState>((set) => ({
   businessName: "",
+  ownerName: "",
   logo: null,
   phone: "",
   email: "",
@@ -32,6 +34,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       const map = new Map(settings.map((s) => [s.key, s.value ?? ""]));
       set({
         businessName: map.get("business_name") ?? "",
+        ownerName: map.get("owner_name") ?? "",
         logo: map.get("shop_logo") || null,
         phone: map.get("phone") ?? "",
         email: map.get("email") ?? "",

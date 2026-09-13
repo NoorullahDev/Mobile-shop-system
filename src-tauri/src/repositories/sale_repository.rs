@@ -155,6 +155,90 @@ pub fn mark_imei_sold(conn: &Connection, imei_id: i64, phone_id: i64) -> Result<
     Ok(affected > 0)
 }
 
+pub fn release_imei(conn: &Connection, imei_id: i64, phone_id: i64) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE phone_imeis SET status = 'in_stock', sold_at = NULL WHERE id = ?1 AND phone_id = ?2",
+        params![imei_id, phone_id],
+    )?;
+    Ok(())
+}
+
+pub fn imei_used_by_other_sale(
+    conn: &Connection,
+    imei_id: i64,
+    sale_id: i64,
+) -> Result<bool, AppError> {
+    let used: i64 = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sale_items WHERE imei_id = ?1 AND sale_id <> ?2)",
+        params![imei_id, sale_id],
+        |r| r.get(0),
+    )?;
+    Ok(used != 0)
+}
+
+pub fn increment_stock(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    qty: i64,
+) -> Result<(), AppError> {
+    super::inventory_repository::increment_stock(conn, item_type, item_id, qty)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn update_sale(
+    conn: &Connection,
+    id: i64,
+    member_id: Option<i64>,
+    total_amount: f64,
+    discount: f64,
+    paid_amount: f64,
+    payment_method: &str,
+    notes: Option<&str>,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE sales SET member_id = ?2, total_amount = ?3, discount = ?4, paid_amount = ?5, payment_method = ?6, notes = ?7 WHERE id = ?1",
+        params![id, member_id, total_amount, discount, paid_amount, payment_method, notes],
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn update_sale_item(
+    conn: &Connection,
+    id: i64,
+    item_type: &str,
+    item_id: i64,
+    imei_id: Option<i64>,
+    quantity: i64,
+    unit_price: f64,
+) -> Result<(), AppError> {
+    let (phone_id, accessory_id) = if item_type == "phone" {
+        (Some(item_id), None)
+    } else {
+        (None, Some(item_id))
+    };
+    conn.execute(
+        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6 WHERE id = ?1",
+        params![id, phone_id, accessory_id, imei_id, quantity, unit_price],
+    )?;
+    Ok(())
+}
+
+pub fn delete_sale_item(conn: &Connection, id: i64) -> Result<(), AppError> {
+    conn.execute("DELETE FROM sale_items WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+pub fn delete_sale(conn: &Connection, id: i64) -> Result<(), AppError> {
+    conn.execute("DELETE FROM sale_items WHERE sale_id = ?1", [id])?;
+    let affected = conn.execute("DELETE FROM sales WHERE id = ?1", [id])?;
+    if affected == 0 {
+        return Err(AppError::validation("Sale not found"));
+    }
+    Ok(())
+}
+
 /// Verify an IMEI belongs to the given phone and is still in stock.
 pub fn imei_available(conn: &Connection, imei_id: i64, phone_id: i64) -> Result<bool, AppError> {
     let ok: Option<bool> = conn

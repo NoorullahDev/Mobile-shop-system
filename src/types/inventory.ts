@@ -215,6 +215,7 @@ export interface Product {
   brand: string;
   model: string;
   display_name: string;
+  image_paths?: string[];
   sale_price: number;
   quantity: number;
   storage?: string | null;

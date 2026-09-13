@@ -6,6 +6,8 @@ import {
   ShoppingCart,
   Printer,
   Eye,
+  Pencil,
+  Trash2,
   X,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
@@ -36,14 +38,18 @@ function returnStatusLabel(s?: string) {
 }
 
 export function SalesPage() {
-  const { sales, loading, error, load, add } = useSaleStore();
+  const { sales, loading, error, load, add, update, remove } = useSaleStore();
   const { products, load: loadInventory } = useInventoryStore();
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
+  const isAdmin = user?.role.toLowerCase() === "admin";
   const [search, setSearch] = useState("");
   const [saleOpen, setSaleOpen] = useState(false);
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
   const [viewSale, setViewSale] = useState<Sale | null>(null);
+  const [editSale, setEditSale] = useState<Sale | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Sale | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     load();
@@ -57,6 +63,27 @@ export function SalesPage() {
     await add(input, user?.id ?? null);
     await loadInventory();
     setSaleOpen(false);
+  };
+
+  const handleUpdate = async (input: Parameters<typeof add>[0]) => {
+    if (!editSale) return;
+    await update(editSale.id, input, user?.id ?? null);
+    await loadInventory();
+    setEditSale(null);
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await remove(confirmDelete.id, user?.id ?? null);
+      await loadInventory();
+      setViewSale(null);
+      setEditSale(null);
+      setConfirmDelete(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -269,6 +296,15 @@ export function SalesPage() {
                         >
                           Print
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditSale(s)}
+                          icon={<Pencil className="h-3.5 w-3.5" />}
+                          title={`Edit ${s.receipt_no}`}
+                        >
+                          Edit
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -295,6 +331,32 @@ export function SalesPage() {
         />
       </Modal>
 
+      <Modal
+        open={editSale !== null}
+        title={editSale ? `Edit ${editSale.receipt_no}` : "Edit Sale"}
+        subtitle="Correct invoice items, customer, totals, discount, or payment"
+        onClose={() => setEditSale(null)}
+        size="xl"
+      >
+        {editSale && (
+          <div className="flex flex-col gap-4">
+            <SaleForm
+              key={editSale.id}
+              initialSale={editSale}
+              onSubmit={handleUpdate}
+              onCancel={() => setEditSale(null)}
+              products={products}
+              members={members}
+            />
+            {isAdmin && <div className="border-t pt-3" style={{ borderColor: "#E2E8F0" }}>
+              <Button variant="danger" size="sm" onClick={() => setConfirmDelete(editSale)} icon={<Trash2 className="h-3.5 w-3.5" />}>
+                Delete Sale
+              </Button>
+            </div>}
+          </div>
+        )}
+      </Modal>
+
       {/* Receipt preview + print */}
       <ReceiptModal
         open={receiptSale != null}
@@ -307,7 +369,24 @@ export function SalesPage() {
         open={viewSale != null}
         saleId={viewSale?.id ?? null}
         onClose={() => setViewSale(null)}
+        onEdit={(sale) => { setViewSale(null); setEditSale(sale); }}
+        onDelete={isAdmin ? (sale) => setConfirmDelete(sale) : undefined}
       />
+
+      <Modal
+        open={confirmDelete !== null}
+        title="Delete Sale"
+        onClose={() => setConfirmDelete(null)}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete Sale</Button>
+          </>
+        }
+      >
+        <Alert variant="warning" message={`Delete ${confirmDelete?.receipt_no ?? "this sale"}? Its stock, return, payment, customer due, and report effects will be reversed. This cannot be undone.`} />
+      </Modal>
     </div>
   );
 }

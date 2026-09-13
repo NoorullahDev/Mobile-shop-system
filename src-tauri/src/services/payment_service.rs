@@ -45,6 +45,25 @@ pub fn create(
     input: CreatePaymentInput,
     actor: Option<i64>,
 ) -> Result<Payment, AppError> {
+    let normalized = normalize_input(conn, input)?;
+    let amount = normalized.amount;
+
+    let id = payment_repository::insert(conn, &normalized, actor)?;
+    services::record_activity(conn, actor, "payment", "create", Some(id))?;
+    services::notification_service::notify(
+        conn,
+        actor,
+        "finance",
+        "normal",
+        "Payment received",
+        &format!("A payment of Rs {amount:.2} was recorded."),
+    )?;
+
+    payment_repository::get_by_id(conn, id)?
+        .ok_or_else(|| AppError::Internal("Created payment could not be retrieved".into()))
+}
+
+fn normalize_input(conn: &Connection, input: CreatePaymentInput) -> Result<CreatePaymentInput, AppError> {
     let amount = validate_amount(input.amount)?;
 
     if let Some(mid) = input.member_id {
@@ -53,7 +72,7 @@ pub fn create(
         }
     }
 
-    let normalized = CreatePaymentInput {
+    Ok(CreatePaymentInput {
         member_id: input.member_id,
         amount,
         payment_method: normalize_method(&input.payment_method),
@@ -71,21 +90,22 @@ pub fn create(
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty()),
         payment_date: input.payment_date,
-    };
+    })
+}
 
-    let id = payment_repository::insert(conn, &normalized, actor)?;
-    services::record_activity(conn, actor, "payment", "create", Some(id))?;
-    services::notification_service::notify(
-        conn,
-        actor,
-        "finance",
-        "normal",
-        "Payment received",
-        &format!("A payment of Rs {amount:.2} was recorded."),
-    )?;
-
-    payment_repository::get_by_id(conn, id)?
-        .ok_or_else(|| AppError::Internal("Created payment could not be retrieved".into()))
+pub fn update(
+    conn: &Connection,
+    id: i64,
+    input: CreatePaymentInput,
+    actor: Option<i64>,
+) -> Result<Payment, AppError> {
+    get(conn, id)?;
+    let normalized = normalize_input(conn, input)?;
+    if !payment_repository::update(conn, id, &normalized)? {
+        return Err(AppError::validation("Payment not found"));
+    }
+    services::record_activity(conn, actor, "payment", "update", Some(id))?;
+    get(conn, id)
 }
 
 pub fn list(conn: &Connection, search: Option<String>) -> Result<Vec<Payment>, AppError> {
@@ -102,6 +122,14 @@ pub fn get(conn: &Connection, id: i64) -> Result<Payment, AppError> {
 }
 
 pub fn soft_delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
+    let payment = get(conn, id)?;
+    if let Some(member_id) = payment.member_id {
+        if member_balance(conn, member_id)?.balance > 0.001 {
+            return Err(AppError::validation(
+                "This payment can only be deleted after the customer due is fully cleared",
+            ));
+        }
+    }
     let deleted = payment_repository::soft_delete(conn, id)?;
     if !deleted {
         return Err(AppError::validation("Payment not found"));
@@ -258,5 +286,53 @@ mod tests {
         assert!(all
             .iter()
             .any(|b| b.member_id == mid && (b.balance - 200.0).abs() < 0.001));
+    }
+
+    #[test]
+    fn update_payment_recalculates_customer_balance() {
+        let conn = in_memory_conn();
+        let mid = member_id(&conn);
+        conn.execute(
+            "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method) VALUES ('UP1', ?1, 500, 100, 'cash')",
+            [mid],
+        )
+        .unwrap();
+        let mut input = sample(Some(mid));
+        input.amount = 100.0;
+        let payment = create(&conn, input, None).unwrap();
+        let mut corrected = sample(Some(mid));
+        corrected.amount = 250.0;
+        corrected.payment_method = "card".into();
+
+        let updated = update(&conn, payment.id, corrected, None).unwrap();
+        assert_eq!(updated.amount, 250.0);
+        assert_eq!(updated.payment_method, "card");
+        assert_eq!(member_balance(&conn, mid).unwrap().balance, 150.0);
+        assert!(soft_delete(&conn, payment.id, None).is_err());
+    }
+
+    #[test]
+    fn returns_reduce_customer_credit_and_cleared_payment_can_be_deleted() {
+        let conn = in_memory_conn();
+        let mid = member_id(&conn);
+        conn.execute(
+            "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method) VALUES ('RET-DUE', ?1, 500, 100, 'cash')",
+            [mid],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO returns (return_no, sale_id, member_id, total_sale_price, deduction_amount, refund_amount, refund_method) VALUES ('RD1', ?1, ?2, 100, 10, 90, 'cash')",
+            rusqlite::params![sale_id, mid],
+        )
+        .unwrap();
+        assert_eq!(member_balance(&conn, mid).unwrap().balance, 310.0);
+
+        let mut input = sample(Some(mid));
+        input.amount = 310.0;
+        let payment = create(&conn, input, None).unwrap();
+        assert_eq!(member_balance(&conn, mid).unwrap().balance, 0.0);
+        soft_delete(&conn, payment.id, None).unwrap();
+        assert_eq!(member_balance(&conn, mid).unwrap().balance, 310.0);
     }
 }

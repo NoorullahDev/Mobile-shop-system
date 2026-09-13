@@ -6,7 +6,7 @@ import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
 import type { PhoneImei, Product } from "../types/inventory";
 import type { Member } from "../types/member";
-import type { CreateSaleInput, SaleItemInput } from "../types/sale";
+import type { CreateSaleInput, Sale, SaleItemInput } from "../types/sale";
 import { PAYMENT_METHODS } from "../types/sale";
 import * as inventoryService from "../services/inventoryService";
 import { roundMoney } from "../lib/format";
@@ -17,6 +17,7 @@ function formatPKR(n: number) {
 
 interface Line {
   key: number;
+  sale_item_id?: number | null;
   item_type: "phone" | "accessory";
   item_id: number;
   quantity: number;
@@ -29,6 +30,7 @@ interface SaleFormProps {
   onCancel: () => void;
   products: Product[];
   members: Member[];
+  initialSale?: Sale | null;
 }
 
 const methodLabels: Record<string, string> = {
@@ -40,18 +42,26 @@ const methodLabels: Record<string, string> = {
 
 let lineKey = 0;
 
-export function SaleForm({ onSubmit, onCancel, products, members }: SaleFormProps) {
+export function SaleForm({ onSubmit, onCancel, products, members, initialSale }: SaleFormProps) {
   const inStock = useMemo(
-    () => products.filter((p) => p.quantity > 0),
-    [products],
+    () => products.filter((p) => p.quantity > 0 || initialSale?.items.some((item) => item.item_type === p.item_type && item.item_id === p.item_id)),
+    [products, initialSale],
   );
-  const [lines, setLines] = useState<Line[]>([]);
+  const [lines, setLines] = useState<Line[]>(() => initialSale?.items.map((item) => ({
+    key: ++lineKey,
+    sale_item_id: item.id,
+    item_type: item.item_type,
+    item_id: item.item_id,
+    quantity: item.quantity,
+    imei_id: item.imei_id ?? null,
+    unit_price: item.unit_price,
+  })) ?? []);
   const [imeiByItem, setImeiByItem] = useState<Record<number, PhoneImei[]>>({});
-  const [discount, setDiscount] = useState("0");
-  const [paidAmount, setPaidAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("cash");
-  const [memberId, setMemberId] = useState("");
-  const [notes, setNotes] = useState("");
+  const [discount, setDiscount] = useState(String(initialSale?.discount ?? 0));
+  const [paidAmount, setPaidAmount] = useState(initialSale ? String(initialSale.paid_amount) : "");
+  const [paymentMethod, setPaymentMethod] = useState(initialSale?.payment_method ?? "cash");
+  const [memberId, setMemberId] = useState(initialSale?.member_id ? String(initialSale.member_id) : "");
+  const [notes, setNotes] = useState(initialSale?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,7 +85,8 @@ export function SaleForm({ onSubmit, onCancel, products, members }: SaleFormProp
   const loadImeis = async (itemId: number) => {
     try {
       const all = await inventoryService.listPhoneImeis(itemId);
-      const inStockImeis = all.filter((i) => i.status === "in_stock");
+      const selectedIds = new Set(lines.filter((line) => line.item_id === itemId).map((line) => line.imei_id));
+      const inStockImeis = all.filter((i) => i.status === "in_stock" || selectedIds.has(i.id));
       setImeiByItem((prev) => ({ ...prev, [itemId]: inStockImeis }));
     } catch {
       setImeiByItem((prev) => ({ ...prev, [itemId]: [] }));
@@ -88,6 +99,14 @@ export function SaleForm({ onSubmit, onCancel, products, members }: SaleFormProp
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inStock.length]);
+
+  useEffect(() => {
+    for (const line of lines) {
+      if (line.item_type === "phone") loadImeis(line.item_id);
+    }
+    // Initial edit values only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateLine = (key: number, patch: Partial<Line>) => {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -134,6 +153,7 @@ export function SaleForm({ onSubmit, onCancel, products, members }: SaleFormProp
       return;
     }
     const items: SaleItemInput[] = lines.map((l) => ({
+      sale_item_id: l.sale_item_id ?? null,
       item_type: l.item_type,
       item_id: l.item_id,
       quantity: l.quantity,
@@ -335,7 +355,7 @@ export function SaleForm({ onSubmit, onCancel, products, members }: SaleFormProp
           Cancel
         </Button>
         <Button type="submit" loading={saving}>
-          Complete Sale
+          {initialSale ? "Save Changes" : "Complete Sale"}
         </Button>
       </div>
     </form>

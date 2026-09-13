@@ -4,6 +4,7 @@ use rusqlite::Connection;
 
 use crate::errors::AppError;
 use crate::models::product_return::{CreateReturnInput, ProductReturn, ReturnSummary};
+use crate::models::sale::Sale;
 use crate::repositories::{product_return_repository, sale_repository};
 use crate::services;
 use crate::utils;
@@ -52,11 +53,23 @@ struct Line {
     refund: f64,
 }
 
-pub fn create(
+struct PreparedReturn {
+    sale: Sale,
+    lines: Vec<Line>,
+    total_value: f64,
+    deduction_amount: f64,
+    refund_amount: f64,
+    condition_label: String,
+    refund_method: String,
+    return_date: String,
+    notes: Option<String>,
+}
+
+fn prepare(
     conn: &Connection,
-    input: CreateReturnInput,
-    actor: Option<i64>,
-) -> Result<ProductReturn, AppError> {
+    input: &CreateReturnInput,
+    excluded_return_id: Option<i64>,
+) -> Result<PreparedReturn, AppError> {
     if input.items.is_empty() {
         return Err(AppError::validation(
             "A return must contain at least one item",
@@ -77,7 +90,11 @@ pub fn create(
         .ok_or_else(|| AppError::validation("Sale not found"))?;
 
     let sale_ids: Vec<i64> = sale.items.iter().map(|i| i.id).collect();
-    let mut returned = product_return_repository::returned_qty_by_sale_items(conn, &sale_ids)?;
+    let mut returned = if let Some(return_id) = excluded_return_id {
+        product_return_repository::returned_qty_by_sale_items_excluding(conn, &sale_ids, return_id)?
+    } else {
+        product_return_repository::returned_qty_by_sale_items(conn, &sale_ids)?
+    };
 
     let mut lines: Vec<Line> = Vec::new();
     let mut total_value = 0.0;
@@ -233,35 +250,68 @@ pub fn create(
         .notes
         .as_deref()
         .map(|s| s.trim())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    Ok(PreparedReturn {
+        sale,
+        lines,
+        total_value: utils::round2(total_value),
+        deduction_amount,
+        refund_amount,
+        condition_label,
+        refund_method,
+        return_date,
+        notes,
+    })
+}
+
+fn insert_lines(conn: &Connection, return_id: i64, lines: &[Line]) -> Result<(), AppError> {
+    for line in lines {
+        product_return_repository::insert_return_item(
+            conn, return_id, line.sale_item_id, &line.item_type, line.item_id, line.imei_id,
+            line.product_name.as_deref(), line.imei.as_deref(), line.serial_no.as_deref(),
+            line.quantity, line.unit_price, line.line_total, line.deduction, line.refund,
+            line.reason.as_deref(), &line.condition, line.restock,
+        )?;
+    }
+    Ok(())
+}
+
+pub fn create(
+    conn: &Connection,
+    input: CreateReturnInput,
+    actor: Option<i64>,
+) -> Result<ProductReturn, AppError> {
+    let prepared = prepare(conn, &input, None)?;
 
     // ----- Persist everything in a single transaction -----
     let tx = conn.unchecked_transaction()?;
     let return_no = product_return_repository::next_return_no(&tx)?;
 
-    let reason = lines.iter().find_map(|l| l.reason.clone());
+    let reason = prepared.lines.iter().find_map(|l| l.reason.clone());
 
     let return_id = product_return_repository::insert_return(
         &tx,
         &return_no,
         input.sale_id,
-        sale.member_id,
-        sale.member_name.as_deref(),
-        sale.member_phone.as_deref(),
-        Some(&sale.receipt_no),
-        utils::round2(total_value),
-        deduction_amount,
-        refund_amount,
+        prepared.sale.member_id,
+        prepared.sale.member_name.as_deref(),
+        prepared.sale.member_phone.as_deref(),
+        Some(&prepared.sale.receipt_no),
+        prepared.total_value,
+        prepared.deduction_amount,
+        prepared.refund_amount,
         input.return_charge_percent,
-        &refund_method,
-        Some(&return_date),
+        &prepared.refund_method,
+        Some(&prepared.return_date),
         reason.as_deref(),
-        &condition_label,
-        notes,
+        &prepared.condition_label,
+        prepared.notes.as_deref(),
         actor,
     )?;
 
-    for line in &lines {
+    for line in &prepared.lines {
         product_return_repository::insert_return_item(
             &tx,
             return_id,
@@ -325,6 +375,108 @@ pub fn get(conn: &Connection, id: i64) -> Result<ProductReturn, AppError> {
         .ok_or_else(|| AppError::validation("Return not found"))
 }
 
+fn apply_inventory_change(
+    conn: &Connection,
+    old: &[crate::models::product_return::ReturnItem],
+    new: &[Line],
+) -> Result<(), AppError> {
+    let mut deltas: HashMap<(String, i64), i64> = HashMap::new();
+    for item in old.iter().filter(|item| item.restocked) {
+        *deltas.entry((item.item_type.clone(), item.item_id)).or_default() -= item.quantity;
+    }
+    for item in new.iter().filter(|item| item.restock) {
+        *deltas.entry((item.item_type.clone(), item.item_id)).or_default() += item.quantity;
+    }
+    for ((item_type, item_id), delta) in deltas {
+        if delta > 0 {
+            product_return_repository::increment_stock(conn, &item_type, item_id, delta)?;
+        } else if delta < 0
+            && !sale_repository::decrement_stock(conn, &item_type, item_id, -delta)?
+        {
+            return Err(AppError::validation(
+                "This return cannot be changed because some restocked units have already been sold",
+            ));
+        }
+    }
+
+    let old_imeis: HashMap<i64, bool> = old
+        .iter()
+        .filter_map(|item| item.imei_id.map(|id| (id, item.restocked)))
+        .collect();
+    let new_imeis: HashMap<i64, bool> = new
+        .iter()
+        .filter_map(|item| item.imei_id.map(|id| (id, item.restock)))
+        .collect();
+    for (imei_id, old_restocked) in &old_imeis {
+        if new_imeis.get(imei_id) == Some(old_restocked) {
+            continue;
+        }
+        let status = product_return_repository::imei_status(conn, *imei_id)?;
+        if *old_restocked && status.as_deref() == Some("sold") {
+            return Err(AppError::validation(
+                "This return cannot be changed because its IMEI has already been sold again",
+            ));
+        }
+        product_return_repository::set_imei_status(conn, *imei_id, "sold")?;
+    }
+    for (imei_id, restocked) in &new_imeis {
+        if old_imeis.get(imei_id) == Some(restocked) {
+            continue;
+        }
+        product_return_repository::set_imei_status(
+            conn,
+            *imei_id,
+            if *restocked { "in_stock" } else { "defective" },
+        )?;
+    }
+    Ok(())
+}
+
+pub fn update(
+    conn: &Connection,
+    id: i64,
+    input: CreateReturnInput,
+    actor: Option<i64>,
+) -> Result<ProductReturn, AppError> {
+    let old = get(conn, id)?;
+    if input.sale_id != old.sale_id {
+        return Err(AppError::validation("A return cannot be moved to another sale"));
+    }
+    let prepared = prepare(conn, &input, Some(id))?;
+    let tx = conn.unchecked_transaction()?;
+    apply_inventory_change(&tx, &old.items, &prepared.lines)?;
+    tx.execute("DELETE FROM return_items WHERE return_id = ?1", [id])?;
+    let reason = prepared.lines.iter().find_map(|line| line.reason.clone());
+    product_return_repository::update_return(
+        &tx,
+        id,
+        prepared.total_value,
+        prepared.deduction_amount,
+        prepared.refund_amount,
+        input.return_charge_percent,
+        &prepared.refund_method,
+        Some(&prepared.return_date),
+        reason.as_deref(),
+        &prepared.condition_label,
+        prepared.notes.as_deref(),
+    )?;
+    insert_lines(&tx, id, &prepared.lines)?;
+    tx.commit()?;
+    services::record_activity(conn, actor, "return", "update", Some(id))?;
+    get(conn, id)
+}
+
+pub fn delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
+    let old = get(conn, id)?;
+    let tx = conn.unchecked_transaction()?;
+    apply_inventory_change(&tx, &old.items, &[])?;
+    if !product_return_repository::delete_return(&tx, id)? {
+        return Err(AppError::validation("Return not found"));
+    }
+    tx.commit()?;
+    services::record_activity(conn, actor, "return", "delete", Some(id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,6 +522,7 @@ mod tests {
                 payment_method: Some("cash".into()),
                 notes: None,
                 items: vec![SaleItemInput {
+                    sale_item_id: None,
                     item_type: "phone".into(),
                     item_id: pid,
                     quantity: 1,
@@ -463,6 +616,7 @@ mod tests {
                 payment_method: Some("cash".into()),
                 notes: None,
                 items: vec![SaleItemInput {
+                    sale_item_id: None,
                     item_type: "accessory".into(),
                     item_id: aid,
                     quantity: 5,
@@ -551,6 +705,7 @@ mod tests {
                 payment_method: Some("cash".into()),
                 notes: None,
                 items: vec![SaleItemInput {
+                    sale_item_id: None,
                     item_type: "phone".into(),
                     item_id: phone_id,
                     quantity: qty,
@@ -763,5 +918,42 @@ mod tests {
         assert_eq!(row.return_count, 2);
         assert!(row.returned_amount > 0.0);
         assert!(row.returns.is_empty());
+    }
+
+    #[test]
+    fn edits_return_quantity_condition_and_refund_atomically() {
+        let conn = in_memory_conn();
+        let aid = accessory(&conn);
+        let sale = accessory_sale(&conn, aid);
+        let sid = sale.items[0].id;
+        let original = create(&conn, return_input(sale.id, sid, 2, "sellable"), None).unwrap();
+        assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 2);
+
+        let mut corrected = return_input(sale.id, sid, 1, "damaged");
+        corrected.return_charge_percent = 10.0;
+        let updated = update(&conn, original.id, corrected, None).unwrap();
+
+        assert_eq!(updated.total_sale_price, 30.0);
+        assert_eq!(updated.deduction_amount, 3.0);
+        assert_eq!(updated.refund_amount, 27.0);
+        assert!(!updated.items[0].restocked);
+        assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 0);
+        assert_eq!(sale_service::get(&conn, sale.id).unwrap().return_status, "partial");
+    }
+
+    #[test]
+    fn deleting_return_reverses_stock_and_sale_status() {
+        let conn = in_memory_conn();
+        let aid = accessory(&conn);
+        let sale = accessory_sale(&conn, aid);
+        let ret = create(&conn, return_input(sale.id, sale.items[0].id, 2, "sellable"), None).unwrap();
+        assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 2);
+
+        delete(&conn, ret.id, None).unwrap();
+
+        assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 0);
+        let sale = sale_service::get(&conn, sale.id).unwrap();
+        assert_eq!(sale.return_status, "none");
+        assert_eq!(sale.returned_amount, 0.0);
     }
 }

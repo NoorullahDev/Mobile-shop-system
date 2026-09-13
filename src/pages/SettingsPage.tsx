@@ -99,6 +99,7 @@ export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("business");
 
   const [businessName, setBusinessName] = useState("");
+  const [ownerName, setOwnerName] = useState("");
   const [currency, setCurrency] = useState("PKR");
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
@@ -118,6 +119,7 @@ export function SettingsPage() {
         const settings = await settingsService.getAllSettings();
         const map = new Map(settings.map((s) => [s.key, s.value ?? ""]));
         setBusinessName(map.get("business_name") ?? "");
+        setOwnerName(map.get("owner_name") ?? "");
         const savedCurrency = (map.get("currency") ?? "PKR") as "PKR" | "USD";
         setCurrency(savedCurrency);
         setActiveCurrency(savedCurrency);
@@ -151,20 +153,24 @@ export function SettingsPage() {
     setError(null);
     setMessage(null);
     try {
-      const entries: Array<[string, string]> = [];
-      if (businessName.trim()) entries.push(["business_name", businessName]);
-      if (currency.trim()) entries.push(["currency", currency]);
-      if (address.trim()) entries.push(["address", address]);
-      if (phone.trim()) entries.push(["phone", phone]);
-      if (email.trim()) entries.push(["email", email]);
-      entries.push(["shop_logo", logo ?? ""]);
+      const savedCurrency = (currency.trim() || "PKR") as "PKR" | "USD";
+      const entries: Array<[string, string]> = [
+        ["business_name", businessName.trim()],
+        ["owner_name", ownerName.trim()],
+        ["address", address.trim()],
+        ["phone", phone.trim()],
+        ["currency", savedCurrency],
+        ["shop_logo", logo ?? ""],
+      ];
       for (const [k, v] of entries) {
         await settingsService.updateSetting(k, v, actor);
       }
-      if (currency.trim()) setActiveCurrency(currency as "PKR" | "USD");
+      setCurrency(savedCurrency);
+      setActiveCurrency(savedCurrency);
       useSettingsStore.getState().applyChanges({
         businessName: businessName.trim(),
-        currency: (currency.trim() || "PKR") as "PKR" | "USD",
+        ownerName: ownerName.trim(),
+        currency: savedCurrency,
         address: address.trim(),
         phone: phone.trim(),
         email: email.trim(),
@@ -236,101 +242,106 @@ export function SettingsPage() {
                 <span className="text-[13px]">Loading settings...</span>
               </div>
             ) : (
-              <Card title="Business Profile">
-                <div className="mb-4 flex items-center gap-4">
-                  <div
-                    className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg"
-                    style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}
-                  >
-                    {logo ? (
-                      <img src={logo} alt="Shop logo" className="h-full w-full object-cover" />
-                    ) : (
-                      <Store className="h-7 w-7" style={{ color: "#94A3B8" }} />
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex items-center gap-2">
-                      <input
-                        ref={logoInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleLogoChange}
-                      />
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => logoInputRef.current?.click()}
-                        icon={<ImagePlus className="h-3.5 w-3.5" />}
-                      >
-                        {logo ? "Change Logo" : "Upload Logo"}
-                      </Button>
-                      {logo && (
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => { setLogo(null); setLogoError(null); }}
-                          icon={<Trash2 className="h-3.5 w-3.5" />}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </div>
-                    {logoError && <span className="text-[11px]" style={{ color: "#DC2626" }}>{logoError}</span>}
-                    <span className="text-[11px]" style={{ color: "#94A3B8" }}>
-                      Logo · Business Name · Phone · Email · Address · Currency
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Input
-                    label="Business Name"
-                    value={businessName}
-                    onChange={(e) => setBusinessName(e.target.value)}
-                    placeholder="e.g. Al-Haseeb Mobile Store"
-                  />
-                  <Input
-                    label="Currency"
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value)}
-                    placeholder="PKR"
-                    hint="Used on all invoices and reports"
-                  />
-                  <Input
-                    label="Phone Number"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+92 300 1234567"
-                  />
-                  <Input
-                    label="Email Address"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="shop@example.com"
-                  />
-                  <div className="sm:col-span-2">
+              <div className="space-y-5">
+                <Card
+                  title="General"
+                  subtitle="Showroom identity used by the application and newly generated documents."
+                  actions={
+                    <Button
+                      size="sm"
+                      onClick={handleSave}
+                      loading={saving}
+                      icon={<Save className="h-3.5 w-3.5" />}
+                    >
+                      {saving ? "Saving..." : "Save Changes"}
+                    </Button>
+                  }
+                >
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <Input
-                      label="Shop Address"
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      placeholder="Street, City, Province"
+                      label="Showroom / Business Name"
+                      value={businessName}
+                      onChange={(e) => setBusinessName(e.target.value)}
+                      placeholder="e.g. Al-Haseeb Mobile Store"
+                    />
+                    <Input
+                      label="Owner Name"
+                      value={ownerName}
+                      onChange={(e) => setOwnerName(e.target.value)}
+                      placeholder="Owner name"
+                    />
+                    <div className="sm:col-span-2">
+                      <Input
+                        label="Address"
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                        placeholder="Street, City, Province"
+                      />
+                    </div>
+                    <Input
+                      label="Phone Number"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+92 300 1234567"
+                    />
+                    <Input
+                      label="Currency"
+                      value={currency}
+                      onChange={(e) => setCurrency(e.target.value)}
+                      placeholder="PKR"
+                      hint="Used on all invoices and reports"
                     />
                   </div>
-                </div>
+                </Card>
 
-                <div className="mt-4 flex justify-end">
-                  <Button
-                    size="sm"
-                    onClick={handleSave}
-                    loading={saving}
-                    icon={<Save className="h-3.5 w-3.5" />}
-                  >
-                    {saving ? "Saving..." : "Save Changes"}
-                  </Button>
-                </div>
-              </Card>
+                <Card
+                  title="Shop Logo"
+                  subtitle="PNG, JPEG, or WebP. The same logo is used throughout the application and generated documents."
+                >
+                  <div className="flex items-center gap-4">
+                    <div
+                      className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg"
+                      style={{ background: "#F8FAFC", border: "1px dashed #CBD5E1" }}
+                    >
+                      {logo ? (
+                        <img src={logo} alt="Shop logo" className="h-full w-full object-contain p-2" />
+                      ) : (
+                        <Store className="h-8 w-8" style={{ color: "#94A3B8" }} />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={logoInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={handleLogoChange}
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => logoInputRef.current?.click()}
+                          icon={<ImagePlus className="h-3.5 w-3.5" />}
+                        >
+                          {logo ? "Change Logo" : "Upload Logo"}
+                        </Button>
+                        {logo && (
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => { setLogo(null); setLogoError(null); }}
+                            icon={<Trash2 className="h-3.5 w-3.5" />}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+                      {logoError && <span className="text-[11px]" style={{ color: "#DC2626" }}>{logoError}</span>}
+                    </div>
+                  </div>
+                </Card>
+              </div>
             ))}
 
           {activeTab === "receipt" && <ReceiptSettingsPage />}

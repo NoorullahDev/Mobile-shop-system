@@ -15,7 +15,6 @@ import { ReturnsPage } from "./pages/ReturnsPage";
 import { POSPage } from "./pages/POSPage";
 import { ExpensesPage } from "./pages/ExpensesPage";
 import { ReportsPage } from "./pages/ReportsPage";
-import { ProfitLossPage } from "./pages/ProfitLossPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ReceiptSettingsPage } from "./pages/ReceiptSettingsPage";
 import { UsersPage } from "./pages/UsersPage";
@@ -122,7 +121,6 @@ export default function App() {
             <Route path="accessories" element={<AccessoriesPage />} />
             <Route path="purchases" element={<PurchasesPage />} />
             <Route path="supplier-dues" element={<SupplierDuesPage />} />
-            <Route path="reports/profit" element={<ProfitLossPage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="activity" element={<ActivityLogsPage />} />
             <Route path="notifications" element={<NotificationsPage />} />

@@ -76,3 +76,18 @@ export interface ProfitLoss {
   sales_count: number;
   monthly: MonthlyProfitPoint[];
 }
+
+export type ReportType =
+  | "all"
+  | "sales-pos"
+  | "sales-history"
+  | "returns"
+  | "products"
+  | "inventory"
+  | "purchases"
+  | "customers"
+  | "customer-dues"
+  | "suppliers"
+  | "supplier-dues"
+  | "expenses"
+  | "profit-loss";

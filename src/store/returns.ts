@@ -9,6 +9,8 @@ interface ReturnsState {
   load: (search?: string) => Promise<void>;
   add: (input: CreateReturnInput, actor?: number | null) => Promise<ProductReturn | null>;
   get: (id: number) => Promise<ProductReturn | null>;
+  update: (id: number, input: CreateReturnInput, actor?: number | null) => Promise<ProductReturn>;
+  remove: (id: number, actor?: number | null) => Promise<void>;
 }
 
 export const useReturnStore = create<ReturnsState>((set) => ({
@@ -46,5 +48,17 @@ export const useReturnStore = create<ReturnsState>((set) => ({
       set({ error: String(e) });
       return null;
     }
+  },
+
+  update: async (id, input, actor) => {
+    const updated = await returnService.updateReturn(id, input, actor);
+    const summary: ReturnSummary = { ...updated, item_count: updated.items.length };
+    set((state) => ({ returns: state.returns.map((item) => item.id === id ? summary : item) }));
+    return updated;
+  },
+
+  remove: async (id, actor) => {
+    await returnService.deleteReturn(id, actor);
+    set((state) => ({ returns: state.returns.filter((item) => item.id !== id) }));
   },
 }));

@@ -479,6 +479,18 @@ pub fn insert_supplier_payment(
     Ok(conn.last_insert_rowid())
 }
 
+pub fn update_supplier_payment(
+    conn: &Connection,
+    id: i64,
+    input: &crate::models::purchase::CreateSupplierPaymentInput,
+) -> Result<bool, AppError> {
+    let affected = conn.execute(
+        "UPDATE supplier_payments SET supplier_id = ?2, amount = ?3, payment_method = ?4, status = ?5, reference = ?6, notes = ?7, payment_date = COALESCE(?8, payment_date), updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0",
+        params![id, input.supplier_id, input.amount, input.payment_method, input.status, input.reference, input.notes, input.payment_date],
+    )?;
+    Ok(affected > 0)
+}
+
 pub fn get_supplier_payment(
     conn: &Connection,
     id: i64,

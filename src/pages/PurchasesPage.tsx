@@ -244,15 +244,15 @@ export function PurchasesPage() {
                       <td style={{ color: "#64748B", fontSize: "12px" }}>{formatDate(p.created_at)}</td>
                       <td>
                         <div className="flex justify-end">
-                          <button
-                            type="button"
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => openDetail(p)}
-                            className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50"
-                            style={{ color: "#3B6FD4" }}
-                            title="View details"
+                            icon={<FileText className="h-3.5 w-3.5" />}
+                            title={`View ${p.purchase_no}`}
                           >
-                            <FileText className="h-3.5 w-3.5" />
-                          </button>
+                            View
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -394,6 +394,11 @@ export function PurchasesPage() {
                                 {[it.condition, it.warranty].filter(Boolean).join(" · ")}
                               </div>
                             )}
+                            {it.serials && it.serials.length > 0 && (
+                              <div className="font-mono text-[11px]" style={{ color: "#64748B" }}>
+                                IMEI / Serial: {it.serials.join(", ")}
+                              </div>
+                            )}
                           </td>
                           <td className="text-right" style={{ fontSize: "13px", color: "#475569" }}>
                             {it.quantity}
@@ -413,7 +418,15 @@ export function PurchasesPage() {
                   </table>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                  <div className="rounded-lg p-3" style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+                    <div className="text-[11px] uppercase tracking-wide" style={{ color: "#94A3B8" }}>Subtotal</div>
+                    <div className="mt-1 amount text-[15px] font-bold" style={{ color: "#0F172A" }}>{formatMoney(detail.total_amount + detail.discount)}</div>
+                  </div>
+                  <div className="rounded-lg p-3" style={{ background: "#FEF2F2", border: "1px solid #FEE2E2" }}>
+                    <div className="text-[11px] uppercase tracking-wide" style={{ color: "#94A3B8" }}>Discount</div>
+                    <div className="mt-1 amount text-[15px] font-bold" style={{ color: "#DC2626" }}>{formatMoney(detail.discount)}</div>
+                  </div>
                   <div
                     className="rounded-lg p-3"
                     style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}

@@ -20,6 +20,14 @@ export async function getPayment(id: number): Promise<Payment> {
   return invoke<Payment>("get_payment", { id });
 }
 
+export async function updatePayment(
+  id: number,
+  input: CreatePaymentInput,
+  actor?: number | null,
+): Promise<Payment> {
+  return invoke<Payment>("update_payment", { id, input, actor: actor ?? null });
+}
+
 export async function deletePayment(id: number, actor?: number | null): Promise<void> {
   return invoke<void>("delete_payment", { id, actor: actor ?? null });
 }

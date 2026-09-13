@@ -9,6 +9,7 @@ interface PaymentsState {
   load: (search?: string) => Promise<void>;
   add: (input: CreatePaymentInput, actor?: number | null) => Promise<void>;
   remove: (id: number) => Promise<void>;
+  update: (id: number, input: CreatePaymentInput, actor?: number | null) => Promise<void>;
 }
 
 export const usePaymentStore = create<PaymentsState>((set) => ({
@@ -46,5 +47,10 @@ export const usePaymentStore = create<PaymentsState>((set) => ({
       set({ error: String(e) });
       throw e;
     }
+  },
+
+  update: async (id, input, actor) => {
+    const updated = await paymentService.updatePayment(id, input, actor);
+    set((state) => ({ payments: state.payments.map((payment) => payment.id === id ? updated : payment) }));
   },
 }));

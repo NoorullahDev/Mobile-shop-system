@@ -270,6 +270,17 @@ pub fn create_supplier_payment(
     input: CreateSupplierPaymentInput,
     actor: Option<i64>,
 ) -> Result<SupplierPayment, AppError> {
+    let normalized = normalize_supplier_payment(conn, input)?;
+    let id = purchase_repository::insert_supplier_payment(conn, &normalized, actor)?;
+    services::record_activity(conn, actor, "supplier_payment", "create", Some(id))?;
+    purchase_repository::get_supplier_payment(conn, id)?
+        .ok_or_else(|| AppError::Internal("Created payment could not be retrieved".into()))
+}
+
+fn normalize_supplier_payment(
+    conn: &Connection,
+    input: CreateSupplierPaymentInput,
+) -> Result<CreateSupplierPaymentInput, AppError> {
     if !input.amount.is_finite() || input.amount <= 0.0 {
         return Err(AppError::validation(
             "Payment amount must be greater than zero",
@@ -282,7 +293,7 @@ pub fn create_supplier_payment(
         }
     }
 
-    let normalized = CreateSupplierPaymentInput {
+    Ok(CreateSupplierPaymentInput {
         supplier_id: input.supplier_id,
         amount,
         payment_method: Some(normalize_payment_method(
@@ -298,12 +309,25 @@ pub fn create_supplier_payment(
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty()),
         payment_date: input.payment_date,
-    };
+    })
+}
 
-    let id = purchase_repository::insert_supplier_payment(conn, &normalized, actor)?;
-    services::record_activity(conn, actor, "supplier_payment", "create", Some(id))?;
+pub fn update_supplier_payment(
+    conn: &Connection,
+    id: i64,
+    input: CreateSupplierPaymentInput,
+    actor: Option<i64>,
+) -> Result<SupplierPayment, AppError> {
+    if purchase_repository::get_supplier_payment(conn, id)?.is_none() {
+        return Err(AppError::validation("Payment not found"));
+    }
+    let normalized = normalize_supplier_payment(conn, input)?;
+    if !purchase_repository::update_supplier_payment(conn, id, &normalized)? {
+        return Err(AppError::validation("Payment not found"));
+    }
+    services::record_activity(conn, actor, "supplier_payment", "update", Some(id))?;
     purchase_repository::get_supplier_payment(conn, id)?
-        .ok_or_else(|| AppError::Internal("Created payment could not be retrieved".into()))
+        .ok_or_else(|| AppError::validation("Payment not found"))
 }
 
 pub fn list_supplier_payments(
@@ -325,6 +349,15 @@ pub fn delete_supplier_payment(
     id: i64,
     actor: Option<i64>,
 ) -> Result<(), AppError> {
+    let payment = purchase_repository::get_supplier_payment(conn, id)?
+        .ok_or_else(|| AppError::validation("Payment not found"))?;
+    if let Some(supplier_id) = payment.supplier_id {
+        if supplier_balance(conn, supplier_id)?.balance > 0.001 {
+            return Err(AppError::validation(
+                "This payment can only be deleted after the supplier due is fully cleared",
+            ));
+        }
+    }
     let deleted = purchase_repository::soft_delete_supplier_payment(conn, id)?;
     if !deleted {
         return Err(AppError::validation("Payment not found"));
@@ -624,5 +657,51 @@ mod tests {
         // A fully-paid purchase should not appear in supplier dues.
         let dues = list_supplier_dues(&conn, None).unwrap();
         assert_eq!(dues.len(), 0);
+    }
+
+    #[test]
+    fn supplier_payment_update_and_cleared_delete_recalculate_balance() {
+        let conn = in_memory_conn();
+        let sid = supplier(&conn);
+        let iid = phone_item(&conn, Some(sid));
+        let mut purchase = purchase_input(iid, Some(sid));
+        purchase.paid_amount = Some(0.0);
+        create_purchase(&conn, purchase, None).unwrap();
+
+        let payment = create_supplier_payment(
+            &conn,
+            CreateSupplierPaymentInput {
+                supplier_id: Some(sid),
+                amount: 100.0,
+                payment_method: Some("cash".into()),
+                status: Some("completed".into()),
+                reference: None,
+                notes: None,
+                payment_date: None,
+            },
+            None,
+        )
+        .unwrap();
+        assert!(delete_supplier_payment(&conn, payment.id, None).is_err());
+        let corrected = update_supplier_payment(
+            &conn,
+            payment.id,
+            CreateSupplierPaymentInput {
+                supplier_id: Some(sid),
+                amount: 200.0,
+                payment_method: Some("bank_transfer".into()),
+                status: Some("completed".into()),
+                reference: Some("BANK-1".into()),
+                notes: None,
+                payment_date: None,
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(corrected.amount, 200.0);
+        assert_eq!(supplier_balance(&conn, sid).unwrap().balance, 0.0);
+
+        delete_supplier_payment(&conn, payment.id, None).unwrap();
+        assert_eq!(supplier_balance(&conn, sid).unwrap().balance, 200.0);
     }
 }

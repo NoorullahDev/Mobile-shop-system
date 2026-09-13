@@ -41,6 +41,66 @@ const methodLabels: Record<string, { label: string; icon: typeof Banknote }> = {
   other: { label: "Other", icon: CircleCheck },
 };
 
+const posImageCache = new Map<string, Promise<string>>();
+
+function loadPosProductImage(path: string) {
+  let pending = posImageCache.get(path);
+  if (!pending) {
+    pending = inventoryService.readProductImage(path);
+    posImageCache.set(path, pending);
+  }
+  return pending;
+}
+
+function POSProductThumbnail({ product }: { product: Product }) {
+  const imagePath = product.image_paths?.[0];
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const FallbackIcon = product.item_type === "phone" ? Smartphone : Headphones;
+
+  useEffect(() => {
+    let active = true;
+    setSrc(null);
+    setFailed(false);
+    if (imagePath) {
+      loadPosProductImage(imagePath)
+        .then((value) => {
+          if (active) setSrc(value);
+        })
+        .catch(() => {
+          posImageCache.delete(imagePath);
+          if (active) setFailed(true);
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [imagePath]);
+
+  const fallbackStyle = {
+    background: product.item_type === "phone" ? "#EEF2FF" : "#F0FDF4",
+    color: product.item_type === "phone" ? "#3B6FD4" : "#16A34A",
+  };
+
+  return (
+    <span
+      className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
+      style={!imagePath || failed || !src ? fallbackStyle : undefined}
+    >
+      {imagePath && !failed && src ? (
+        <img
+          src={src}
+          alt={product.display_name}
+          className="h-full w-full object-contain"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <FallbackIcon className="h-5 w-5" />
+      )}
+    </span>
+  );
+}
+
 interface CartLine {
   key: number;
   item_type: "phone" | "accessory";
@@ -335,8 +395,6 @@ export function POSPage() {
                   (l) => l.item_type === p.item_type && l.item_id === p.item_id,
                 );
                 const soldOut = p.quantity === 0 || (inCart ? inCart.quantity >= p.quantity : false);
-                const cardIcon = p.item_type === "phone" ? Smartphone : Headphones;
-                const CardIcon = cardIcon;
                 return (
                   <button
                     key={`${p.item_type}:${p.item_id}`}
@@ -350,15 +408,7 @@ export function POSPage() {
                     }}
                   >
                     <div className="flex items-center gap-2.5 px-3 pt-3">
-                      <span
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-                        style={{
-                          background: p.item_type === "phone" ? "#EEF2FF" : "#F0FDF4",
-                          color: p.item_type === "phone" ? "#3B6FD4" : "#16A34A",
-                        }}
-                      >
-                        <CardIcon className="h-4 w-4" />
-                      </span>
+                      <POSProductThumbnail product={p} />
                       <div className="min-w-0">
                         <div className="truncate text-[13px] font-semibold" style={{ color: "#0F172A" }}>
                           {p.brand} {p.model}

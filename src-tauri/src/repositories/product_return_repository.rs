@@ -171,6 +171,167 @@ pub fn returned_qty_by_sale_items(
     Ok(out)
 }
 
+pub fn returned_qty_by_sale_items_excluding(
+    conn: &Connection,
+    sale_item_ids: &[i64],
+    excluded_return_id: i64,
+) -> Result<HashMap<i64, i64>, AppError> {
+    let mut out = HashMap::new();
+    if sale_item_ids.is_empty() {
+        return Ok(out);
+    }
+    let placeholders = vec!["?"; sale_item_ids.len()].join(",");
+    let sql = format!(
+        "SELECT sale_item_id, SUM(quantity) FROM return_items WHERE return_id <> ? AND sale_item_id IN ({placeholders}) GROUP BY sale_item_id"
+    );
+    let values = std::iter::once(excluded_return_id).chain(sale_item_ids.iter().copied());
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(values), |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    for row in rows {
+        let (id, qty) = row?;
+        out.insert(id, qty);
+    }
+    Ok(out)
+}
+
+pub fn restocked_qty_by_sale_items(
+    conn: &Connection,
+    sale_item_ids: &[i64],
+) -> Result<HashMap<i64, i64>, AppError> {
+    let mut out = HashMap::new();
+    if sale_item_ids.is_empty() {
+        return Ok(out);
+    }
+    let placeholders = vec!["?"; sale_item_ids.len()].join(",");
+    let sql = format!(
+        "SELECT sale_item_id, SUM(quantity) FROM return_items WHERE restocked = 1 AND sale_item_id IN ({placeholders}) GROUP BY sale_item_id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(sale_item_ids.iter().copied()), |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    for row in rows {
+        let (id, qty) = row?;
+        out.insert(id, qty);
+    }
+    Ok(out)
+}
+
+pub fn sync_sale_snapshot(
+    conn: &Connection,
+    sale_id: i64,
+    member_id: Option<i64>,
+) -> Result<(), AppError> {
+    let member: Option<(String, Option<String>)> = match member_id {
+        Some(id) => conn
+            .query_row("SELECT name, phone FROM members WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?,
+        None => None,
+    };
+    let (name, phone) = member.map(|m| (Some(m.0), m.1)).unwrap_or((None, None));
+    conn.execute(
+        "UPDATE returns SET member_id = ?2, customer_name = ?3, customer_phone = ?4 WHERE sale_id = ?1",
+        params![sale_id, member_id, name, phone],
+    )?;
+    Ok(())
+}
+
+pub fn recalculate_for_sale(conn: &Connection, sale_id: i64) -> Result<(), AppError> {
+    let returns = returns_for_sale(conn, sale_id)?;
+    for ret in returns {
+        let mut values = Vec::with_capacity(ret.items.len());
+        let mut total = 0.0;
+        for item in &ret.items {
+            let unit_price: f64 = conn.query_row(
+                "SELECT unit_price FROM sale_items WHERE id = ?1",
+                [item.sale_item_id],
+                |r| r.get(0),
+            )?;
+            let line_total = crate::utils::round2(unit_price * item.quantity as f64);
+            total += line_total;
+            values.push((item.id, unit_price, line_total));
+        }
+        total = crate::utils::round2(total);
+        let old_percent_deduction = crate::utils::round2(ret.total_sale_price * ret.return_charge_percent / 100.0);
+        let fixed = (old_percent_deduction - ret.deduction_amount).abs() > 0.011;
+        let target_deduction = if fixed {
+            ret.deduction_amount
+        } else {
+            crate::utils::round2(total * ret.return_charge_percent / 100.0)
+        };
+        if target_deduction > total {
+            return Err(AppError::validation("The corrected sale price is lower than an existing return deduction"));
+        }
+        let mut allocated = 0.0;
+        let count = values.len();
+        for (index, (item_id, unit_price, line_total)) in values.into_iter().enumerate() {
+            let deduction = if index + 1 == count {
+                crate::utils::round2(target_deduction - allocated)
+            } else {
+                let value = crate::utils::round2((line_total / total) * target_deduction);
+                allocated += value;
+                value
+            };
+            let refund = crate::utils::round2(line_total - deduction);
+            conn.execute(
+                "UPDATE return_items SET unit_price = ?2, line_total = ?3, deduction_amount = ?4, refund_amount = ?5 WHERE id = ?1",
+                params![item_id, unit_price, line_total, deduction, refund],
+            )?;
+        }
+        conn.execute(
+            "UPDATE returns SET total_sale_price = ?2, deduction_amount = ?3, refund_amount = ?4 WHERE id = ?1",
+            params![ret.id, total, target_deduction, crate::utils::round2(total - target_deduction)],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn delete_for_sale(conn: &Connection, sale_id: i64) -> Result<(), AppError> {
+    conn.execute(
+        "DELETE FROM return_items WHERE return_id IN (SELECT id FROM returns WHERE sale_id = ?1)",
+        [sale_id],
+    )?;
+    conn.execute("DELETE FROM returns WHERE sale_id = ?1", [sale_id])?;
+    Ok(())
+}
+
+pub fn delete_return(conn: &Connection, id: i64) -> Result<bool, AppError> {
+    conn.execute("DELETE FROM return_items WHERE return_id = ?1", [id])?;
+    Ok(conn.execute("DELETE FROM returns WHERE id = ?1", [id])? > 0)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn update_return(
+    conn: &Connection,
+    id: i64,
+    total_sale_price: f64,
+    deduction_amount: f64,
+    refund_amount: f64,
+    return_charge_percent: f64,
+    refund_method: &str,
+    return_date: Option<&str>,
+    reason: Option<&str>,
+    condition: &str,
+    notes: Option<&str>,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE returns SET total_sale_price = ?2, deduction_amount = ?3, refund_amount = ?4, return_charge_percent = ?5, refund_method = ?6, return_date = ?7, reason = ?8, condition = ?9, notes = ?10 WHERE id = ?1",
+        params![id, total_sale_price, deduction_amount, refund_amount, return_charge_percent, refund_method, return_date, reason, condition, notes],
+    )?;
+    Ok(())
+}
+
+pub fn set_imei_status(conn: &Connection, imei_id: i64, status: &str) -> Result<(), AppError> {
+    let sold_at: Option<String> = if status == "sold" { Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()) } else { None };
+    conn.execute(
+        "UPDATE phone_imeis SET status = ?2, sold_at = ?3 WHERE id = ?1",
+        params![imei_id, status, sold_at],
+    )?;
+    Ok(())
+}
+
 /// Returns the current status of an IMEI (e.g. "sold", "in_stock") if it exists.
 pub fn imei_status(conn: &Connection, imei_id: i64) -> Result<Option<String>, AppError> {
     let s: Option<String> = conn

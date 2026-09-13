@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Search, X, RotateCcw, Eye, Receipt as ReceiptIcon } from "lucide-react";
+import { Plus, Search, X, RotateCcw, Eye, Pencil, Trash2, Receipt as ReceiptIcon } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
 import { Button, Spinner } from "../components/Button";
@@ -10,6 +10,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { useReturnStore } from "../store/returns";
 import { NewReturnModal } from "./NewReturnModal";
 import type { ProductReturn, ReturnSummary } from "../types/return";
+import { useSessionStore } from "../store/session";
 
 function formatPKR(n: number) {
   return `Rs. ${n.toLocaleString("en-PK")}`;
@@ -29,11 +30,16 @@ function formatDate(s?: string | null) {
 }
 
 export function ReturnsPage() {
-  const { returns, loading, error, load, get } = useReturnStore();
+  const { returns, loading, error, load, get, remove } = useReturnStore();
+  const user = useSessionStore((state) => state.user);
+  const isAdmin = user?.role.toLowerCase() === "admin";
   const [search, setSearch] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [detail, setDetail] = useState<ProductReturn | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [editReturn, setEditReturn] = useState<ProductReturn | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<ProductReturn | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     load();
@@ -46,6 +52,23 @@ export function ReturnsPage() {
     const full = await get(r.id);
     setDetail(full);
     setDetailLoading(false);
+  };
+
+  const openEdit = async (r: ReturnSummary | ProductReturn) => {
+    const full = "items" in r ? r : await get(r.id);
+    if (full) setEditReturn(full);
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await remove(confirmDelete.id, user?.id ?? null);
+      setConfirmDelete(null);
+      setDetail(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -209,14 +232,10 @@ export function ReturnsPage() {
                       {formatDate(r.return_date ?? r.created_at)}
                     </td>
                     <td className="text-center">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        icon={<Eye className="h-3.5 w-3.5" />}
-                        onClick={() => openDetail(r)}
-                      >
-                        View
-                      </Button>
+                      <div className="flex justify-center gap-1">
+                        <Button variant="ghost" size="sm" icon={<Eye className="h-3.5 w-3.5" />} onClick={() => openDetail(r)}>View</Button>
+                        <Button variant="ghost" size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(r)}>Edit</Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -231,6 +250,16 @@ export function ReturnsPage() {
         onClose={() => setNewOpen(false)}
         onCreated={() => load()}
       />
+
+      {editReturn && (
+        <NewReturnModal
+          key={editReturn.id}
+          open
+          initialReturn={editReturn}
+          onClose={() => setEditReturn(null)}
+          onSaved={() => { setEditReturn(null); load(); }}
+        />
+      )}
 
       {/* Return detail */}
       <Modal
@@ -354,8 +383,26 @@ export function ReturnsPage() {
                 {detail.notes}
               </div>
             )}
+            <div className="flex justify-end gap-2 border-t pt-3" style={{ borderColor: "#E2E8F0" }}>
+              {isAdmin && <Button variant="danger" size="sm" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setConfirmDelete(detail)}>Delete</Button>}
+              <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => { setDetail(null); setEditReturn(detail); }}>Edit Return</Button>
+            </div>
           </div>
         ) : null}
+      </Modal>
+      <Modal
+        open={confirmDelete !== null}
+        title="Delete Return"
+        onClose={() => setConfirmDelete(null)}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>Delete Return</Button>
+          </>
+        }
+      >
+        <Alert variant="warning" message={`Delete ${confirmDelete?.return_no ?? "this return"}? Returned quantities, stock, refund/deduction totals, and the sale return status will be reversed. This cannot be undone.`} />
       </Modal>
     </div>
   );

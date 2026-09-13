@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Undo2, Search } from "lucide-react";
 import { Modal } from "../components/Modal";
 import { Button, Spinner } from "../components/Button";
@@ -40,10 +40,12 @@ interface NewReturnModalProps {
   open: boolean;
   onClose: () => void;
   onCreated?: (r: ProductReturn) => void;
+  initialReturn?: ProductReturn | null;
+  onSaved?: (r: ProductReturn) => void;
 }
 
-export function NewReturnModal({ open, onClose, onCreated }: NewReturnModalProps) {
-  const { add } = useReturnStore();
+export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSaved }: NewReturnModalProps) {
+  const { add, update } = useReturnStore();
   const user = useSessionStore((s) => s.user);
 
   // Sale lookup
@@ -57,16 +59,37 @@ export function NewReturnModal({ open, onClose, onCreated }: NewReturnModalProps
   const [lines, setLines] = useState<DraftLine[]>([]);
 
   // Charge + refund details
-  const [chargeOption, setChargeOption] = useState<string>("0");
-  const [customPercent, setCustomPercent] = useState("");
-  const [fixedMode, setFixedMode] = useState(false);
-  const [fixedAmount, setFixedAmount] = useState("");
-  const [refundMethod, setRefundMethod] = useState<string>("cash");
-  const [returnDate, setReturnDate] = useState(nowLocalValue);
-  const [notes, setNotes] = useState("");
+  const expectedDeduction = initialReturn ? round2(initialReturn.total_sale_price * initialReturn.return_charge_percent / 100) : 0;
+  const initialFixed = initialReturn ? Math.abs(expectedDeduction - initialReturn.deduction_amount) > 0.01 : false;
+  const initialPercent = initialReturn?.return_charge_percent ?? 0;
+  const [chargeOption, setChargeOption] = useState<string>(initialPercent === 0 || [10, 20, 30].includes(initialPercent) ? String(initialPercent) : "custom");
+  const [customPercent, setCustomPercent] = useState(initialPercent && ![10, 20, 30].includes(initialPercent) ? String(initialPercent) : "");
+  const [fixedMode, setFixedMode] = useState(initialFixed);
+  const [fixedAmount, setFixedAmount] = useState(initialFixed ? String(initialReturn?.deduction_amount ?? 0) : "");
+  const [refundMethod, setRefundMethod] = useState<string>(initialReturn?.refund_method ?? "cash");
+  const [returnDate, setReturnDate] = useState(() => initialReturn?.return_date?.replace(" ", "T") ?? nowLocalValue());
+  const [notes, setNotes] = useState(initialReturn?.notes ?? "");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !initialReturn) return;
+    setLoadingSale(true);
+    saleService.getSale(initialReturn.sale_id)
+      .then((sale) => {
+        setSelectedSale(sale);
+        setLines(initialReturn.items.map((item) => ({
+          saleItem: sale.items.find((line) => line.id === item.sale_item_id)!,
+          quantity: item.quantity,
+          imeiId: item.imei_id ?? null,
+          reason: item.reason ?? "",
+          condition: item.condition,
+        })).filter((line) => Boolean(line.saleItem)));
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoadingSale(false));
+  }, [open, initialReturn]);
 
   const reset = () => {
     setSalesSearch("");
@@ -177,8 +200,13 @@ export function NewReturnModal({ open, onClose, onCreated }: NewReturnModalProps
       })),
     };
     try {
-      const created = await add(input, user?.id ?? null);
-      if (created) onCreated?.(created);
+      const created = initialReturn
+        ? await update(initialReturn.id, input, user?.id ?? null)
+        : await add(input, user?.id ?? null);
+      if (created) {
+        onCreated?.(created);
+        onSaved?.(created);
+      }
       reset();
       onClose();
     } catch (e) {
@@ -205,7 +233,7 @@ export function NewReturnModal({ open, onClose, onCreated }: NewReturnModalProps
           loading={submitting}
           icon={<Undo2 className="h-3.5 w-3.5" />}
         >
-          Process Return
+          {initialReturn ? "Save Changes" : "Process Return"}
         </Button>
       </div>
     </div>
@@ -214,8 +242,8 @@ export function NewReturnModal({ open, onClose, onCreated }: NewReturnModalProps
   return (
     <Modal
       open={open}
-      title="New Return"
-      subtitle="Search a sale, select the returned items, and set the restocking charge"
+      title={initialReturn ? `Edit ${initialReturn.return_no}` : "New Return"}
+      subtitle={initialReturn ? "Correct returned items, condition, deduction, or refund" : "Search a sale, select the returned items, and set the restocking charge"}
       onClose={onClose}
       size="xl"
       footer={footer}
@@ -339,7 +367,7 @@ export function NewReturnModal({ open, onClose, onCreated }: NewReturnModalProps
                   })}
                 </div>
               </div>
-              <Button
+              {!initialReturn && <Button
                 variant="ghost"
                 size="sm"
                 icon={<Undo2 className="h-3.5 w-3.5" />}
@@ -349,7 +377,7 @@ export function NewReturnModal({ open, onClose, onCreated }: NewReturnModalProps
                 }}
               >
                 Pick another sale
-              </Button>
+              </Button>}
             </div>
 
             {loadingSale ? (

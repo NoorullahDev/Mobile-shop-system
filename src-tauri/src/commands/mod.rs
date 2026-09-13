@@ -75,6 +75,21 @@ fn require_permission(session: &SessionState, permission: &str) -> Result<i64, A
     }
 }
 
+fn require_admin(session: &SessionState) -> Result<i64, AppError> {
+    let guard = session
+        .0
+        .lock()
+        .map_err(|_| AppError::Internal("Session lock poisoned".into()))?;
+    let user = guard
+        .as_ref()
+        .ok_or_else(|| AppError::Authentication("Not signed in".into()))?;
+    if user.role.eq_ignore_ascii_case("admin") {
+        Ok(user.id)
+    } else {
+        Err(AppError::PermissionDenied("Only an admin can delete this record".into()))
+    }
+}
+
 fn authorized_conn<'a>(
     db: &'a Database,
     session: &SessionState,
@@ -457,6 +472,18 @@ pub fn create_payment(
 }
 
 #[tauri::command]
+pub fn update_payment(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    input: CreatePaymentInput,
+    _actor: Option<i64>,
+) -> Result<Payment, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    payment_service::update(&guard, id, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
 pub fn list_payments(
     db: State<Database>,
     session: State<SessionState>,
@@ -493,6 +520,7 @@ pub fn delete_payment(
     id: i64,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
+    require_admin(&session)?;
     let guard = authenticated_conn(&db, &session)?;
     payment_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
@@ -856,6 +884,30 @@ pub fn get_sale(
     sale_service::get(&guard, id)
 }
 
+#[tauri::command]
+pub fn update_sale(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    input: CreateSaleInput,
+    _actor: Option<i64>,
+) -> Result<Sale, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    sale_service::update(&guard, id, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn delete_sale(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    _actor: Option<i64>,
+) -> Result<(), AppError> {
+    require_admin(&session)?;
+    let guard = authenticated_conn(&db, &session)?;
+    sale_service::delete(&guard, id, Some(current_user_id(&session)?))
+}
+
 // ---- Product Returns ----
 
 #[tauri::command]
@@ -887,6 +939,30 @@ pub fn get_return(
 ) -> Result<ProductReturn, AppError> {
     let guard = authenticated_conn(&db, &session)?;
     product_return_service::get(&guard, id)
+}
+
+#[tauri::command]
+pub fn update_return(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    input: CreateReturnInput,
+    _actor: Option<i64>,
+) -> Result<ProductReturn, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    product_return_service::update(&guard, id, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn delete_return(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    _actor: Option<i64>,
+) -> Result<(), AppError> {
+    require_admin(&session)?;
+    let guard = authenticated_conn(&db, &session)?;
+    product_return_service::delete(&guard, id, Some(current_user_id(&session)?))
 }
 
 // ---- Categories & Expenses ----
@@ -1630,6 +1706,18 @@ pub fn create_supplier_payment(
 }
 
 #[tauri::command]
+pub fn update_supplier_payment(
+    db: State<Database>,
+    session: State<SessionState>,
+    _actor: Option<i64>,
+    id: i64,
+    input: CreateSupplierPaymentInput,
+) -> Result<SupplierPayment, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    purchase_service::update_supplier_payment(&guard, id, input, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
 pub fn list_supplier_payments(
     db: State<Database>,
     session: State<SessionState>,
@@ -1656,6 +1744,7 @@ pub fn delete_supplier_payment(
     _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
+    require_admin(&session)?;
     let guard = authenticated_conn(&db, &session)?;
     purchase_service::delete_supplier_payment(&guard, id, Some(current_user_id(&session)?))
 }

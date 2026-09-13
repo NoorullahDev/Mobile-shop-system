@@ -72,8 +72,8 @@ function ProductThumbnail({ path, title, onPreview }: { path?: string; title: st
   const [src,setSrc]=useState<string|null>(null);
   const [failed,setFailed]=useState(false);
   useEffect(()=>{let active=true;setSrc(null);setFailed(false);if(path){loadProductImage(path).then(v=>active&&setSrc(v)).catch(()=>{imageCache.delete(path);if(active)setFailed(true);});}return()=>{active=false};},[path]);
-  if(!path||failed||!src)return <div className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-slate-200 bg-slate-50" aria-label="No product image"><ImageIcon className="h-5 w-5 text-slate-300"/></div>;
-  return <button type="button" onClick={()=>onPreview(src,title)} className="h-11 w-11 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-50" title="Preview product image"><img src={src} alt={title} className="h-full w-full object-cover" onError={()=>setFailed(true)}/></button>;
+  if(!path||failed||!src)return <div className="grid h-16 w-16 shrink-0 place-items-center rounded-md border border-slate-200 bg-slate-50" aria-label="No product image"><ImageIcon className="h-6 w-6 text-slate-300"/></div>;
+  return <button type="button" onClick={()=>onPreview(src,title)} className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white" title="Preview product image"><img src={src} alt={title} className="h-full w-full object-contain" onError={()=>setFailed(true)}/></button>;
 }
 
 function StockBadge<T extends InventoryRow>({ item }: { item: T }) {

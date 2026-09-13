@@ -51,6 +51,14 @@ pub fn insert(
     Ok(conn.last_insert_rowid())
 }
 
+pub fn update(conn: &Connection, id: i64, input: &CreatePaymentInput) -> Result<bool, AppError> {
+    let affected = conn.execute(
+        "UPDATE payments SET member_id = ?2, amount = ?3, payment_method = ?4, payment_type = ?5, status = ?6, reference = ?7, notes = ?8, payment_date = COALESCE(?9, payment_date), updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0",
+        params![id, input.member_id, input.amount, input.payment_method, input.payment_type, input.status, input.reference, input.notes, input.payment_date],
+    )?;
+    Ok(affected > 0)
+}
+
 pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<Payment>, AppError> {
     let sql = format!(
         "SELECT {COLS} {JOIN} AND p.id = ?1 ORDER BY p.payment_date DESC, p.id DESC LIMIT 1"
@@ -115,7 +123,7 @@ pub fn member_balance(conn: &Connection, member_id: i64) -> Result<MemberBalance
     let row: (Option<String>, Option<String>, Option<f64>, Option<f64>, Option<i64>) = conn
         .query_row(
             "SELECT m.name, m.phone,
-                (SELECT COALESCE(SUM(total_amount - paid_amount),0) FROM sales WHERE member_id = ?1),
+                (SELECT COALESCE(SUM(MAX((s.total_amount - s.paid_amount) - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0)),0) FROM sales s WHERE s.member_id = ?1),
                 (SELECT COALESCE(SUM(amount),0) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND status = 'completed'),
                 (SELECT COUNT(*) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND status = 'completed')
              FROM members m WHERE m.id = ?1 AND m.is_deleted = 0",
@@ -146,7 +154,7 @@ pub fn list_balances(
     let has_search = search.map(|s| !s.trim().is_empty()).unwrap_or(false);
     let mut sql = String::from(
         "SELECT m.id AS member_id, m.name AS member_name, m.phone AS phone,
-                COALESCE((SELECT SUM(s.total_amount - s.paid_amount) FROM sales s WHERE s.member_id = m.id), 0) AS total_credit,
+                COALESCE((SELECT SUM(MAX((s.total_amount - s.paid_amount) - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0)) FROM sales s WHERE s.member_id = m.id), 0) AS total_credit,
                 COALESCE(SUM(CASE WHEN p.status = 'completed' THEN p.amount ELSE 0 END), 0) AS total_paid,
                 COUNT(CASE WHEN p.status = 'completed' THEN p.id END) AS payment_count
          FROM members m
@@ -195,4 +203,3 @@ fn balance_from_row(r: &Row) -> rusqlite::Result<MemberBalance> {
 }
 
 use crate::utils;
-

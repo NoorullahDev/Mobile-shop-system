@@ -4,6 +4,9 @@ use super::product_return::ProductReturn;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SaleItemInput {
+    /// Existing sale line id when correcting an invoice. Omit for new lines.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sale_item_id: Option<i64>,
     /// "phone" or "accessory"
     pub item_type: String,
     pub item_id: i64,
