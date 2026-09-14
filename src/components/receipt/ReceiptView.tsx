@@ -31,6 +31,9 @@ export function ReceiptView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [availableWpx, setAvailableWpx] = useState<number>(targetWpx + BOX_PADDING * 2);
 
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [contentHeight, setContentHeight] = useState<number>(0);
+
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -44,9 +47,26 @@ export function ReceiptView({
     return () => ro?.disconnect();
   }, []);
 
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const updateHeight = () => {
+      setContentHeight(el.getBoundingClientRect().height);
+    };
+    updateHeight();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateHeight) : null;
+    if (ro) ro.observe(el);
+    return () => ro?.disconnect();
+  }, [inner]);
+
   const fittedWpx = Math.min(targetWpx, availableWpx);
-  const zoom = fittedWpx / contentWpx;
-  const boxWpx = contentWpx * zoom + BOX_PADDING * 2;
+  // Prevent division by zero
+  const safeContentWpx = contentWpx || 1;
+  const zoom = fittedWpx / safeContentWpx;
+  const boxWpx = safeContentWpx * zoom + BOX_PADDING * 2;
+
+  // The wrapper must have an explicit height because transform: scale doesn't affect layout flow height
+  const wrapperHeight = contentHeight * zoom;
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
@@ -63,8 +83,20 @@ export function ReceiptView({
           overflowX: "visible",
         }}
       >
-        <div style={{ width: contentWpx, zoom, lineHeight: 0 }}>
-          <div dangerouslySetInnerHTML={{ __html: inner }} />
+        <div style={{ width: safeContentWpx, height: wrapperHeight, position: "relative", overflow: "hidden" }}>
+          <div
+            ref={contentRef}
+            style={{
+              width: safeContentWpx,
+              transform: `scale(${zoom})`,
+              transformOrigin: "top left",
+              position: "absolute",
+              top: 0,
+              left: 0,
+            }}
+          >
+            <div dangerouslySetInnerHTML={{ __html: inner }} />
+          </div>
         </div>
       </div>
     </div>

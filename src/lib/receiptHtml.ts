@@ -135,39 +135,39 @@ export function buildReceiptInner(data: ReceiptData, settings: ReceiptSettings):
 
   const css = `
 .receipt .rp-center{text-align:center}
-.receipt .rp-logo{display:block;margin:0 auto 2mm;max-width:100%;max-height:30mm;height:auto}
+.receipt .rp-logo{display:block;margin:0 auto ${Math.round(mmToPx(2))}px;max-width:100%;max-height:${Math.round(mmToPx(30))}px;height:auto}
 .receipt .rp-shop{font-weight:700;text-transform:uppercase;letter-spacing:.3px;font-size:${shop}px}
-.receipt .rp-tag{font-style:italic;color:#333;font-size:${meta}px;margin-top:.5mm}
-.receipt .rp-contact{font-size:${meta}px;margin-top:.5mm;color:#222}
-.receipt .rp-dash{border-top:1px dashed #222;margin:1.6mm 0}
-.receipt .rp-title{font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.6mm}
+.receipt .rp-tag{font-style:italic;color:#333;font-size:${meta}px;margin-top:${Math.round(mmToPx(0.5))}px}
+.receipt .rp-contact{font-size:${meta}px;margin-top:${Math.round(mmToPx(0.5))}px;color:#222}
+.receipt .rp-dash{border-top:1px dashed #222;margin:${Math.round(mmToPx(1.6))}px 0}
+.receipt .rp-title{font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:${Math.round(mmToPx(0.6))}px}
 .receipt .rp-meta{font-size:${meta}px}
 .receipt .rp-inv{font-weight:600}
 .receipt .rp-label{font-weight:600}
 .receipt table{width:100%;table-layout:fixed;border-collapse:collapse}
 .receipt .rp-col-desc{width:auto}
-.receipt .rp-col-qty{width:${rules.qtyMm}mm}
-.receipt .rp-col-amt{width:${rules.amountMm}mm}
-.receipt thead th{font-size:${meta}px;text-align:left;border-bottom:1px solid #000;padding-bottom:.6mm}
+.receipt .rp-col-qty{width:${Math.round(mmToPx(rules.qtyMm))}px}
+.receipt .rp-col-amt{width:${Math.round(mmToPx(rules.amountMm))}px}
+.receipt thead th{font-size:${meta}px;text-align:left;border-bottom:1px solid #000;padding-bottom:${Math.round(mmToPx(0.6))}px}
 .receipt thead th.rp-qty{text-align:center;white-space:nowrap}
 .receipt thead th.rp-amt{text-align:right;white-space:nowrap}
 .receipt .rp-qty{text-align:center;white-space:nowrap}
 .receipt .rp-amt{text-align:right;overflow-wrap:anywhere;word-break:break-word}
-.receipt tbody td{vertical-align:top;padding:.6mm 0 0}
+.receipt tbody td{vertical-align:top;padding:${Math.round(mmToPx(0.6))}px 0 0}
 .receipt .rp-item{overflow-wrap:anywhere;word-break:break-word}
 .receipt .rp-sub{font-size:${sub}px;color:#333;overflow-wrap:anywhere;word-break:break-word}
 .receipt .rp-row{display:flex;justify-content:space-between;font-size:${fs}px}
 .receipt .rp-row>span:first-child{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
-.receipt .rp-row>span:last-child{flex:0 0 auto;white-space:nowrap;padding-left:2mm;text-align:right}
-.receipt .rp-grand{font-weight:700;font-size:${grand}px;margin-top:.6mm}
+.receipt .rp-row>span:last-child{flex:0 0 auto;white-space:nowrap;padding-left:${Math.round(mmToPx(2))}px;text-align:right}
+.receipt .rp-grand{font-weight:700;font-size:${grand}px;margin-top:${Math.round(mmToPx(0.6))}px}
 .receipt .rp-disc{color:#333}
 .receipt .rp-dues{font-weight:600}
-.receipt .rp-footer{text-align:center;font-size:${meta}px;margin-top:1.5mm}
-.receipt .rp-credit{margin-top:1.5mm;text-align:center;font-size:8px;color:#444}
+.receipt .rp-footer{text-align:center;font-size:${meta}px;margin-top:${Math.round(mmToPx(1.5))}px}
+.receipt .rp-credit{margin-top:${Math.round(mmToPx(1.5))}px;text-align:center;font-size:8px;color:#444}
 `;
 
   return (
-    `<div class="receipt" style="width:${rules.contentMm}mm;margin:0 auto;` +
+    `<div class="receipt" style="width:${Math.round(mmToPx(rules.contentMm))}px;margin:0 auto;` +
     `font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:${fs}px;line-height:1.4;color:#000;">` +
     `<style>${css}</style>` +
     parts.join("") +
