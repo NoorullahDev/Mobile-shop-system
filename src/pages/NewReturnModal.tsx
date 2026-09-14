@@ -51,9 +51,11 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
   // Sale lookup
   const [salesSearch, setSalesSearch] = useState("");
   const [salesResult, setSalesResult] = useState<Sale[] | null>(null);
+  const [allSales, setAllSales] = useState<Sale[]>([]);
   const [searching, setSearching] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [loadingSale, setLoadingSale] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
   // Draft lines
   const [lines, setLines] = useState<DraftLine[]>([]);
@@ -94,9 +96,29 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
       .finally(() => setLoadingSale(false));
   }, [open, initialReturn]);
 
+  // Load all sales for autocomplete when modal opens (not in edit mode)
+  useEffect(() => {
+    if (!open || initialReturn) return;
+    saleService.listSales()
+      .then(setAllSales)
+      .catch(() => setAllSales([]));
+  }, [open, initialReturn]);
+
+  // Client-side filtered suggestions
+  const suggestions = useMemo(() => {
+    if (!salesSearch.trim()) return [];
+    const q = salesSearch.trim().toLowerCase();
+    return allSales.filter((s) =>
+      s.receipt_no.toLowerCase().includes(q) ||
+      (s.member_name ?? "").toLowerCase().includes(q) ||
+      (s.member_phone ?? "").toLowerCase().includes(q)
+    );
+  }, [allSales, salesSearch]);
+
   const reset = () => {
     setSalesSearch("");
     setSalesResult(null);
+    setSuggestionsOpen(false);
     setSelectedSale(null);
     setLines([]);
     setChargeOption("0");
@@ -268,11 +290,64 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
                   style={{ borderColor: "#CBD5E1", color: "#0F172A" }}
                   placeholder="Search sale by invoice no, customer name or phone…"
                   value={salesSearch}
-                  onChange={(e) => setSalesSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && doSearch()}
+                  onChange={(e) => {
+                    setSalesSearch(e.target.value);
+                    setSuggestionsOpen(true);
+                    setSalesResult(null);
+                  }}
+                  onFocus={() => salesSearch.trim() && setSuggestionsOpen(true)}
+                  onBlur={() => setTimeout(() => setSuggestionsOpen(false), 150)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setSuggestionsOpen(false);
+                      doSearch();
+                    }
+                  }}
                 />
+                {suggestionsOpen && suggestions.length > 0 && (
+                  <div
+                    className="absolute z-30 mt-1 max-h-52 w-full overflow-y-auto rounded-md border bg-white shadow-lg"
+                    style={{ borderColor: "#E2E8F0" }}
+                  >
+                    {suggestions.slice(0, 10).map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSuggestionsOpen(false);
+                          pickSale(s);
+                        }}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-slate-50"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-semibold text-[12px]" style={{ color: "#1B2A4A" }}>
+                              {s.receipt_no}
+                            </span>
+                            <span className="text-[12px] text-[#64748B]">
+                              {fmt(s.total_amount)}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-[#64748B]">
+                            {s.member_name ?? "Walk-in"}
+                            {s.member_phone && ` · ${s.member_phone}`}
+                          </div>
+                        </div>
+                        <span className="text-[11px] text-[#94A3B8]">
+                          {new Date(s.created_at).toLocaleDateString("en-PK", { day: "numeric", month: "short" })}
+                        </span>
+                      </button>
+                    ))}
+                    {suggestions.length > 10 && (
+                      <div className="px-3 py-1.5 text-center text-[11px] text-[#94A3B8]">
+                        +{suggestions.length - 10} more results
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <Button variant="secondary" size="sm" onClick={doSearch} loading={searching}>
+              <Button variant="secondary" size="sm" onClick={() => { setSuggestionsOpen(false); doSearch(); }} loading={searching}>
                 Search
               </Button>
             </div>
