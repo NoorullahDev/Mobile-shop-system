@@ -9,11 +9,7 @@ import type { Member } from "../types/member";
 import type { CreateSaleInput, Sale, SaleItemInput } from "../types/sale";
 import { PAYMENT_METHODS } from "../types/sale";
 import * as inventoryService from "../services/inventoryService";
-import { roundMoney, methodLabels } from "../lib/format";
-
-function formatPKR(n: number) {
-  return `Rs. ${n.toLocaleString("en-PK")}`;
-}
+import { roundMoney, methodLabels, formatMoneyCompact } from "../lib/format";
 
 interface Line {
   key: number;
@@ -230,7 +226,10 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
                     min="1"
                     max={inStock.find((p) => p.item_type === l.item_type && p.item_id === l.item_id)?.quantity ?? undefined}
                     value={l.quantity}
-                    onChange={(e) => updateLine(l.key, { quantity: Math.max(1, Number(e.target.value) || 1) })}
+                    onChange={(e) => {
+                      const maxQty = inStock.find((p) => p.item_type === l.item_type && p.item_id === l.item_id)?.quantity ?? Infinity;
+                      updateLine(l.key, { quantity: Math.max(1, Math.min(Number(e.target.value) || 1, maxQty)) });
+                    }}
                     disabled={saving}
                   />
                 </div>
@@ -248,7 +247,7 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
                 <div className="col-span-2 text-right">
                   <div className="mb-1 text-[11px] font-medium" style={{ color: "#64748B" }}>Total</div>
                   <div className="amount font-semibold text-[14px]" style={{ color: "#0F172A" }}>
-                    {formatPKR(lineTotal(l))}
+                    {formatMoneyCompact(lineTotal(l))}
                   </div>
                 </div>
                 {imeis.length > 0 && (
@@ -334,12 +333,12 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
         style={{ background: "#F0FDF4", border: "1px solid #DCFCE7" }}
       >
         <div className="text-[13px]" style={{ color: "#166534" }}>
-          Subtotal: <span className="font-semibold">{formatPKR(subtotal)}</span>
+          Subtotal: <span className="font-semibold">{formatMoneyCompact(subtotal)}</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "#166534" }}>Total Due</span>
           <span className="amount-large font-bold text-[20px]" style={{ color: "#15803D" }}>
-            {formatPKR(total)}
+            {formatMoneyCompact(total)}
           </span>
         </div>
       </div>

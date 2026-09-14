@@ -17,7 +17,7 @@ import type {
 } from "../types/inventory";
 import type { CreatePurchaseInput, PurchaseItemInput } from "../types/purchase";
 import { PURCHASE_PAYMENT_METHODS } from "../types/purchase";
-import { methodLabels } from "../lib/format";
+import { methodLabels, roundMoney } from "../lib/format";
 
 interface PurchaseFormProps {
   onSubmit: (input: CreatePurchaseInput) => Promise<void>;
@@ -73,10 +73,6 @@ function newAccessoryLine(): AccessoryDraftLine {
     sellingPrice: "",
     warranty: "",
   };
-}
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
 }
 
 function phoneDisplay(p: Phone) {
@@ -223,9 +219,9 @@ export function PurchaseForm({
     return sum + qty * cost;
   }, 0);
   const discount = Number(discountStr) || 0;
-  const total = round2(Math.max(0, subtotal - discount));
+  const total = roundMoney(Math.max(0, subtotal - discount));
   const paid = Number(paidStr) || 0;
-  const balanceDue = round2(Math.max(0, total - paid));
+  const balanceDue = roundMoney(Math.max(0, total - paid));
   const paymentStatus =
     paid >= total - 0.005 ? "Paid" : paid > 0 ? "Partial" : "Unpaid";
 
@@ -265,8 +261,8 @@ export function PurchaseForm({
         item_type: "phone",
         item_id: Number(l.productId),
         quantity: qty,
-        unit_cost: cost > 0 ? round2(cost) : null,
-        selling_price: l.sellingPrice !== "" ? round2(Number(l.sellingPrice) || 0) : null,
+        unit_cost: cost > 0 ? roundMoney(cost) : null,
+        selling_price: l.sellingPrice !== "" ? roundMoney(Number(l.sellingPrice) || 0) : null,
         warranty: l.warranty.trim() || null,
         condition: l.condition.trim() || null,
         imeis,
@@ -292,8 +288,8 @@ export function PurchaseForm({
         item_type: "accessory",
         item_id: Number(l.productId),
         quantity: qty,
-        unit_cost: cost > 0 ? round2(cost) : null,
-        selling_price: l.sellingPrice !== "" ? round2(Number(l.sellingPrice) || 0) : null,
+        unit_cost: cost > 0 ? roundMoney(cost) : null,
+        selling_price: l.sellingPrice !== "" ? roundMoney(Number(l.sellingPrice) || 0) : null,
         warranty: l.warranty.trim() || null,
         imeis: [],
       });
@@ -313,8 +309,8 @@ export function PurchaseForm({
     try {
       await onSubmit({
         supplier_id: supplierId ? Number(supplierId) : null,
-        discount: round2(discount),
-        paid_amount: paidStr !== "" ? round2(Number(paidStr) || 0) : null,
+        discount: roundMoney(discount),
+        paid_amount: paidStr !== "" ? roundMoney(Number(paidStr) || 0) : null,
         payment_method: method,
         purchase_date: purchaseDate || null,
         invoice_reference: invoiceRef.trim() || null,
@@ -490,7 +486,7 @@ export function PurchaseForm({
                     <div className="flex flex-col justify-end pb-1">
                       <div className="text-[12px] font-medium text-slate-500">Line Total</div>
                       <div className="text-[15px] font-bold text-slate-800">
-                        Rs. {round2((Number(l.quantity) || 0) * (Number(l.unitCost) || 0)).toLocaleString("en-PK")}
+                        Rs. {roundMoney((Number(l.quantity) || 0) * (Number(l.unitCost) || 0)).toLocaleString("en-PK")}
                       </div>
                     </div>
                   </div>
@@ -673,7 +669,7 @@ export function PurchaseForm({
                     <div className="flex flex-col justify-end pb-1">
                       <div className="text-[12px] font-medium text-slate-500">Line Total</div>
                       <div className="text-[15px] font-bold text-slate-800">
-                        Rs. {round2((Number(l.quantity) || 0) * (Number(l.unitCost) || 0)).toLocaleString("en-PK")}
+                        Rs. {roundMoney((Number(l.quantity) || 0) * (Number(l.unitCost) || 0)).toLocaleString("en-PK")}
                       </div>
                     </div>
                   </div>
@@ -739,13 +735,13 @@ export function PurchaseForm({
         <div className="flex items-center justify-between py-1">
           <span className="text-[13px] font-medium text-slate-500">Subtotal</span>
           <span className="text-[14px] font-semibold text-slate-800">
-            Rs. {round2(subtotal).toLocaleString("en-PK")}
+            Rs. {roundMoney(subtotal).toLocaleString("en-PK")}
           </span>
         </div>
         <div className="flex items-center justify-between py-1">
           <span className="text-[13px] font-medium text-slate-500">Discount</span>
           <span className="text-[14px] font-semibold text-slate-800">
-            - Rs. {round2(discount).toLocaleString("en-PK")}
+            - Rs. {roundMoney(discount).toLocaleString("en-PK")}
           </span>
         </div>
         <div className="flex items-center justify-between py-1">

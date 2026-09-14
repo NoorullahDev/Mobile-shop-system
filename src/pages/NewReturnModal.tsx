@@ -11,16 +11,9 @@ import { useReturnStore } from "../store/returns";
 import { useSessionStore } from "../store/session";
 import { RETURN_CHARGE_OPTIONS, RETURN_CONDITIONS } from "../types/return";
 import { REFUND_METHODS } from "../types/return";
+import { roundMoney, formatMoneyCompact } from "../lib/format";
 import type { CreateReturnInput, ProductReturn } from "../types/return";
 import type { Sale, SaleItem } from "../types/sale";
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
-function fmt(n: number) {
-  return `Rs. ${n.toLocaleString("en-PK")}`;
-}
 
 function nowLocalValue() {
   const d = new Date();
@@ -61,7 +54,7 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
   const [lines, setLines] = useState<DraftLine[]>([]);
 
   // Charge + refund details
-  const expectedDeduction = initialReturn ? round2(initialReturn.total_sale_price * initialReturn.return_charge_percent / 100) : 0;
+  const expectedDeduction = initialReturn ? roundMoney(initialReturn.total_sale_price * initialReturn.return_charge_percent / 100) : 0;
   const initialFixed = initialReturn ? Math.abs(expectedDeduction - initialReturn.deduction_amount) > 0.01 : false;
   const initialPercent = initialReturn?.return_charge_percent ?? 0;
   const [chargeOption, setChargeOption] = useState<string>(initialPercent === 0 || [10, 20, 30].includes(initialPercent) ? String(initialPercent) : "custom");
@@ -184,7 +177,7 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
   };
 
   const value = useMemo(
-    () => lines.reduce((sum, l) => sum + round2(l.saleItem.unit_price * l.quantity), 0),
+    () => lines.reduce((sum, l) => sum + roundMoney(l.saleItem.unit_price * l.quantity), 0),
     [lines],
   );
 
@@ -196,11 +189,11 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
   const fixed = fixedMode ? Math.max(0, Number(fixedAmount) || 0) : 0;
 
   const deduction = useMemo(() => {
-    if (fixed > 0) return round2(Math.min(fixed, value));
-    return round2((value * pct) / 100);
+    if (fixed > 0) return roundMoney(Math.min(fixed, value));
+    return roundMoney((value * pct) / 100);
   }, [value, pct, fixed]);
 
-  const refund = round2(value - deduction);
+  const refund = roundMoney(value - deduction);
   const deductionInvalid = fixedMode && fixed > 0 && fixed > value;
 
   const canSubmit = lines.length > 0 && value > 0 && !deductionInvalid && !submitting;
@@ -245,7 +238,7 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
     <div className="flex w-full items-center justify-between gap-2">
       <span className="text-[12px]" style={{ color: "#94A3B8" }}>
         {lines.length > 0
-          ? `${lines.length} item${lines.length !== 1 ? "s" : ""} · refund ${fmt(refund)}`
+          ? `${lines.length} item${lines.length !== 1 ? "s" : ""} · refund ${formatMoneyCompact(refund)}`
           : "Select items from the sale to enable the return."}
       </span>
       <div className="flex items-center gap-2">
@@ -326,7 +319,7 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
                               {s.receipt_no}
                             </span>
                             <span className="text-[12px] text-[#64748B]">
-                              {fmt(s.total_amount)}
+                              {formatMoneyCompact(s.total_amount)}
                             </span>
                           </div>
                           <div className="text-[11px] text-[#64748B]">
@@ -400,7 +393,7 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
                             {s.items.length} item{s.items.length !== 1 ? "s" : ""}
                           </td>
                           <td className="text-right" style={{ fontSize: "13px", fontWeight: 600 }}>
-                            {fmt(s.total_amount)}
+                            {formatMoneyCompact(s.total_amount)}
                           </td>
                           <td style={{ color: "#64748B", fontSize: "12px" }}>
                             {new Date(s.created_at).toLocaleDateString("en-PK", {
@@ -504,7 +497,7 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
                             <div className="mt-0.5 flex flex-wrap gap-x-3 text-[12px]" style={{ color: "#64748B" }}>
                               {si.imei && <span className="font-mono">IMEI: {si.imei}</span>}
                               <span>
-                                Sold: <strong>{si.quantity}</strong> × {fmt(si.unit_price)}
+                                Sold: <strong>{si.quantity}</strong> × {formatMoneyCompact(si.unit_price)}
                               </span>
                             </div>
                           </div>
@@ -653,14 +646,14 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
                 <div className="flex items-center justify-between py-1 text-[13px]" style={{ color: "#334155" }}>
                   <span>Returned value ({lines.length} item{lines.length !== 1 ? "s" : ""})</span>
                   <span className="font-semibold" style={{ color: "#0F172A" }}>
-                    {fmt(value)}
+                    {formatMoneyCompact(value)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between py-1 text-[13px]" style={{ color: "#DC2626" }}>
                   <span>
                     Deduction — {fixedMode ? `Rs. ${Number(fixedAmount || 0).toLocaleString("en-PK")}` : `${pct}%`}
                   </span>
-                  <span className="font-semibold">{fmt(deduction)}</span>
+                  <span className="font-semibold">{formatMoneyCompact(deduction)}</span>
                 </div>
                 <div
                   className="mt-1 flex items-center justify-between rounded bg-white px-3 py-2"
@@ -670,7 +663,7 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
                     Refund due to customer
                   </span>
                   <span className="text-[16px] font-bold" style={{ color: "#16A34A" }}>
-                    {fmt(refund)}
+                    {formatMoneyCompact(refund)}
                   </span>
                 </div>
               </div>

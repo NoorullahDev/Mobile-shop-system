@@ -3,6 +3,7 @@ import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
+import { toLocalDate } from "../lib/format";
 import type { Category, CreateExpenseInput } from "../types/expense";
 
 interface ExpenseFormProps {
@@ -14,7 +15,7 @@ interface ExpenseFormProps {
 export function ExpenseForm({ onSubmit, onCancel, categories }: ExpenseFormProps) {
   const [categoryId, setCategoryId] = useState("");
   const [amount, setAmount] = useState("");
-  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [expenseDate, setExpenseDate] = useState(toLocalDate(new Date()));
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -13,11 +13,8 @@ import { CategoryForm } from "./CategoryForm";
 import { useExpenseStore } from "../store/expenses";
 import { useCategoryStore } from "../store/categories";
 import { useSessionStore } from "../store/session";
+import { formatMoneyCompact } from "../lib/format";
 import type { Expense } from "../types/expense";
-
-function formatMoney(n: number) {
-  return `Rs. ${n.toLocaleString("en-PK")}`;
-}
 
 export function ExpensesPage() {
   const { expenses, loading, error, load, add, remove } = useExpenseStore();
@@ -78,7 +75,7 @@ export function ExpensesPage() {
         title="Expenses"
         description="Track and manage all business expenses"
         breadcrumb={[{ label: "Finance" }, { label: "Expenses" }]}
-        meta={expenses.length > 0 ? formatMoney(total) : undefined}
+        meta={expenses.length > 0 ? formatMoneyCompact(total) : undefined}
         actions={
           <div className="flex gap-2">
             <Button
@@ -127,7 +124,7 @@ export function ExpensesPage() {
               <TrendingDown className="h-3.5 w-3.5" style={{ color: "#DC2626" }} />
               <span className="text-[12px]" style={{ color: "#B91C1C" }}>Total:</span>
               <span className="amount text-[13px] font-bold" style={{ color: "#B91C1C" }}>
-                {formatMoney(total)}
+                {formatMoneyCompact(total)}
               </span>
             </div>
           )}
@@ -180,7 +177,7 @@ export function ExpensesPage() {
                     </td>
                     <td className="text-right">
                       <span className="amount font-semibold text-[13px]" style={{ color: "#DC2626" }}>
-                        {formatMoney(e.amount)}
+                        {formatMoneyCompact(e.amount)}
                       </span>
                     </td>
                     <td style={{ color: "#475569", fontSize: "13px" }}>{e.description ?? "—"}</td>
@@ -281,7 +278,7 @@ export function ExpensesPage() {
       >
         <Alert
           variant="warning"
-          message={`Delete expense of ${confirmDelete ? formatMoney(confirmDelete.amount) : ""}? This action cannot be undone.`}
+          message={`Delete expense of ${confirmDelete ? formatMoneyCompact(confirmDelete.amount) : ""}? This action cannot be undone.`}
         />
       </Modal>
 

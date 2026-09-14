@@ -11,13 +11,16 @@ import { Select } from "../components/Select";
 import { Spinner } from "../components/Button";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toaster";
-import { formatDate, formatMoneyCompact } from "../lib/format";
+import { formatDate, formatMoneyCompact, toLocalDate } from "../lib/format";
 import * as staffService from "../services/staffService";
 import type { SalaryInput, SalaryRecord, StaffInput, StaffMember } from "../types/staff";
 import type { UserDetail } from "../types/user";
 
-const today = () => new Date().toISOString().slice(0, 10);
-const thisMonth = () => new Date().toISOString().slice(0, 7);
+const today = () => toLocalDate(new Date());
+const thisMonth = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
 const money = (value: string) => Number(value || 0);
 
 function formatMonth(month: string) {

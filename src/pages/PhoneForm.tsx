@@ -506,7 +506,7 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
             type="number"
             min="0"
             required
-            prefix="$"
+            prefix="Rs."
             value={form.cost_price}
             onChange={(e) => set("cost_price", parseFloat(e.target.value) || 0)}
             disabled={saving}
@@ -517,7 +517,7 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
             type="number"
             min="0"
             required
-            prefix="$"
+            prefix="Rs."
             value={form.sale_price}
             onChange={(e) => set("sale_price", parseFloat(e.target.value) || 0)}
             disabled={saving}

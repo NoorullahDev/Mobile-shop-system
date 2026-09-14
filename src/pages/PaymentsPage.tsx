@@ -23,19 +23,9 @@ import { usePaymentStore } from "../store/payments";
 import { useMemberStore } from "../store/members";
 import * as paymentService from "../services/paymentService";
 import { useSessionStore } from "../store/session";
+import { formatMoneyCompact, methodLabels } from "../lib/format";
 import type { Payment } from "../types/payment";
 import type { MemberBalance } from "../types/payment";
-
-function formatMoney(n: number) {
-  return `Rs. ${n.toLocaleString("en-PK")}`;
-}
-
-const methodLabels: Record<string, string> = {
-  cash: "Cash",
-  bank_transfer: "Bank Transfer",
-  card: "Card",
-  other: "Other",
-};
 
 export function PaymentsPage() {
   const { payments, loading, error, load, add, remove, update } = usePaymentStore();
@@ -179,7 +169,7 @@ export function PaymentsPage() {
                     </div>
                     <div className="text-right">
                       <div className="amount font-bold text-[14px]" style={{ color: "#B45309" }}>
-                        {formatMoney(d.balance)}
+                        {formatMoneyCompact(d.balance)}
                       </div>
                       <div className="text-[10px]" style={{ color: "#94A3B8" }}>
                         due balance
@@ -206,7 +196,7 @@ export function PaymentsPage() {
                   Total Outstanding
                 </div>
                 <div className="amount text-[22px] font-bold" style={{ color: "#B45309" }}>
-                  {formatMoney(totalOutstanding)}
+                  {formatMoneyCompact(totalOutstanding)}
                 </div>
               </div>
             </div>
@@ -335,7 +325,7 @@ export function PaymentsPage() {
                     </td>
                     <td className="text-right">
                       <span className="amount font-semibold text-[13px]" style={{ color: "#16A34A" }}>
-                        {formatMoney(p.amount)}
+                        {formatMoneyCompact(p.amount)}
                       </span>
                     </td>
                     <td>
@@ -431,7 +421,7 @@ export function PaymentsPage() {
             >
               <span className="text-[13px] font-semibold" style={{ color: "#16A34A" }}>Total Paid</span>
               <span className="amount font-bold text-[18px]" style={{ color: "#15803D" }}>
-                {formatMoney(memberTotal)}
+                {formatMoneyCompact(memberTotal)}
               </span>
             </div>
             
@@ -449,7 +439,7 @@ export function PaymentsPage() {
                   >
                     <div>
                       <div className="amount font-semibold text-[14px]" style={{ color: "#0F172A" }}>
-                        {formatMoney(p.amount)}
+                        {formatMoneyCompact(p.amount)}
                       </div>
                       <div className="mt-1 flex items-center gap-2 text-[11px]" style={{ color: "#64748B" }}>
                         <span>{methodLabels[p.payment_method] ?? p.payment_method}</span>

@@ -34,10 +34,6 @@ import { formatMoneyCompact } from "../lib/format";
 import * as inventoryService from "../services/inventoryService";
 import type { PhoneImei, ProductCategory, Supplier } from "../types/inventory";
 
-function formatPKR(n: number) {
-  return `Rs. ${n.toLocaleString("en-PK")}`;
-}
-
 export interface InventoryRow {
   id: number;
   cost_price: number;
@@ -471,12 +467,12 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                       </td>
                       <td className="text-right">
                         <span className="amount text-[13px]" style={{ color: "#64748B" }}>
-                          {formatPKR(item.cost_price)}
+                          {formatMoneyCompact(item.cost_price)}
                         </span>
                       </td>
                       <td className="text-right">
                         <span className="amount text-[13px] font-semibold" style={{ color: "#0F172A" }}>
-                          {formatPKR(item.sale_price)}
+                          {formatMoneyCompact(item.sale_price)}
                         </span>
                       </td>
                       <td className="text-center">

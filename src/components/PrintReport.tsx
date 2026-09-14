@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from "react";
-import { formatDate, formatMoney } from "../lib/format";
+import { formatDate, formatMoney, methodLabels } from "../lib/format";
 import { useSettingsStore } from "../store/settings";
 import type { CategoryTotal, Expense } from "../types/expense";
 import type { Supplier } from "../types/inventory";
@@ -46,14 +46,6 @@ interface PrintReportProps {
   byCategory: CategoryTotal[];
   allSummaryRows: string[][];
 }
-
-const methodLabels: Record<string, string> = {
-  cash: "Cash",
-  bank_transfer: "Bank Transfer",
-  card: "Card",
-  credit: "Credit",
-  other: "Other",
-};
 
 function Metrics({ items }: { items: { label: string; value: ReactNode }[] }) {
   return <div className="report-print-metrics">{items.map((item) => <div className="report-print-metric" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}</div>;

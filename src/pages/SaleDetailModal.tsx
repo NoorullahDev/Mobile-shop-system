@@ -6,25 +6,9 @@ import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { StatusBadge } from "../components/StatusBadge";
 import * as saleService from "../services/saleService";
+import { formatMoneyCompact, formatDateTime } from "../lib/format";
 import type { Sale } from "../types/sale";
 import type { ReturnItem } from "../types/return";
-
-function fmt(n: number) {
-  return `Rs. ${n.toLocaleString("en-PK")}`;
-}
-
-function formatDate(s?: string | null) {
-  if (!s) return "—";
-  const d = new Date(s.replace(" ", "T"));
-  if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleString("en-PK", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function returnStatusLabel(s?: string) {
   if (s === "full") return "Fully Returned";
@@ -102,7 +86,7 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
             </div>
             <div>
               <div style={{ color: "#94A3B8" }}>Date &amp; Time</div>
-              <div style={{ color: "#0F172A" }}>{formatDate(sale.created_at)}</div>
+              <div style={{ color: "#0F172A" }}>{formatDateTime(sale.created_at)}</div>
             </div>
             <div>
               <div style={{ color: "#94A3B8" }}>Payment</div>
@@ -111,10 +95,10 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
             <div>
               <div style={{ color: "#94A3B8" }}>Total</div>
               <div className="font-semibold" style={{ color: "#0F172A" }}>
-                {fmt(sale.total_amount)}
+                {formatMoneyCompact(sale.total_amount)}
                 {sale.discount > 0 && (
                   <span className="ml-1 text-[11px] font-normal" style={{ color: "#16A34A" }}>
-                    −{fmt(sale.discount)}
+                    −{formatMoneyCompact(sale.discount)}
                   </span>
                 )}
               </div>
@@ -135,7 +119,7 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                     Refunded:
                   </span>
                   <span className="text-[13px] font-semibold" style={{ color: "#16A34A" }}>
-                    {fmt(sale.returned_amount ?? 0)}
+                    {formatMoneyCompact(sale.returned_amount ?? 0)}
                   </span>
                   {(sale.return_count ?? 0) > 1 && (
                     <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: "#E2E8F0", color: "#475569" }}>
@@ -178,7 +162,7 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                         )}
                       </td>
                       <td className="text-center" style={{ fontSize: "13px" }}>{it.quantity}</td>
-                      <td className="text-right text-[13px]">{fmt(it.unit_price)}</td>
+                      <td className="text-right text-[13px]">{formatMoneyCompact(it.unit_price)}</td>
                       <td className="text-center">
                         {returnedQty > 0 ? (
                           <span
@@ -219,20 +203,20 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                       </span>
                       <StatusBadge status={r.condition} />
                       <span style={{ color: "#64748B", fontSize: "12px" }}>
-                        {formatDate(r.return_date ?? r.created_at)}
+                        {formatDateTime(r.return_date ?? r.created_at)}
                       </span>
                       <span className="text-[12px] capitalize" style={{ color: "#64748B" }}>
                         {r.refund_method.replace("_", " ")}
                       </span>
                       <span className="ml-auto flex items-center gap-3 text-[12px]">
                         <span style={{ color: "#334155" }}>
-                          Items: <strong>{fmt(r.total_sale_price)}</strong>
+                          Items: <strong>{formatMoneyCompact(r.total_sale_price)}</strong>
                         </span>
                         <span style={{ color: "#DC2626" }}>
-                          Deduction: <strong>{fmt(r.deduction_amount)}</strong>
+                          Deduction: <strong>{formatMoneyCompact(r.deduction_amount)}</strong>
                         </span>
                         <span style={{ color: "#16A34A" }}>
-                          Refund: <strong>{fmt(r.refund_amount)}</strong>
+                          Refund: <strong>{formatMoneyCompact(r.refund_amount)}</strong>
                         </span>
                       </span>
                     </div>
@@ -259,12 +243,12 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                                 <ReturnItemMeta it={it} />
                               </td>
                               <td className="text-center" style={{ fontSize: "13px" }}>{it.quantity}</td>
-                              <td className="text-right text-[13px]">{fmt(it.line_total)}</td>
+                              <td className="text-right text-[13px]">{formatMoneyCompact(it.line_total)}</td>
                               <td className="text-right text-[13px]" style={{ color: "#DC2626" }}>
-                                {fmt(it.deduction_amount)}
+                                {formatMoneyCompact(it.deduction_amount)}
                               </td>
                               <td className="text-right text-[13px] font-semibold" style={{ color: "#16A34A" }}>
-                                {fmt(it.refund_amount)}
+                                {formatMoneyCompact(it.refund_amount)}
                               </td>
                               <td className="text-center">
                                 <StatusBadge status={it.restocked ? "processed" : "nonsellable"} />

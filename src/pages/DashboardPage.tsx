@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   TrendingUp,
   CircleDollarSign,
@@ -87,9 +87,13 @@ export function DashboardPage() {
   const [period, setPeriod] = useState("today");
   const [periodSummary, setPeriodSummary] = useState<PeriodSummary | null>(null);
   const [dailySales, setDailySales] = useState<SalePoint[]>([]);
+  const [extraError, setExtraError] = useState<string | null>(null);
+  const dashReq = useRef(0);
 
   const fetchDashboardData = async () => {
+    const req = ++dashReq.current;
     load();
+    setExtraError(null);
     try {
       const now = new Date();
       const to = toLocalDate(now);
@@ -107,18 +111,16 @@ export function DashboardPage() {
         from = toLocalDate(start);
       }
 
-      const pSummary = await getPeriodSummary(from, to);
+      const [pSummary, top, seriesData] = await Promise.all([
+        getPeriodSummary(from, to),
+        getTopSellers(from, to, 5),
+        (period === "week" || period === "month") ? getSalesSeries(from, to) : Promise.resolve([]),
+      ]);
+
+      if (req !== dashReq.current) return;
       setPeriodSummary(pSummary);
-
-      const top = await getTopSellers(from, to, 5);
       setTopSellers(top);
-
-      if (period === "week" || period === "month") {
-        const dSales = await getSalesSeries(from, to);
-        setDailySales(dSales);
-      } else {
-        setDailySales([]);
-      }
+      setDailySales(seriesData);
 
       const [salesData, productsData, suppliersData, returnsList, membersData] = await Promise.all([
         listSales(),
@@ -128,6 +130,7 @@ export function DashboardPage() {
         listMembers(),
       ]);
 
+      if (req !== dashReq.current) return;
       setRecentSales(salesData.slice(0, 5));
       setOutOfStock(productsData.filter((p) => p.quantity <= 0));
       setSupplierDues(suppliersData.filter((s) => ((s as any).balance_due || 0) > 0));
@@ -135,7 +138,9 @@ export function DashboardPage() {
       setMembersWithDues(membersData.filter((m) => ((m as any).balance_due || 0) > 0));
       setTotalMembers(membersData);
     } catch (err) {
+      if (req !== dashReq.current) return;
       console.error("Failed to load extra dashboard data", err);
+      setExtraError("Failed to load dashboard details. Showing limited data.");
     }
   };
 
@@ -201,6 +206,12 @@ export function DashboardPage() {
       {error && (
         <div className="mb-4">
           <Alert message={error} variant="error" />
+        </div>
+      )}
+
+      {extraError && (
+        <div className="mb-4">
+          <Alert message={extraError} variant="warning" />
         </div>
       )}
 
