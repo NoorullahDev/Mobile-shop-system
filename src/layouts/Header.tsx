@@ -43,7 +43,7 @@ export function Header() {
       className="flex h-14 shrink-0 items-center justify-between gap-4 px-6"
       style={{ background: "#FFFFFF", borderBottom: "1px solid #E2E8F0" }}
     >
-      <div className="flex items-center gap-6">
+      <div className="ml-auto flex items-center gap-6">
         <div 
           className="relative cursor-pointer mt-1" 
           onClick={() => navigate("/notifications")}
