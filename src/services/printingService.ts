@@ -86,19 +86,14 @@ export function printReceiptViaDialog(
   const inner = buildReceiptInner(data, settings);
   const rules = PAPER_RULES[settings.paperWidth];
 
-  // Measure exact content height so the @page size is tight (no blank space)
-  const contentHeightMm = measureReceiptHeight(inner, rules.contentMm);
-  const pageHeightMm = clampHeightMm(contentHeightMm + 2);
-
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8" />
 <title>Receipt - Print</title>
 <style>
   @page {
-    size: ${rules.paperMm}mm ${pageHeightMm}mm;
     margin: 0;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: ${rules.paperMm}mm; height: ${pageHeightMm}mm; overflow: hidden; background: #fff; }
+  html, body { width: ${rules.paperMm}mm; background: #fff; }
 </style>
 </head><body>${inner}</body></html>`;
 

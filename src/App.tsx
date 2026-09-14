@@ -38,13 +38,18 @@ export default function App() {
 
   useEffect(() => {
     init();
-    useSettingsStore.getState().load().catch(() => {});
     licenseService
       .getLicenseStatus()
       .then(setLicenseStatus)
       .catch(() => setLicenseStatus(null))
       .finally(() => setLicenseLoading(false));
   }, [init]);
+
+  useEffect(() => {
+    if (user) {
+      useSettingsStore.getState().load().catch(() => {});
+    }
+  }, [user]);
 
   useEffect(() => {
     if (businessName) document.title = businessName;

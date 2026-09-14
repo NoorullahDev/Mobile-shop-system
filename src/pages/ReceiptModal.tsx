@@ -5,7 +5,7 @@ import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { ReceiptView } from "../components/receipt/ReceiptView";
 import { buildReceiptData } from "../lib/receiptLayout";
-import { printReceipt, printReceiptViaDialog } from "../services/printingService";
+import { printReceiptViaDialog } from "../services/printingService";
 import * as saleService from "../services/saleService";
 import { useReceiptSettingsStore } from "../store/receiptSettings";
 import { useSettingsStore } from "../store/settings";
@@ -20,8 +20,6 @@ interface ReceiptModalProps {
 export function ReceiptModal({ open, sale, onClose }: ReceiptModalProps) {
   const rs = useReceiptSettingsStore();
   const business = useSettingsStore();
-  const [printing, setPrinting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fullSale, setFullSale] = useState<Sale | null>(null);
 
@@ -30,7 +28,6 @@ export function ReceiptModal({ open, sale, onClose }: ReceiptModalProps) {
       if (!useReceiptSettingsStore.getState().loaded) {
         useReceiptSettingsStore.getState().load().catch(() => {});
       }
-      setMessage(null);
       setError(null);
       setFullSale(null);
       saleService.getSale(sale.id).then(setFullSale).catch(() => setFullSale(sale));
@@ -54,26 +51,12 @@ export function ReceiptModal({ open, sale, onClose }: ReceiptModalProps) {
     rs,
   );
 
-  const handlePrint = async () => {
-    if (rs.useSystemPrintDialog) {
-      try {
-        printReceiptViaDialog(data, rs);
-        setMessage("Receipt opened in print window.");
-      } catch (e) {
-        setError(String(e));
-      }
-      return;
-    }
-    setPrinting(true);
+  const handlePrint = () => {
     setError(null);
-    setMessage(null);
     try {
-      await printReceipt(data, rs);
-      setMessage(`Receipt sent to ${rs.printer || "the system default printer"}.`);
+      printReceiptViaDialog(data, rs);
     } catch (e) {
       setError(String(e));
-    } finally {
-      setPrinting(false);
     }
   };
 
@@ -85,33 +68,23 @@ export function ReceiptModal({ open, sale, onClose }: ReceiptModalProps) {
       onClose={onClose}
       size="md"
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={printing}>
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
           <Button
             variant="primary"
             onClick={handlePrint}
-            loading={printing}
             icon={<Printer className="h-3.5 w-3.5" />}
           >
-            {printing ? "Printing..." : "Print Receipt"}
+            Print Receipt
           </Button>
-        </>
+        </div>
       }
     >
       {error && (
         <div className="mb-3">
-          <Alert
-            variant="error"
-            title="Print failed"
-            message={error}
-          />
-        </div>
-      )}
-      {message && (
-        <div className="mb-3">
-          <Alert variant="success" title="Printed" message={message} />
+          <Alert variant="error" title="Print failed" message={error} />
         </div>
       )}
       <div className="py-3" style={{ background: "#F7F8FA", borderRadius: 8 }}>

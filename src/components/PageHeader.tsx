@@ -2,7 +2,7 @@ import { ReactNode } from "react";
 
 interface PageHeaderProps {
   title: string;
-  description?: string;
+  description?: ReactNode;
   breadcrumb?: { label: string; href?: string }[];
   actions?: ReactNode;
   meta?: string;
@@ -59,12 +59,12 @@ export function PageHeader({
 
         {/* Description */}
         {description && (
-          <p
+          <div
             className="mt-0.5"
             style={{ fontSize: "13px", color: "#64748B" }}
           >
             {description}
-          </p>
+          </div>
         )}
       </div>
 

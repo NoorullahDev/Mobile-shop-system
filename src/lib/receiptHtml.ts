@@ -180,26 +180,20 @@ export function buildPrintHtml(data: ReceiptData, settings: ReceiptSettings): st
 }
 
 export function measureReceiptHeight(inner: string, contentMm: number): number {
-  const iframe = document.createElement("iframe");
-  iframe.style.position = "fixed";
-  iframe.style.left = "-10000px";
-  iframe.style.top = "0";
-  iframe.style.width = `${Math.round(contentMm * MM_TO_PX)}px`;
-  iframe.style.height = "1px";
-  iframe.style.visibility = "hidden";
-  document.body.appendChild(iframe);
+  const container = document.createElement("div");
+  container.style.position = "absolute";
+  container.style.left = "-10000px";
+  container.style.top = "0";
+  container.style.width = `${Math.round(contentMm * MM_TO_PX)}px`;
+  container.style.visibility = "hidden";
+  container.innerHTML = `<div class="receipt-measure-wrapper" style="margin:0;padding:0;">${inner}</div>`;
+  document.body.appendChild(container);
+  
   try {
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return contentMm * 4;
-    doc.open();
-    doc.write(
-      `<!DOCTYPE html><html><head><meta charset="utf-8"></head>` +
-        `<body style="margin:0;padding:0">${inner}</body></html>`,
-    );
-    doc.close();
-    const px = doc.querySelector(".receipt")?.scrollHeight ?? doc.body.scrollHeight ?? 0;
+    const px = container.getBoundingClientRect().height;
+    // Add a small buffer to ensure nothing is clipped
     return (px * 25.4) / 96;
   } finally {
-    iframe.remove();
+    container.remove();
   }
 }
