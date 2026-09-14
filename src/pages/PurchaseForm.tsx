@@ -17,6 +17,7 @@ import type {
 } from "../types/inventory";
 import type { CreatePurchaseInput, PurchaseItemInput } from "../types/purchase";
 import { PURCHASE_PAYMENT_METHODS } from "../types/purchase";
+import { methodLabels } from "../lib/format";
 
 interface PurchaseFormProps {
   onSubmit: (input: CreatePurchaseInput) => Promise<void>;
@@ -47,13 +48,6 @@ interface AccessoryDraftLine {
   sellingPrice: string;
   warranty: string;
 }
-
-const methodLabels: Record<string, string> = {
-  cash: "Cash",
-  bank_transfer: "Bank Transfer",
-  card: "Card",
-  other: "Other",
-};
 
 let nextKey = 1;
 
@@ -255,12 +249,11 @@ export function PurchaseForm({
         errs.push("Phone cost cannot be negative.");
         continue;
       }
-      const imeis = l.imeis.map((s) => s.trim()).filter((s) => s.length > 0);
+        const imeis = l.imeis.map((s) => s.trim()).filter((s) => s.length > 0);
       if (imeis.length !== qty) {
+        const phone = phones.find((p) => p.id === Number(l.productId));
         errs.push(
-          `Quantity ${qty} requires exactly ${qty} IMEI(s) for ${phoneDisplay(
-            phones.find((p) => p.id === Number(l.productId))!,
-          )}.`,
+          `Quantity ${qty} requires exactly ${qty} IMEI(s) for ${phone ? phoneDisplay(phone) : `product #${l.productId}`}.`,
         );
         continue;
       }

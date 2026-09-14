@@ -9,7 +9,7 @@ import type { Member } from "../types/member";
 import type { CreateSaleInput, Sale, SaleItemInput } from "../types/sale";
 import { PAYMENT_METHODS } from "../types/sale";
 import * as inventoryService from "../services/inventoryService";
-import { roundMoney } from "../lib/format";
+import { roundMoney, methodLabels } from "../lib/format";
 
 function formatPKR(n: number) {
   return `Rs. ${n.toLocaleString("en-PK")}`;
@@ -32,13 +32,6 @@ interface SaleFormProps {
   members: Member[];
   initialSale?: Sale | null;
 }
-
-const methodLabels: Record<string, string> = {
-  cash: "Cash",
-  bank_transfer: "Bank Transfer",
-  card: "Card",
-  other: "Other",
-};
 
 let lineKey = 0;
 
@@ -235,6 +228,7 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
                     label="Qty"
                     type="number"
                     min="1"
+                    max={inStock.find((p) => p.item_type === l.item_type && p.item_id === l.item_id)?.quantity ?? undefined}
                     value={l.quantity}
                     onChange={(e) => updateLine(l.key, { quantity: Math.max(1, Number(e.target.value) || 1) })}
                     disabled={saving}

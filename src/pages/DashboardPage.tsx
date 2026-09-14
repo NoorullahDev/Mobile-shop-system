@@ -36,6 +36,7 @@ import {
   formatMoney,
   formatMoneyCompact,
   formatDateTime,
+  toLocalDate,
 } from "../lib/format";
 
 // Additional imports for real data
@@ -81,6 +82,7 @@ export function DashboardPage() {
   const [supplierDues, setSupplierDues] = useState<Supplier[]>([]);
   const [recentReturns, setRecentReturns] = useState<ReturnSummary[]>([]);
   const [membersWithDues, setMembersWithDues] = useState<Member[]>([]);
+  const [totalMembers, setTotalMembers] = useState<Member[]>([]);
 
   const [period, setPeriod] = useState("today");
   const [periodSummary, setPeriodSummary] = useState<PeriodSummary | null>(null);
@@ -90,19 +92,19 @@ export function DashboardPage() {
     load();
     try {
       const now = new Date();
-      const to = now.toISOString().split("T")[0];
+      const to = toLocalDate(now);
       let from = to;
 
       if (period === "week") {
         const start = new Date(now);
         start.setDate(now.getDate() - now.getDay());
-        from = start.toISOString().split("T")[0];
+        from = toLocalDate(start);
       } else if (period === "month") {
         const start = new Date(now.getFullYear(), now.getMonth(), 1);
-        from = start.toISOString().split("T")[0];
+        from = toLocalDate(start);
       } else if (period === "year") {
         const start = new Date(now.getFullYear(), 0, 1);
-        from = start.toISOString().split("T")[0];
+        from = toLocalDate(start);
       }
 
       const pSummary = await getPeriodSummary(from, to);
@@ -118,20 +120,20 @@ export function DashboardPage() {
         setDailySales([]);
       }
 
-      const sales = await listSales();
-      setRecentSales(sales.slice(0, 5));
+      const [salesData, productsData, suppliersData, returnsList, membersData] = await Promise.all([
+        listSales(),
+        listProducts(),
+        listSuppliers(),
+        listReturns(),
+        listMembers(),
+      ]);
 
-      const products = await listProducts();
-      setOutOfStock(products.filter((p) => p.quantity <= 0));
-
-      const suppliers = await listSuppliers();
-      setSupplierDues(suppliers.filter((s) => ((s as any).balance_due || 0) > 0));
-
-      const returnsList = await listReturns();
+      setRecentSales(salesData.slice(0, 5));
+      setOutOfStock(productsData.filter((p) => p.quantity <= 0));
+      setSupplierDues(suppliersData.filter((s) => ((s as any).balance_due || 0) > 0));
       setRecentReturns(returnsList.slice(0, 5));
-
-      const members = await listMembers();
-      setMembersWithDues(members.filter((m) => ((m as any).balance_due || 0) > 0));
+      setMembersWithDues(membersData.filter((m) => ((m as any).balance_due || 0) > 0));
+      setTotalMembers(membersData);
     } catch (err) {
       console.error("Failed to load extra dashboard data", err);
     }
@@ -564,7 +566,25 @@ export function DashboardPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <div className="text-[12px] text-[#64748B]">New Customers</div>
-                    <div className="mt-1 text-lg font-bold text-[#0F172A]">0</div>
+                    <div className="mt-1 text-lg font-bold text-[#0F172A]">
+                      {totalMembers.filter((m) => {
+                        const d = new Date(m.created_at);
+                        const now = new Date();
+                        if (period === "today") {
+                          return d.toDateString() === now.toDateString();
+                        }
+                        if (period === "week") {
+                          const weekStart = new Date(now);
+                          weekStart.setDate(now.getDate() - now.getDay());
+                          weekStart.setHours(0, 0, 0, 0);
+                          return d >= weekStart;
+                        }
+                        if (period === "month") {
+                          return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+                        }
+                        return d.getFullYear() === now.getFullYear();
+                      }).length}
+                    </div>
                   </div>
                   <div>
                     <div className="text-[12px] text-[#64748B]">Items Sold</div>

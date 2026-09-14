@@ -29,6 +29,7 @@ import { formatMoney, formatMoneyCompact, roundMoney } from "../lib/format";
 import * as inventoryService from "../services/inventoryService";
 import * as memberService from "../services/memberService";
 import { ReceiptModal } from "./ReceiptModal";
+import { useNavigate } from "react-router-dom";
 import type { PhoneImei, Product } from "../types/inventory";
 import type { CreateMemberInput } from "../types/member";
 import type { CreateSaleInput, Sale } from "../types/sale";
@@ -117,6 +118,7 @@ export function POSPage() {
   const { products, load: loadInventory } = useInventoryStore();
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
+  const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
   const [productType, setProductType] = useState<"phone" | "accessory">("phone");
@@ -292,13 +294,14 @@ export function POSPage() {
             </div>
           </div>
         </div>
-        <a
-          href="#/sales"
+        <button
+          type="button"
+          onClick={() => navigate("/sales")}
           className="rounded px-3 py-2 text-[12px] font-semibold transition-colors hover:bg-white/10"
           style={{ color: "#AEBBD1" }}
         >
           View Sales History →
-        </a>
+        </button>
       </div>
 
       <div className="grid flex-1 grid-cols-5 gap-4 overflow-hidden rounded-b-lg bg-white p-4" style={{ border: "1px solid #E2E8F0" }}>

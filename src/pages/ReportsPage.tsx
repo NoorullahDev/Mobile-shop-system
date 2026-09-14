@@ -48,7 +48,7 @@ import * as reportService from "../services/reportService";
 import * as returnService from "../services/returnService";
 import * as saleService from "../services/saleService";
 import * as supplierService from "../services/supplierService";
-import { formatDate, formatMoney, formatMoneyCompact } from "../lib/format";
+import { formatDate, formatMoney, formatMoneyCompact, methodLabels } from "../lib/format";
 import type { CategoryTotal, Expense } from "../types/expense";
 import type { Accessory, Phone, Supplier } from "../types/inventory";
 import type { Member } from "../types/member";
@@ -73,14 +73,6 @@ const reportOptions: { value: ReportType; label: string }[] = [
   { value: "expenses", label: "Expenses" },
   { value: "profit-loss", label: "Profit & Loss" },
 ];
-
-const methodLabels: Record<string, string> = {
-  cash: "Cash",
-  bank_transfer: "Bank Transfer",
-  card: "Card",
-  credit: "Credit",
-  other: "Other",
-};
 
 function toInputDate(date: Date) {
   const year = date.getFullYear();

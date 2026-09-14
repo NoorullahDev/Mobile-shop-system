@@ -79,13 +79,16 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
     saleService.getSale(initialReturn.sale_id)
       .then((sale) => {
         setSelectedSale(sale);
-        setLines(initialReturn.items.map((item) => ({
-          saleItem: sale.items.find((line) => line.id === item.sale_item_id)!,
-          quantity: item.quantity,
-          imeiId: item.imei_id ?? null,
-          reason: item.reason ?? "",
-          condition: item.condition,
-        })).filter((line) => Boolean(line.saleItem)));
+        setLines(initialReturn.items.map((item) => {
+          const saleItem = sale.items.find((line) => line.id === item.sale_item_id);
+          return saleItem ? {
+            saleItem,
+            quantity: item.quantity,
+            imeiId: item.imei_id ?? null,
+            reason: item.reason ?? "",
+            condition: item.condition,
+          } : null;
+        }).filter((line): line is { saleItem: SaleItem; quantity: number; imeiId: number | null; reason: string; condition: string } => line !== null));
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoadingSale(false));

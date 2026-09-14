@@ -24,17 +24,10 @@ import { Select } from "../components/Select";
 import { useSupplierStore } from "../store/suppliers";
 import { useSessionStore } from "../store/session";
 import * as purchaseService from "../services/purchaseService";
-import { formatMoney, formatDate } from "../lib/format";
+import { formatMoney, formatDate, methodLabels } from "../lib/format";
 import type { SupplierBalance, SupplierPayment } from "../types/purchase";
 import { SUPPLIER_PAYMENT_STATUSES, PURCHASE_PAYMENT_METHODS } from "../types/purchase";
 import type { Supplier } from "../types/inventory";
-
-const methodLabels: Record<string, string> = {
-  cash: "Cash",
-  bank_transfer: "Bank Transfer",
-  card: "Card",
-  other: "Other",
-};
 
 export function SupplierDuesPage() {
   const { suppliers, load: loadSuppliers } = useSupplierStore();

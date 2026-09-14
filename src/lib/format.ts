@@ -71,3 +71,20 @@ export function formatDateTime(input: string | Date): string {
     minute: "2-digit",
   })}`;
 }
+
+/** Convert a Date to a local YYYY-MM-DD string (avoids UTC offset issues). */
+export function toLocalDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/** Shared payment method labels used across pages. */
+export const methodLabels: Record<string, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank Transfer",
+  card: "Card",
+  credit: "Credit",
+  other: "Other",
+};

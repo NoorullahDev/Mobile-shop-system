@@ -30,7 +30,7 @@ import { Input } from "../components/Input";
 import { Alert } from "../components/Alert";
 import { EmptyState } from "../components/EmptyState";
 import * as reportService from "../services/reportService";
-import { formatMoney, formatMoneyCompact, formatDate } from "../lib/format";
+import { formatMoney, formatMoneyCompact, formatDate, toLocalDate } from "../lib/format";
 import type { ProfitLoss } from "../types/report";
 
 type Preset = { label: string; from: () => string; to: () => string };
@@ -38,8 +38,11 @@ type Preset = { label: string; from: () => string; to: () => string };
 const presets: Preset[] = [
   {
     label: "This Month",
-    from: () => new Date().toISOString().slice(0, 8) + "01",
-    to: () => new Date().toISOString().slice(0, 10),
+    from: () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+    },
+    to: () => toLocalDate(new Date()),
   },
   {
     label: "This Quarter",
@@ -47,14 +50,14 @@ const presets: Preset[] = [
       const d = new Date();
       const q = Math.floor(d.getMonth() / 3);
       d.setMonth(q * 3, 1);
-      return d.toISOString().slice(0, 10);
+      return toLocalDate(d);
     },
-    to: () => new Date().toISOString().slice(0, 10),
+    to: () => toLocalDate(new Date()),
   },
   {
     label: "This Year",
-    from: () => new Date().toISOString().slice(0, 4) + "-01-01",
-    to: () => new Date().toISOString().slice(0, 10),
+    from: () => `${new Date().getFullYear()}-01-01`,
+    to: () => toLocalDate(new Date()),
   },
   {
     label: "Last 12 Months",
@@ -62,9 +65,9 @@ const presets: Preset[] = [
       const d = new Date();
       d.setMonth(d.getMonth() - 11);
       d.setDate(1);
-      return d.toISOString().slice(0, 10);
+      return toLocalDate(d);
     },
-    to: () => new Date().toISOString().slice(0, 10),
+    to: () => toLocalDate(new Date()),
   },
 ];
 
@@ -77,7 +80,7 @@ function monthLabel(month: string) {
 }
 
 export function ProfitLossPage() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toLocalDate(new Date());
   const firstOfMonth = today.slice(0, 8) + "01";
 
   const [from, setFrom] = useState(firstOfMonth);
