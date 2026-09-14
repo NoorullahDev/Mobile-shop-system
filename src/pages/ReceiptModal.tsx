@@ -88,7 +88,7 @@ export function ReceiptModal({ open, sale, onClose }: ReceiptModalProps) {
         </div>
       )}
       <div className="py-3" style={{ background: "#F7F8FA", borderRadius: 8 }}>
-        <ReceiptView data={data} settings={rs} scale={0.66} />
+        <ReceiptView data={data} settings={rs} scale={0.85} />
       </div>
     </Modal>
   );
