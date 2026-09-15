@@ -32,7 +32,7 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
   const business = useSettingsStore();
   const [error, setError] = useState<string | null>(null);
   const [fullSale, setFullSale] = useState<Sale | null>(null);
-  const [printType, setPrintType] = useState<PrintType>(initialPrintType ?? "thermal_58");
+  const [printType, setPrintType] = useState<PrintType>(initialPrintType ?? "a4");
 
   useEffect(() => {
     if (open && sale) {
