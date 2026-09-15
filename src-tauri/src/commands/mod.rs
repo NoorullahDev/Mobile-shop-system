@@ -1141,10 +1141,13 @@ pub fn get_dashboard_summary(
     db: State<Database>,
     session: State<SessionState>,
     months: Option<i64>,
-    today: String,
+    today: Option<String>,
 ) -> Result<DashboardSummary, AppError> {
     let guard = authenticated_conn(&db, &session)?;
-    report_service::dashboard(&guard, months.unwrap_or(12), &today)
+    let today_str = today.unwrap_or_else(|| {
+        chrono::Utc::now().format("%Y-%m-%d").to_string()
+    });
+    report_service::dashboard(&guard, months.unwrap_or(12), &today_str)
 }
 
 #[tauri::command]
