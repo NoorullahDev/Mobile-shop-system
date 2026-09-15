@@ -153,8 +153,8 @@ export async function printA4InvoiceViaDialog(data: ReceiptData): Promise<void> 
   await printHtml({
     html,
     printerId: undefined,
-    pageWidth: Math.round(210 * 96 / 25.4),
-    pageHeight: Math.round(297 * 96 / 25.4),
+    pageWidth: 210,
+    pageHeight: 297,
     orientation: "portrait",
     margin: { top: 0, right: 0, bottom: 0, left: 0, unit: "mm" },
     copies: 1,
