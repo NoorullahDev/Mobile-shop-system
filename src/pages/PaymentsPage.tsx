@@ -9,6 +9,7 @@ import {
   CircleDollarSign,
   X,
   Pencil,
+  MessageCircle,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -24,6 +25,8 @@ import { useMemberStore } from "../store/members";
 import * as paymentService from "../services/paymentService";
 import { useSessionStore } from "../store/session";
 import { formatMoneyCompact, methodLabels } from "../lib/format";
+import { openDuesReminder } from "../lib/whatsapp";
+import { useSettingsStore } from "../store/settings";
 import type { Payment } from "../types/payment";
 import type { MemberBalance } from "../types/payment";
 
@@ -31,6 +34,7 @@ export function PaymentsPage() {
   const { payments, loading, error, load, add, remove, update } = usePaymentStore();
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
+  const businessName = useSettingsStore((s) => s.businessName);
   const isAdmin = user?.role.toLowerCase() === "admin";
   
   const [search, setSearch] = useState("");
@@ -149,14 +153,16 @@ export function PaymentsPage() {
             <div className="max-h-72 overflow-y-auto p-3">
               <div className="flex flex-col gap-2">
                 {dues.map((d) => (
-                  <button
+                  <div
                     key={d.member_id}
-                    type="button"
-                    onClick={() => openHistory(d.member_id)}
-                    className="flex items-center justify-between rounded-md p-2.5 text-left transition-colors hover:bg-blue-50/50"
+                    className="flex items-center justify-between rounded-md p-2.5 transition-colors"
                     style={{ border: "1px solid #E2E8F0", background: "#F8FAFC" }}
                   >
-                    <div className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => openHistory(d.member_id)}
+                      className="min-w-0 flex-1 text-left transition-colors hover:bg-blue-50/50 rounded"
+                    >
                       <div className="flex items-center gap-2">
                         <span className="truncate text-[13px] font-semibold" style={{ color: "#0F172A" }}>
                           {d.member_name}
@@ -166,16 +172,29 @@ export function PaymentsPage() {
                       <div className="truncate text-[11px]" style={{ color: "#64748B" }}>
                         {d.phone ?? "—"} · {d.payment_count} payment{d.payment_count !== 1 ? "s" : ""}
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="amount font-bold text-[14px]" style={{ color: "#B45309" }}>
-                        {formatMoneyCompact(d.balance)}
+                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {d.phone && d.balance > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => openDuesReminder(d.phone, d.balance, businessName || undefined)}
+                          className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
+                          style={{ color: "#25D366" }}
+                          title="Send WhatsApp dues reminder"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      <div className="text-right">
+                        <div className="amount font-bold text-[14px]" style={{ color: "#B45309" }}>
+                          {formatMoneyCompact(d.balance)}
+                        </div>
+                        <div className="text-[10px]" style={{ color: "#94A3B8" }}>
+                          due balance
+                        </div>
                       </div>
-                      <div className="text-[10px]" style={{ color: "#94A3B8" }}>
-                        due balance
-                      </div>
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>

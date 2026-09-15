@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Search, Users, Pencil, Trash2, X, Wallet } from "lucide-react";
+import { Plus, Search, Users, Pencil, Trash2, X, Wallet, MessageCircle } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
@@ -13,12 +13,15 @@ import { MemberForm } from "./MemberForm";
 import { useMemberStore } from "../store/members";
 import * as paymentService from "../services/paymentService";
 import { formatMoneyCompact } from "../lib/format";
+import { openDuesReminder } from "../lib/whatsapp";
+import { useSettingsStore } from "../store/settings";
 import type { CreateMemberInput, Member } from "../types/member";
 import type { MemberBalance } from "../types/payment";
 
 export function MembersPage() {
   const { members, loading, error, load, add, update, remove } =
     useMemberStore();
+  const businessName = useSettingsStore((s) => s.businessName);
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Member | null>(null);
@@ -273,6 +276,23 @@ export function MembersPage() {
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1">
+                        {(() => {
+                          const due = balances[m.id]?.balance ?? 0;
+                          if (due > 0.001 && m.phone) {
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => openDuesReminder(m.phone, due, businessName || undefined)}
+                                className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
+                                style={{ color: "#25D366" }}
+                                title="Send WhatsApp dues reminder"
+                              >
+                                <MessageCircle className="h-3.5 w-3.5" />
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
                         <button
                           type="button"
                           onClick={() => setEditing(m)}
