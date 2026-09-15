@@ -70,6 +70,8 @@ fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
         body_condition: trim(input.body_condition),
         screen_condition: trim(input.screen_condition),
         battery_health: trim(input.battery_health),
+        pta_status: trim(input.pta_status),
+        battery_health_pct: input.battery_health_pct,
         camera_condition: trim(input.camera_condition),
         face_id: trim(input.face_id),
         speaker: trim(input.speaker),

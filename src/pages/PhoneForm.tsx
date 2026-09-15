@@ -72,6 +72,7 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
   const speakers = getOptionsByType("speaker");
   const chargers = getOptionsByType("charger");
   const boxes = getOptionsByType("box_condition");
+  const ptaStatuses = getOptionsByType("pta_status");
 
   const [form, setForm] = useState<CreatePhoneInput>({
     brand: initial?.brand ?? "",
@@ -99,6 +100,8 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
     body_condition: initial?.body_condition ?? "",
     screen_condition: initial?.screen_condition ?? "",
     battery_health: initial?.battery_health ?? "",
+    pta_status: initial?.pta_status ?? "",
+    battery_health_pct: initial?.battery_health_pct ?? null,
     camera_condition: initial?.camera_condition ?? "",
     face_id: initial?.face_id ?? "",
     speaker: initial?.speaker ?? "",
@@ -122,6 +125,7 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
   ];
 
   const showConditionDetails = !!form.condition && form.condition.trim() !== "New";
+  const isAppleBrand = (form.brand ?? "").trim().toLowerCase() === "apple";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,6 +183,8 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
         body_condition: form.body_condition ? form.body_condition.trim() : "",
         screen_condition: form.screen_condition ? form.screen_condition.trim() : "",
         battery_health: form.battery_health ? form.battery_health.trim() : "",
+        pta_status: form.pta_status ? form.pta_status.trim() : "",
+        battery_health_pct: form.battery_health_pct ? Number(form.battery_health_pct) : null,
         camera_condition: form.camera_condition ? form.camera_condition.trim() : "",
         face_id: form.face_id ? form.face_id.trim() : "",
         speaker: form.speaker ? form.speaker.trim() : "",
@@ -319,6 +325,37 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
             disabled={saving}
           />
         </Section>
+
+        {isAppleBrand && (
+          <Section index="2A" title="iPhone Details" description="Apple/iPhone specific fields.">
+            <Select
+              name="pta_status"
+              label="PTA Status"
+              placeholder="— Select PTA status —"
+              options={mapOptions(ptaStatuses, "— Select PTA status —")}
+              value={form.pta_status ?? ""}
+              onChange={(e) => set("pta_status", e.target.value)}
+              disabled={saving}
+            />
+            <Input
+              name="battery_health_pct"
+              label="Battery Health %"
+              type="number"
+              min="0"
+              max="100"
+              placeholder="e.g. 87"
+              hint="0–100%"
+              value={form.battery_health_pct != null ? String(form.battery_health_pct) : ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "") { set("battery_health_pct", null); return; }
+                const n = parseInt(v);
+                if (!isNaN(n) && n >= 0 && n <= 100) set("battery_health_pct", n);
+              }}
+              disabled={saving}
+            />
+          </Section>
+        )}
 
         <Section
           index="3"

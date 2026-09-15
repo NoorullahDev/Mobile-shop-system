@@ -58,6 +58,8 @@ export interface Phone {
   body_condition?: string | null;
   screen_condition?: string | null;
   battery_health?: string | null;
+  pta_status?: string | null;
+  battery_health_pct?: number | null;
   camera_condition?: string | null;
   face_id?: string | null;
   speaker?: string | null;
@@ -97,6 +99,8 @@ export interface CreatePhoneInput {
   body_condition?: string | null;
   screen_condition?: string | null;
   battery_health?: string | null;
+  pta_status?: string | null;
+  battery_health_pct?: number | null;
   camera_condition?: string | null;
   face_id?: string | null;
   speaker?: string | null;

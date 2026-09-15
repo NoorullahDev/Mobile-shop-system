@@ -111,6 +111,7 @@ CREATE TABLE phones (
     battery_capacity TEXT, imei TEXT, imei2 TEXT, category TEXT, condition TEXT,
     variant TEXT, sku TEXT, serial_number TEXT, image_paths TEXT NOT NULL DEFAULT '[]',
     condition_rating TEXT, body_condition TEXT, screen_condition TEXT, battery_health TEXT,
+    pta_status TEXT, battery_health_pct INTEGER,
     camera_condition TEXT, face_id TEXT, speaker TEXT, charger TEXT, box_condition TEXT,
     warranty TEXT, condition_notes TEXT,
     cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0,

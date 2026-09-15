@@ -27,6 +27,8 @@ fn phone_from_row(r: &rusqlite::Row) -> rusqlite::Result<Phone> {
         body_condition: r.get("body_condition")?,
         screen_condition: r.get("screen_condition")?,
         battery_health: r.get("battery_health")?,
+        pta_status: r.get("pta_status")?,
+        battery_health_pct: r.get("battery_health_pct")?,
         camera_condition: r.get("camera_condition")?,
         face_id: r.get("face_id")?,
         speaker: r.get("speaker")?,
@@ -59,20 +61,21 @@ fn imei_from_row(r: &rusqlite::Row) -> rusqlite::Result<PhoneImei> {
 
 const COLS: &str = "p.id, p.brand, p.model, p.color, p.storage, p.ram, p.processor, \
      p.chipset, p.network_type, p.battery_capacity, p.imei, p.imei2, p.serial_number, p.image_paths, p.category, p.condition, p.variant, p.sku, \
-     p.condition_rating, p.body_condition, p.screen_condition, p.battery_health, p.camera_condition, p.face_id, p.speaker, p.charger, p.box_condition, p.warranty, p.condition_notes, \
+     p.condition_rating, p.body_condition, p.screen_condition, p.battery_health, p.pta_status, p.battery_health_pct, p.camera_condition, p.face_id, p.speaker, p.charger, p.box_condition, p.warranty, p.condition_notes, \
      p.cost_price, p.sale_price, \
      p.quantity, p.supplier_id, s.name AS supplier_name, p.low_stock_threshold, p.is_deleted, \
      p.created_at, p.updated_at";
 
 pub fn insert(conn: &Connection, input: &CreatePhoneInput) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO phones (brand, model, color, storage, ram, processor, chipset, network_type, battery_capacity, imei, imei2, serial_number, image_paths, category, condition, variant, sku, condition_rating, body_condition, screen_condition, battery_health, camera_condition, face_id, speaker, charger, box_condition, warranty, condition_notes, cost_price, sale_price, quantity, supplier_id, low_stock_threshold)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)",
+        "INSERT INTO phones (brand, model, color, storage, ram, processor, chipset, network_type, battery_capacity, imei, imei2, serial_number, image_paths, category, condition, variant, sku, condition_rating, body_condition, screen_condition, battery_health, pta_status, battery_health_pct, camera_condition, face_id, speaker, charger, box_condition, warranty, condition_notes, cost_price, sale_price, quantity, supplier_id, low_stock_threshold)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35)",
         params![
             input.brand, input.model, input.color, input.storage, input.ram, input.processor,
             input.chipset, input.network_type, input.battery_capacity, input.imei, input.imei2, input.serial_number, serde_json::to_string(&input.image_paths).unwrap_or_else(|_| "[]".into()), input.category,
             input.condition, input.variant, input.sku,
             input.condition_rating, input.body_condition, input.screen_condition, input.battery_health,
+            input.pta_status, input.battery_health_pct,
             input.camera_condition, input.face_id, input.speaker, input.charger, input.box_condition,
             input.warranty, input.condition_notes,
             input.cost_price, input.sale_price, input.quantity, input.supplier_id,
@@ -132,14 +135,15 @@ pub fn list(conn: &Connection, search: Option<&str>) -> Result<Vec<Phone>, AppEr
 pub fn update(conn: &Connection, id: i64, input: &CreatePhoneInput) -> Result<bool, AppError> {
     let affected = conn.execute(
         "UPDATE phones SET brand=?1, model=?2, color=?3, storage=?4, ram=?5, processor=?6, chipset=?7, network_type=?8, battery_capacity=?9, imei=?10, imei2=?11, serial_number=?12, image_paths=?13, category=?14, condition=?15, variant=?16, sku=?17,
-         condition_rating=?18, body_condition=?19, screen_condition=?20, battery_health=?21, camera_condition=?22, face_id=?23, speaker=?24, charger=?25, box_condition=?26, warranty=?27, condition_notes=?28,
-         cost_price=?29, sale_price=?30, quantity=?31, supplier_id=?32, low_stock_threshold=?33, updated_at=CURRENT_TIMESTAMP
-         WHERE id=?34 AND is_deleted=0",
+         condition_rating=?18, body_condition=?19, screen_condition=?20, battery_health=?21, pta_status=?22, battery_health_pct=?23, camera_condition=?24, face_id=?25, speaker=?26, charger=?27, box_condition=?28, warranty=?29, condition_notes=?30,
+         cost_price=?31, sale_price=?32, quantity=?33, supplier_id=?34, low_stock_threshold=?35, updated_at=CURRENT_TIMESTAMP
+         WHERE id=?36 AND is_deleted=0",
         params![
             input.brand, input.model, input.color, input.storage, input.ram, input.processor,
             input.chipset, input.network_type, input.battery_capacity, input.imei, input.imei2, input.serial_number, serde_json::to_string(&input.image_paths).unwrap_or_else(|_| "[]".into()), input.category,
             input.condition, input.variant, input.sku,
             input.condition_rating, input.body_condition, input.screen_condition, input.battery_health,
+            input.pta_status, input.battery_health_pct,
             input.camera_condition, input.face_id, input.speaker, input.charger, input.box_condition,
             input.warranty, input.condition_notes,
             input.cost_price, input.sale_price, input.quantity, input.supplier_id,

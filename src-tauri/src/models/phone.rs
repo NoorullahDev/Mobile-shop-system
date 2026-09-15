@@ -42,6 +42,10 @@ pub struct Phone {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub battery_health: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub pta_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery_health_pct: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub camera_condition: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub face_id: Option<String>,
@@ -92,6 +96,8 @@ pub struct CreatePhoneInput {
     pub body_condition: Option<String>,
     pub screen_condition: Option<String>,
     pub battery_health: Option<String>,
+    pub pta_status: Option<String>,
+    pub battery_health_pct: Option<i64>,
     pub camera_condition: Option<String>,
     pub face_id: Option<String>,
     pub speaker: Option<String>,

@@ -1124,6 +1124,26 @@ const MIGRATIONS: &[(&str, &str)] = &[
           AND NOT EXISTS (SELECT 1 FROM sale_payments sp WHERE sp.sale_id = sales.id);
         "#,
     ),
+
+    // =====================================================================
+    // 0023: iPhone-specific fields — pta_status + battery_health_pct.
+    //
+    // pta_status: dropdown (PTA Approved / Non-PTA / JV) stored via
+    //   phone_options with option_type='pta_status'.
+    // battery_health_pct: numeric 0–100 for iPhone battery health.
+    // =====================================================================
+    (
+        "0023_iphone_fields",
+        r#"
+        ALTER TABLE phones ADD COLUMN pta_status TEXT;
+        ALTER TABLE phones ADD COLUMN battery_health_pct INTEGER;
+
+        INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
+            ('pta_status', 'PTA Approved', 1),
+            ('pta_status', 'Non-PTA', 2),
+            ('pta_status', 'JV', 3);
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

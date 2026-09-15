@@ -20,6 +20,7 @@ const OPTION_TYPES = [
   { id: "storage", label: "Storage" },
   { id: "color", label: "Colors" },
   { id: "network_type", label: "Network Types" },
+  { id: "pta_status", label: "PTA Status (iPhone)" },
   { id: "condition_rating", label: "Condition Rating" },
   { id: "body_condition", label: "Body Condition" },
   { id: "screen_condition", label: "Screen Condition" },
