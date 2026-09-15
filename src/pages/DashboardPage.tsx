@@ -278,7 +278,7 @@ export function DashboardPage() {
               title="ONLINE PAYMENTS"
               value={formatMoneyCompact(
                 paymentBreakdown
-                  .filter((b) => b.payment_method !== "cash" && b.payment_method !== "credit")
+                  .filter((b) => b.payment_method !== "cash")
                   .reduce((sum, b) => sum + b.total, 0)
               )}
               sub="Bank Transfer / Easypaisa / JazzCash / Card"

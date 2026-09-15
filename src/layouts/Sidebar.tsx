@@ -18,6 +18,7 @@ import {
   Settings,
   Lock,
   LogOut,
+  Banknote,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -46,6 +47,7 @@ const mainNav: NavItem[] = [
   { to: "/purchases", label: "Purchases", icon: PackagePlus },
   { to: "/members", label: "Customers", icon: Users },
   { to: "/payments", label: "Customer Dues", icon: CreditCard },
+  { to: "/online-payments", label: "Online Payments", icon: Banknote },
   { to: "/suppliers", label: "Suppliers", icon: Building2 },
   { to: "/supplier-dues", label: "Supplier Dues", icon: CreditCard },
   { to: "/expenses", label: "Expenses", icon: TrendingDown },

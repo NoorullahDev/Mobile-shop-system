@@ -574,6 +574,7 @@ export function ReportsPage() {
         expenses={expenses}
         byCategory={byCategory}
         allSummaryRows={allSummaryRows}
+        onlinePayments={onlinePayments}
       />
     </div>
   );

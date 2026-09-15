@@ -6,7 +6,7 @@ import type { Supplier } from "../types/inventory";
 import type { Member } from "../types/member";
 import type { MemberBalance } from "../types/payment";
 import type { Purchase, SupplierBalance } from "../types/purchase";
-import type { PaymentBreakdown, PeriodSummary, ProfitLoss, ReportType, TopSeller } from "../types/report";
+import type { PaymentBreakdown, PeriodSummary, ProfitLoss, ReportType, TopSeller, OnlinePaymentRecord } from "../types/report";
 import type { ReturnSummary } from "../types/return";
 import type { Sale } from "../types/sale";
 
@@ -45,6 +45,7 @@ interface PrintReportProps {
   expenses: Expense[];
   byCategory: CategoryTotal[];
   allSummaryRows: string[][];
+  onlinePayments: OnlinePaymentRecord[];
 }
 
 function Metrics({ items }: { items: { label: string; value: ReactNode }[] }) {
@@ -82,6 +83,7 @@ export const PrintReport = memo(function PrintReport({
   expenses,
   byCategory,
   allSummaryRows,
+  onlinePayments,
 }: PrintReportProps) {
   const businessName = useSettingsStore((state) => state.businessName) || "Mobile Shop System";
   const logo = useSettingsStore((state) => state.logo);
@@ -204,6 +206,64 @@ export const PrintReport = memo(function PrintReport({
         <Section title="Monthly Profit Analysis"><table><thead><tr><th>Month</th><th className="num">Revenue</th><th className="num">COGS</th><th className="num">Expenses</th><th className="num">Gross Profit</th><th className="num">Net Profit</th></tr></thead><tbody>{!profitLoss?.monthly.length ? <EmptyRow columns={6}>No profit and loss data in this period.</EmptyRow> : profitLoss.monthly.map((item) => <tr key={item.month}><td>{item.month}</td><td className="num">{formatMoney(item.revenue)}</td><td className="num">{formatMoney(item.cogs)}</td><td className="num">{formatMoney(item.expenses)}</td><td className="num">{formatMoney(item.gross_profit)}</td><td className="num">{formatMoney(item.net_profit)}</td></tr>)}</tbody></table></Section>
         <div className="report-print-totals"><div><span>GROSS PROFIT</span><strong>{formatMoney(profitLoss?.gross_profit ?? 0)}</strong></div><div><span>NET PROFIT</span><strong>{formatMoney(profitLoss?.net_profit ?? 0)}</strong></div></div>
       </>}
+
+      {reportType === "online-payments" && (() => {
+        const totalOnline = onlinePayments.reduce((s, r) => s + r.amount, 0);
+        const byMethod: Record<string, number> = {};
+        for (const r of onlinePayments) byMethod[r.payment_method] = (byMethod[r.payment_method] ?? 0) + r.amount;
+        const methodEntries = Object.entries(byMethod).sort((a, b) => b[1] - a[1]);
+        return <>
+          <Metrics items={[
+            { label: "Total Online Received", value: formatMoney(totalOnline) },
+            { label: "Transactions", value: onlinePayments.length },
+            { label: "Payment Methods", value: methodEntries.length },
+          ]} />
+          <Section title="Totals by Payment Method">
+            <table>
+              <thead><tr><th>Method</th><th className="num">Total</th></tr></thead>
+              <tbody>
+                {methodEntries.length === 0 ? <EmptyRow columns={2}>No online payments in this period.</EmptyRow> : methodEntries.map(([method, total]) => (
+                  <tr key={method}><td>{methodLabels[method] ?? method}</td><td className="num">{formatMoney(total)}</td></tr>
+                ))}
+                {methodEntries.length > 0 && (
+                  <tr style={{ borderTop: "2px solid #CBD5E1", fontWeight: 700 }}><td>TOTAL ONLINE RECEIVED</td><td className="num">{formatMoney(totalOnline)}</td></tr>
+                )}
+              </tbody>
+            </table>
+          </Section>
+          <Section title="Transaction Details">
+            <table>
+              <colgroup>
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "20%" }} />
+              </colgroup>
+              <thead><tr><th>Date</th><th>Invoice</th><th>Customer</th><th>Method</th><th className="num">Amount</th><th>Bank / Account</th><th>Reference / TX ID</th></tr></thead>
+              <tbody>
+                {onlinePayments.length === 0 ? <EmptyRow columns={7}>No online payment records in this period.</EmptyRow> : onlinePayments.map((r) => (
+                  <tr key={r.id}>
+                    <td>{formatDate(r.created_at)}</td>
+                    <td>{r.receipt_no}</td>
+                    <td>{r.customer_name ?? "Walk-in"}</td>
+                    <td>{methodLabels[r.payment_method] ?? r.payment_method}</td>
+                    <td className="num">{formatMoney(r.amount)}</td>
+                    <td>{r.notes ?? "—"}</td>
+                    <td>{r.reference ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Section>
+          <div className="report-print-totals">
+            <div><span>TOTAL ONLINE RECEIVED</span><strong>{formatMoney(totalOnline)}</strong></div>
+            <div><span>TRANSACTIONS</span><strong>{onlinePayments.length}</strong></div>
+          </div>
+        </>;
+      })()}
 
     </article>
   );

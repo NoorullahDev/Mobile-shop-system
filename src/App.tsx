@@ -10,6 +10,7 @@ import { SuppliersPage } from "./pages/SuppliersPage";
 import { PurchasesPage } from "./pages/PurchasesPage";
 import { SupplierDuesPage } from "./pages/SupplierDuesPage";
 import { PaymentsPage } from "./pages/PaymentsPage";
+import { OnlinePaymentsPage } from "./pages/OnlinePaymentsPage";
 import { SalesPage } from "./pages/SalesPage";
 import { ReturnsPage } from "./pages/ReturnsPage";
 import { POSPage } from "./pages/POSPage";
@@ -103,6 +104,7 @@ export default function App() {
             <Route path="sales" element={<SalesPage />} />
             <Route path="returns" element={<ReturnsPage />} />
             <Route path="payments" element={<PaymentsPage />} />
+            <Route path="online-payments" element={<OnlinePaymentsPage />} />
             <Route path="expenses" element={<ExpensesPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="settings" element={<SettingsPage />} />
