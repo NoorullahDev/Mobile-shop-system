@@ -1141,9 +1141,10 @@ pub fn get_dashboard_summary(
     db: State<Database>,
     session: State<SessionState>,
     months: Option<i64>,
+    today: String,
 ) -> Result<DashboardSummary, AppError> {
     let guard = authenticated_conn(&db, &session)?;
-    report_service::dashboard(&guard, months.unwrap_or(12))
+    report_service::dashboard(&guard, months.unwrap_or(12), &today)
 }
 
 #[tauri::command]

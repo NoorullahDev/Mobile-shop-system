@@ -11,8 +11,8 @@ import type {
   TopSeller,
 } from "../types/report";
 
-export async function getDashboardSummary(months?: number): Promise<DashboardSummary> {
-  return invoke<DashboardSummary>("get_dashboard_summary", { months: months ?? 12 });
+export async function getDashboardSummary(months?: number, today?: string): Promise<DashboardSummary> {
+  return invoke<DashboardSummary>("get_dashboard_summary", { months: months ?? 12, today: today ?? new Date().toISOString().slice(0, 10) });
 }
 
 export async function getRevenueSeries(months?: number): Promise<MonthlyPoint[]> {

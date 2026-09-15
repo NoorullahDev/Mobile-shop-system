@@ -42,7 +42,7 @@ fn series(months: i64, rows: Vec<(String, f64)>) -> Vec<MonthlyPoint> {
         .collect()
 }
 
-pub fn dashboard(conn: &Connection, _months: i64) -> Result<DashboardSummary, AppError> {
+pub fn dashboard(conn: &Connection, _months: i64, today: &str) -> Result<DashboardSummary, AppError> {
     let (
         revenue,
         expenses,
@@ -52,7 +52,7 @@ pub fn dashboard(conn: &Connection, _months: i64) -> Result<DashboardSummary, Ap
         low_stock,
         pending_payments,
     ) = report_repository::dashboard_summary(conn)?;
-    let (today_revenue, today_sales_count) = report_repository::today_summary(conn)?;
+    let (today_revenue, today_sales_count) = report_repository::today_summary(conn, today)?;
 
     Ok(DashboardSummary {
         revenue,
@@ -221,6 +221,7 @@ mod tests {
     #[test]
     fn dashboard_counts_and_totals() {
         let conn = in_memory_conn();
+        let today = local_today();
         conn.execute(
             "INSERT INTO categories (name, type) VALUES ('Rent','expense')",
             [],
@@ -232,11 +233,11 @@ mod tests {
             [],
         )
         .unwrap();
-        seed_sale(&conn, 1000.0, None);
-        seed_sale(&conn, 500.0, None);
-        seed_expense(&conn, 300.0, cat);
+        seed_sale_on(&conn, 1000.0, None, Some(&today));
+        seed_sale_on(&conn, 500.0, None, Some(&today));
+        seed_expense_on(&conn, 300.0, cat, Some(&today));
 
-        let s = dashboard(&conn, 12).unwrap();
+        let s = dashboard(&conn, 12, &today).unwrap();
         assert_eq!(s.revenue, 1500.0);
         assert_eq!(s.expenses, 300.0);
         assert_eq!(s.profit, 1200.0);

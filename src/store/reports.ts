@@ -2,6 +2,14 @@ import { create } from "zustand";
 import type { ActivityLog, DashboardSummary, MonthlyPoint } from "../types/report";
 import * as reportService from "../services/reportService";
 
+function localToday(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 interface DashboardState {
   summary: DashboardSummary | null;
   revenueSeries: MonthlyPoint[];
@@ -23,8 +31,9 @@ export const useReportStore = create<DashboardState>((set) => ({
   load: async () => {
     set({ loading: true, error: null });
     try {
+      const today = localToday();
       const [summary, revenueSeries, expenseSeries, activity] = await Promise.all([
-        reportService.getDashboardSummary(),
+        reportService.getDashboardSummary(12, today),
         reportService.getRevenueSeries(),
         reportService.getExpenseSeries(),
         reportService.getRecentActivity(10),

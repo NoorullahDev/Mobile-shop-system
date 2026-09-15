@@ -397,19 +397,19 @@ pub fn monthly_profit_loss(
     Ok(out)
 }
 
-/// Today's sales revenue and transaction count. Uses UTC to match the UTC
-/// bucket used by every range report and the UTC date strings sent by the UI.
-pub fn today_summary(conn: &Connection) -> Result<(f64, i64), AppError> {
+/// Today's sales revenue and transaction count. Uses the frontend-supplied
+/// local date string so it stays consistent with period_summary filtering.
+pub fn today_summary(conn: &Connection, today: &str) -> Result<(f64, i64), AppError> {
     let revenue = conn.query_row(
         "SELECT COALESCE(SUM(total_amount), 0) FROM sales
-         WHERE created_at >= date('now') AND created_at < date('now', '+1 day')",
-        [],
+         WHERE created_at >= date(?1) AND created_at < date(?1, '+1 day')",
+        params![today],
         |r| r.get::<_, f64>(0),
     )?;
     let count = conn.query_row(
         "SELECT COUNT(*) FROM sales
-         WHERE created_at >= date('now') AND created_at < date('now', '+1 day')",
-        [],
+         WHERE created_at >= date(?1) AND created_at < date(?1, '+1 day')",
+        params![today],
         |r| r.get::<_, i64>(0),
     )?;
     Ok((revenue, count))
