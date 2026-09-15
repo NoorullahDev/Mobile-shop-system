@@ -1,43 +1,88 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { formatMoneyCompact } from "./format";
 
 /**
- * Generate a WhatsApp deep link URL with a pre-filled dues reminder
- * message in Urdu. Opens in a new tab / WhatsApp app.
+ * Validate and normalize a Pakistani phone number for WhatsApp.
+ * Returns the cleaned number with country code, or null if invalid.
  */
-export function duesReminderUrl(phone: string | null | undefined, amount: number, businessName?: string): string | null {
-  if (!phone || amount <= 0) return null;
+function normalizePhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
 
-  // Clean phone: remove spaces, dashes, parentheses, leading +
-  let clean = phone.replace(/[\s\-()+]/g, "");
+  // Strip all non-digit characters
+  let clean = phone.replace(/\D/g, "");
 
-  // If it starts with 0 (local PK format), prefix 92
-  if (clean.startsWith("0")) {
+  // Must have at least 10 digits to be a valid PK number
+  if (clean.length < 10) return null;
+
+  // Handle 03xx local format → 923xx
+  if (clean.startsWith("0") && clean.length >= 11) {
     clean = "92" + clean.slice(1);
   }
 
-  // If no country code, assume Pakistan (92)
-  if (!clean.startsWith("92") && !clean.startsWith("1")) {
-    clean = "92" + clean;
+  // Handle +92xxx format (already has country code)
+  if (clean.startsWith("92") && clean.length >= 12) {
+    return clean;
   }
 
-  const formattedAmount = formatMoneyCompact(amount);
-  const shopLine = businessName ? `${businessName} se` : "Aap ki dukaan se";
+  // Handle 3xx without leading 0 (rare but possible)
+  if (clean.startsWith("3") && clean.length >= 10) {
+    return "92" + clean;
+  }
 
-  const message =
-    `Assalamu Alaikum! 🙏\n\n` +
-    `${shopLine} Rs. ${formattedAmount} ki payment baqi hai.\n\n` +
-    `Baraye meherbani jald se jald ada karein.\n` +
-    `Shukriya! 🙏`;
+  // If it already starts with 92 and is long enough, accept it
+  if (clean.startsWith("92")) return clean;
 
-  return `https://wa.me/${clean}?text=${encodeURIComponent(message)}`;
+  return null;
 }
 
 /**
- * Open WhatsApp dues reminder in a new tab.
+ * Build the WhatsApp deep link URL with a pre-filled Urdu dues reminder.
  */
-export function openDuesReminder(phone: string | null | undefined, amount: number, businessName?: string): void {
+export function duesReminderUrl(
+  phone: string | null | undefined,
+  amount: number,
+  businessName?: string,
+): string | null {
+  const cleanPhone = normalizePhone(phone);
+  if (!cleanPhone) return null;
+  if (amount <= 0) return null;
+
+  const formattedAmount = formatMoneyCompact(amount);
+  const shopLine = businessName
+    ? `${businessName} mein aapki`
+    : "Aap ki dukaan mein aapki";
+
+  const message =
+    `Assalamualaikum!\n` +
+    `${shopLine} Rs. ${formattedAmount} payment baqi hai.\n` +
+    `Baraye meherbani jald se jald ada karein.\n` +
+    `Shukriya.`;
+
+  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+}
+
+/**
+ * Open WhatsApp dues reminder in the system's default browser / WhatsApp app.
+ * Returns true on success, false if phone was invalid.
+ */
+export async function openDuesReminder(
+  phone: string | null | undefined,
+  amount: number,
+  businessName?: string,
+): Promise<boolean> {
   const url = duesReminderUrl(phone, amount, businessName);
-  if (url) {
-    window.open(url, "_blank", "noopener,noreferrer");
+  if (!url) return false;
+  try {
+    await openUrl(url);
+    return true;
+  } catch {
+    return false;
   }
+}
+
+/**
+ * Check if a phone number is valid for WhatsApp.
+ */
+export function isPhoneValid(phone: string | null | undefined): boolean {
+  return normalizePhone(phone) !== null;
 }

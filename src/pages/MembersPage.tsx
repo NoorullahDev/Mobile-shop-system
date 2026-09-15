@@ -13,7 +13,7 @@ import { MemberForm } from "./MemberForm";
 import { useMemberStore } from "../store/members";
 import * as paymentService from "../services/paymentService";
 import { formatMoneyCompact } from "../lib/format";
-import { openDuesReminder } from "../lib/whatsapp";
+import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
 import type { CreateMemberInput, Member } from "../types/member";
 import type { MemberBalance } from "../types/payment";
@@ -282,7 +282,13 @@ export function MembersPage() {
                             return (
                               <button
                                 type="button"
-                                onClick={() => openDuesReminder(m.phone, due, businessName || undefined)}
+                                onClick={async () => {
+                                  if (!isPhoneValid(m.phone)) {
+                                    alert("Customer phone number is invalid or missing. Please update the phone number to send a WhatsApp reminder.");
+                                    return;
+                                  }
+                                  await openDuesReminder(m.phone, due, businessName || undefined);
+                                }}
                                 className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
                                 style={{ color: "#25D366" }}
                                 title="Send WhatsApp dues reminder"

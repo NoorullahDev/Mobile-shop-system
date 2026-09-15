@@ -25,7 +25,7 @@ import { useMemberStore } from "../store/members";
 import * as paymentService from "../services/paymentService";
 import { useSessionStore } from "../store/session";
 import { formatMoneyCompact, methodLabels } from "../lib/format";
-import { openDuesReminder } from "../lib/whatsapp";
+import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
 import type { Payment } from "../types/payment";
 import type { MemberBalance } from "../types/payment";
@@ -177,7 +177,13 @@ export function PaymentsPage() {
                       {d.phone && d.balance > 0 && (
                         <button
                           type="button"
-                          onClick={() => openDuesReminder(d.phone, d.balance, businessName || undefined)}
+                          onClick={async () => {
+                            if (!isPhoneValid(d.phone)) {
+                              alert("Customer phone number is invalid or missing. Please update the phone number to send a WhatsApp reminder.");
+                              return;
+                            }
+                            await openDuesReminder(d.phone, d.balance, businessName || undefined);
+                          }}
                           className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
                           style={{ color: "#25D366" }}
                           title="Send WhatsApp dues reminder"
