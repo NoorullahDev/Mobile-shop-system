@@ -8,9 +8,6 @@ import {
   Smartphone,
   Headphones,
   UserPlus,
-  CreditCard,
-  Banknote,
-  Landmark,
   CircleCheck,
   X,
 } from "lucide-react";
@@ -32,15 +29,8 @@ import { ReceiptModal } from "./ReceiptModal";
 import { useNavigate } from "react-router-dom";
 import type { PhoneImei, Product } from "../types/inventory";
 import type { CreateMemberInput } from "../types/member";
-import type { CreateSaleInput, Sale } from "../types/sale";
-import { PAYMENT_METHODS } from "../types/sale";
-
-const methodLabels: Record<string, { label: string; icon: typeof Banknote }> = {
-  cash: { label: "Cash", icon: Banknote },
-  bank_transfer: { label: "Bank Transfer", icon: Landmark },
-  card: { label: "Card", icon: CreditCard },
-  other: { label: "Other", icon: CircleCheck },
-};
+import type { CreateSaleInput, Sale, SalePaymentInput } from "../types/sale";
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "../types/sale";
 
 const posImageCache = new Map<string, Promise<string>>();
 
@@ -132,6 +122,10 @@ export function POSPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justSold, setJustSold] = useState<Sale | null>(null);
+  const [useSplitPayments, setUseSplitPayments] = useState(false);
+  const [paymentLines, setPaymentLines] = useState<Array<{ key: number; amount: string; payment_method: string; reference: string; notes: string }>>([]);
+
+  let posPaymentKey = 0;
 
   useEffect(() => {
     loadInventory();
@@ -239,6 +233,8 @@ export function POSPage() {
     setPaidAmount("");
     setSearch("");
     setProductType("phone");
+    setUseSplitPayments(false);
+    setPaymentLines([]);
   };
 
   const handleCheckout = async () => {
@@ -246,11 +242,23 @@ export function POSPage() {
       setError("Cart is empty. Add a product to checkout.");
       return;
     }
+
+    const payments: SalePaymentInput[] | undefined = useSplitPayments
+      ? paymentLines
+          .filter((pl) => Number(pl.amount) > 0)
+          .map((pl) => ({
+            amount: Number(pl.amount),
+            payment_method: pl.payment_method,
+            reference: pl.reference.trim() || undefined,
+            notes: pl.notes.trim() || undefined,
+          }))
+      : undefined;
+
     const input: CreateSaleInput = {
       member_id: memberId ? Number(memberId) : null,
       discount: discountNum,
-      paid_amount: paidAmount === "" ? null : paidNum,
-      payment_method: paymentMethod,
+      paid_amount: useSplitPayments ? null : (paidAmount === "" ? null : paidNum),
+      payment_method: useSplitPayments ? null : paymentMethod,
       items: cart.map((l) => ({
         item_type: l.item_type,
         item_id: l.item_id,
@@ -258,6 +266,7 @@ export function POSPage() {
         imei_id: l.imei_id ?? null,
         unit_price: l.unit_price > 0 ? l.unit_price : null,
       })),
+      payments,
     };
     setSaving(true);
     setError(null);
@@ -615,10 +624,11 @@ export function POSPage() {
                 label="Payment"
                 options={PAYMENT_METHODS.map((m) => ({
                   value: m,
-                  label: `${methodLabels[m]?.label ?? m} ${m === "cash" ? "· Rs" : ""}`,
+                  label: PAYMENT_METHOD_LABELS[m] ?? m,
                 }))}
                 value={paymentMethod}
                 onChange={(e) => setPaymentMethod(e.target.value)}
+                disabled={useSplitPayments}
               />
               <Input
                 label="Discount (Rs)"
@@ -627,15 +637,91 @@ export function POSPage() {
                 value={discount}
                 onChange={(e) => setDiscount(e.target.value)}
               />
-              <Input
-                label="Amount Received"
-                type="number"
-                min={0}
-                value={paidAmount}
-                onChange={(e) => setPaidAmount(e.target.value)}
-                placeholder="Full payment"
-              />
+              {!useSplitPayments && (
+                <Input
+                  label="Amount Received"
+                  type="number"
+                  min={0}
+                  value={paidAmount}
+                  onChange={(e) => setPaidAmount(e.target.value)}
+                  placeholder="Full payment"
+                />
+              )}
             </div>
+
+            {/* Split Payments Toggle */}
+            <div className="flex items-center gap-3 mb-2">
+              <button
+                type="button"
+                onClick={() => setUseSplitPayments(!useSplitPayments)}
+                className="rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
+                style={{
+                  background: useSplitPayments ? "#3B6FD4" : "#F1F5F9",
+                  color: useSplitPayments ? "#FFF" : "#475569",
+                }}
+              >
+                {useSplitPayments ? "Split ON" : "Split Payments"}
+              </button>
+              {useSplitPayments && (
+                <span className="text-[11px]" style={{ color: "#64748B" }}>
+                  Total: {formatMoneyCompact(paymentLines.reduce((s, l) => s + (Number(l.amount) || 0), 0))}
+                  {paymentLines.reduce((s, l) => s + (Number(l.amount) || 0), 0) < total && (
+                    <span className="ml-2" style={{ color: "#B45309" }}>
+                      · Due: {formatMoneyCompact(total - paymentLines.reduce((s, l) => s + (Number(l.amount) || 0), 0))}
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+
+            {/* Split Payment Lines */}
+            {useSplitPayments && (
+              <div className="flex flex-col gap-1.5 mb-2">
+                {paymentLines.map((pl) => (
+                  <div key={pl.key} className="flex items-end gap-1.5 rounded p-1.5" style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+                    <div className="flex-1">
+                      <Select
+                        options={PAYMENT_METHODS.map((m) => ({ value: m, label: PAYMENT_METHOD_LABELS[m] ?? m }))}
+                        value={pl.payment_method}
+                        onChange={(e) => setPaymentLines((prev) => prev.map((l) => l.key === pl.key ? { ...l, payment_method: e.target.value } : l))}
+                      />
+                    </div>
+                    <div className="w-24">
+                      <Input
+                        type="number"
+                        min="0"
+                        placeholder="Amount"
+                        value={pl.amount}
+                        onChange={(e) => setPaymentLines((prev) => prev.map((l) => l.key === pl.key ? { ...l, amount: e.target.value } : l))}
+                      />
+                    </div>
+                    <div className="w-20">
+                      <Input
+                        placeholder="Ref#"
+                        value={pl.reference}
+                        onChange={(e) => setPaymentLines((prev) => prev.map((l) => l.key === pl.key ? { ...l, reference: e.target.value } : l))}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentLines((prev) => prev.filter((l) => l.key !== pl.key))}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-red-50"
+                      style={{ color: "#DC2626" }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setPaymentLines((prev) => [...prev, { key: ++posPaymentKey, amount: "", payment_method: "cash", reference: "", notes: "" }])}
+                  icon={<Plus className="h-3.5 w-3.5" />}
+                >
+                  Add Payment
+                </Button>
+              </div>
+            )}
 
             {error && (
               <div className="mb-3">
@@ -654,23 +740,42 @@ export function POSPage() {
                   −{formatMoney(discountNum)}
                 </span>
               </div>
-              {paymentMethod !== "cash" && (
-                <div className="flex justify-between text-[12px]" style={{ color: "#64748B" }}>
-                  <span>{methodLabels[paymentMethod]?.label} payment</span>
-                  <span>{formatMoney(Number.isFinite(paidNum) ? Math.min(paidNum, total) : 0)}</span>
-                </div>
-              )}
-              {Number.isFinite(paidNum) && total > 0 && paidNum < total && (
-                <div className="flex justify-between text-[12px] font-medium" style={{ color: "#B45309" }}>
-                  <span>Balance due (On credit)</span>
-                  <span>{formatMoney(total - paidNum)}</span>
-                </div>
-              )}
-              {change > 0 && paymentMethod === "cash" && (
-                <div className="flex justify-between text-[12px] font-semibold" style={{ color: "#16A34A" }}>
-                  <span>Change to return</span>
-                  <span>{formatMoney(change)}</span>
-                </div>
+              {useSplitPayments ? (
+                <>
+                  {paymentLines.filter((l) => Number(l.amount) > 0).map((pl) => (
+                    <div key={pl.key} className="flex justify-between text-[12px]" style={{ color: "#475569" }}>
+                      <span>{PAYMENT_METHOD_LABELS[pl.payment_method] ?? pl.payment_method}{pl.reference ? ` (${pl.reference})` : ""}</span>
+                      <span className="font-medium" style={{ color: "#0F172A" }}>{formatMoney(Number(pl.amount))}</span>
+                    </div>
+                  ))}
+                  {Number.isFinite(paidNum) && paidNum < total && (
+                    <div className="flex justify-between text-[12px] font-medium" style={{ color: "#B45309" }}>
+                      <span>Balance due (On credit)</span>
+                      <span>{formatMoney(total - paidNum)}</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {paymentMethod !== "cash" && (
+                    <div className="flex justify-between text-[12px]" style={{ color: "#64748B" }}>
+                      <span>{PAYMENT_METHOD_LABELS[paymentMethod]} payment</span>
+                      <span>{formatMoney(Number.isFinite(paidNum) ? Math.min(paidNum, total) : 0)}</span>
+                    </div>
+                  )}
+                  {Number.isFinite(paidNum) && total > 0 && paidNum < total && (
+                    <div className="flex justify-between text-[12px] font-medium" style={{ color: "#B45309" }}>
+                      <span>Balance due (On credit)</span>
+                      <span>{formatMoney(total - paidNum)}</span>
+                    </div>
+                  )}
+                  {change > 0 && paymentMethod === "cash" && (
+                    <div className="flex justify-between text-[12px] font-semibold" style={{ color: "#16A34A" }}>
+                      <span>Change to return</span>
+                      <span>{formatMoney(change)}</span>
+                    </div>
+                  )}
+                </>
               )}
               <div className="mt-1 flex justify-between" style={{ borderTop: "1px solid #E2E8F0", paddingTop: 8 }}>
                 <span className="text-[13px] font-bold uppercase tracking-wide" style={{ color: "#0F172A" }}>

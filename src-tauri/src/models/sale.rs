@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::product_return::ProductReturn;
+use super::sale_payment::SalePayment;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SaleItemInput {
@@ -24,6 +25,9 @@ pub struct CreateSaleInput {
     pub payment_method: Option<String>,
     pub notes: Option<String>,
     pub items: Vec<SaleItemInput>,
+    /// Split payments: when provided, overrides paid_amount and payment_method.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub payments: Vec<super::sale_payment::SalePaymentInput>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -75,4 +79,7 @@ pub struct Sale {
     /// Full return records for this sale (only populated by the detail view).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub returns: Vec<ProductReturn>,
+    /// Split payment entries for this sale (only populated by the detail view).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sale_payments: Vec<SalePayment>,
 }

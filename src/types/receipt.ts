@@ -67,6 +67,13 @@ export interface ReceiptItemData {
   total: number;
 }
 
+export interface ReceiptSplitPayment {
+  method: string;
+  amount: number;
+  reference?: string | null;
+  notes?: string | null;
+}
+
 export interface ReceiptData {
   business: {
     name: string;
@@ -91,6 +98,8 @@ export interface ReceiptData {
     paymentMethod: string;
     balance: number;
   };
+  /** Split payments (when multiple payments exist). */
+  splitPayments?: ReceiptSplitPayment[];
 }
 
 export const PAPER_WIDTHS: ReceiptPaperWidth[] = ["80mm", "58mm"];

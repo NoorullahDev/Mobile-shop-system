@@ -6,10 +6,10 @@ import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
 import type { PhoneImei, Product } from "../types/inventory";
 import type { Member } from "../types/member";
-import type { CreateSaleInput, Sale, SaleItemInput } from "../types/sale";
-import { PAYMENT_METHODS } from "../types/sale";
+import type { CreateSaleInput, Sale, SaleItemInput, SalePaymentInput } from "../types/sale";
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "../types/sale";
 import * as inventoryService from "../services/inventoryService";
-import { roundMoney, methodLabels, formatMoneyCompact } from "../lib/format";
+import { roundMoney, formatMoneyCompact } from "../lib/format";
 
 interface Line {
   key: number;
@@ -20,6 +20,16 @@ interface Line {
   imei_id: number | null;
   unit_price: number;
 }
+
+interface PaymentLine {
+  key: number;
+  amount: string;
+  payment_method: string;
+  reference: string;
+  notes: string;
+}
+
+let paymentKey = 0;
 
 interface SaleFormProps {
   onSubmit: (input: CreateSaleInput) => Promise<void>;
@@ -53,6 +63,19 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
   const [notes, setNotes] = useState(initialSale?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useSplitPayments, setUseSplitPayments] = useState(false);
+  const [paymentLines, setPaymentLines] = useState<PaymentLine[]>(() => {
+    if (initialSale?.sale_payments && initialSale.sale_payments.length > 0) {
+      return initialSale.sale_payments.map((sp) => ({
+        key: ++paymentKey,
+        amount: String(sp.amount),
+        payment_method: sp.payment_method,
+        reference: sp.reference ?? "",
+        notes: sp.notes ?? "",
+      }));
+    }
+    return [];
+  });
 
   const addEmptyLine = (item?: Product) => {
     const first = item ?? inStock[0];
@@ -149,16 +172,30 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
       imei_id: l.imei_id ?? null,
       unit_price: l.unit_price > 0 ? l.unit_price : null,
     }));
+
+    // Build split payments array if enabled
+    const payments: SalePaymentInput[] | undefined = useSplitPayments
+      ? paymentLines
+          .filter((pl) => Number(pl.amount) > 0)
+          .map((pl) => ({
+            amount: Number(pl.amount),
+            payment_method: pl.payment_method,
+            reference: pl.reference.trim() || undefined,
+            notes: pl.notes.trim() || undefined,
+          }))
+      : undefined;
+
     setSaving(true);
     setError(null);
     try {
       await onSubmit({
         member_id: memberId ? Number(memberId) : null,
         discount: discountNum,
-        paid_amount: paidAmount === "" ? null : Number(paidAmount),
-        payment_method: paymentMethod,
+        paid_amount: useSplitPayments ? null : (paidAmount === "" ? null : Number(paidAmount)),
+        payment_method: useSplitPayments ? null : paymentMethod,
         notes: notes ? notes.trim() : "",
         items,
+        payments,
       });
     } catch (err) {
       setError(String(err));
@@ -294,10 +331,10 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
         <Select
           name="payment_method"
           label="Payment Method"
-          options={PAYMENT_METHODS.map((m) => ({ value: m, label: methodLabels[m] ?? m }))}
+          options={PAYMENT_METHODS.map((m) => ({ value: m, label: PAYMENT_METHOD_LABELS[m] ?? m }))}
           value={paymentMethod}
           onChange={(e) => setPaymentMethod(e.target.value)}
-          disabled={saving}
+          disabled={saving || useSplitPayments}
         />
         <Input
           name="discount"
@@ -308,16 +345,120 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
           onChange={(e) => setDiscount(e.target.value)}
           disabled={saving}
         />
-        <Input
-          name="paid_amount"
-          label="Amount Received (Leave blank for full)"
-          type="number"
-          min="0"
-          value={paidAmount}
-          onChange={(e) => setPaidAmount(e.target.value)}
-          disabled={saving}
-        />
+        {!useSplitPayments && (
+          <Input
+            name="paid_amount"
+            label="Amount Received (Leave blank for full)"
+            type="number"
+            min="0"
+            value={paidAmount}
+            onChange={(e) => setPaidAmount(e.target.value)}
+            disabled={saving}
+          />
+        )}
       </div>
+
+      {/* Split Payments Toggle */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setUseSplitPayments(!useSplitPayments)}
+          className="rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors"
+          style={{
+            background: useSplitPayments ? "#3B6FD4" : "#F1F5F9",
+            color: useSplitPayments ? "#FFF" : "#475569",
+          }}
+        >
+          {useSplitPayments ? "Split Payments ON" : "Use Split Payments"}
+        </button>
+        {useSplitPayments && (
+          <span className="text-[11px]" style={{ color: "#64748B" }}>
+            Add multiple payment entries (Cash, Bank Transfer, JazzCash, EasyPaisa, etc.)
+          </span>
+        )}
+      </div>
+
+      {/* Split Payment Lines */}
+      {useSplitPayments && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-medium" style={{ color: "#334155" }}>Payment Entries</span>
+            <span className="text-[12px]" style={{ color: "#64748B" }}>
+              Total: {formatMoneyCompact(paymentLines.reduce((s, l) => s + (Number(l.amount) || 0), 0))}
+              {paymentLines.reduce((s, l) => s + (Number(l.amount) || 0), 0) < total && (
+                <span className="ml-2" style={{ color: "#B45309" }}>
+                  · Due: {formatMoneyCompact(total - paymentLines.reduce((s, l) => s + (Number(l.amount) || 0), 0))}
+                </span>
+              )}
+            </span>
+          </div>
+          {paymentLines.map((pl) => (
+            <div key={pl.key} className="grid grid-cols-12 items-end gap-2 rounded-md p-2" style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+              <div className="col-span-3">
+                <Select
+                  name={`pm-${pl.key}`}
+                  label="Method"
+                  options={PAYMENT_METHODS.map((m) => ({ value: m, label: PAYMENT_METHOD_LABELS[m] ?? m }))}
+                  value={pl.payment_method}
+                  onChange={(e) => setPaymentLines((prev) => prev.map((l) => l.key === pl.key ? { ...l, payment_method: e.target.value } : l))}
+                  disabled={saving}
+                />
+              </div>
+              <div className="col-span-3">
+                <Input
+                  name={`pa-${pl.key}`}
+                  label="Amount"
+                  type="number"
+                  min="0"
+                  value={pl.amount}
+                  onChange={(e) => setPaymentLines((prev) => prev.map((l) => l.key === pl.key ? { ...l, amount: e.target.value } : l))}
+                  disabled={saving}
+                />
+              </div>
+              <div className="col-span-2">
+                <Input
+                  name={`pr-${pl.key}`}
+                  label="Reference"
+                  placeholder="Optional"
+                  value={pl.reference}
+                  onChange={(e) => setPaymentLines((prev) => prev.map((l) => l.key === pl.key ? { ...l, reference: e.target.value } : l))}
+                  disabled={saving}
+                />
+              </div>
+              <div className="col-span-3">
+                <Input
+                  name={`pn-${pl.key}`}
+                  label="Notes"
+                  placeholder="Optional"
+                  value={pl.notes}
+                  onChange={(e) => setPaymentLines((prev) => prev.map((l) => l.key === pl.key ? { ...l, notes: e.target.value } : l))}
+                  disabled={saving}
+                />
+              </div>
+              <div className="col-span-1">
+                <button
+                  type="button"
+                  onClick={() => setPaymentLines((prev) => prev.filter((l) => l.key !== pl.key))}
+                  className="flex h-8 w-8 items-center justify-center rounded hover:bg-red-50"
+                  style={{ color: "#DC2626" }}
+                  title="Remove payment"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setPaymentLines((prev) => [...prev, { key: ++paymentKey, amount: "", payment_method: "cash", reference: "", notes: "" }])}
+            icon={<Plus className="h-3.5 w-3.5" />}
+          >
+            Add Payment Entry
+          </Button>
+        </div>
+      )}
       <Input
         name="notes"
         label="Sale Notes (Optional)"

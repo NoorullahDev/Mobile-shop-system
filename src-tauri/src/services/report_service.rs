@@ -311,6 +311,13 @@ mod tests {
                (2, 1, 2, 650);",
         )
         .unwrap();
+        // Insert sale_payments so payment_breakdown query works
+        conn.execute_batch(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method) VALUES
+               (1, 650, 'cash'),
+               (2, 300, 'credit');",
+        )
+        .unwrap();
 
         let from = chrono::Local::now()
             .date_naive()

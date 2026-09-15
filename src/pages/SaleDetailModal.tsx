@@ -90,7 +90,18 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
             </div>
             <div>
               <div style={{ color: "#94A3B8" }}>Payment</div>
-              <StatusBadge status={sale.payment_method} />
+              {sale.sale_payments && sale.sale_payments.length > 0 ? (
+                <div className="flex flex-col gap-0.5">
+                  {sale.sale_payments.map((sp, i) => (
+                    <div key={i} className="flex items-center gap-1 text-[12px]" style={{ color: "#0F172A" }}>
+                      <StatusBadge status={sp.payment_method} />
+                      <span className="font-medium">{formatMoneyCompact(sp.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <StatusBadge status={sale.payment_method} />
+              )}
             </div>
             <div>
               <div style={{ color: "#94A3B8" }}>Total</div>
@@ -104,6 +115,32 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
               </div>
             </div>
           </div>
+
+          {/* Split payments breakdown */}
+          {sale.sale_payments && sale.sale_payments.length > 0 && (
+            <div className="rounded p-3" style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+              <div className="mb-1 text-[12px] font-semibold uppercase tracking-wider" style={{ color: "#64748B" }}>
+                Payment Breakdown ({sale.sale_payments.length} entries)
+              </div>
+              <div className="flex flex-col gap-1">
+                {sale.sale_payments.map((sp, i) => (
+                  <div key={i} className="flex items-center justify-between text-[13px]">
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={sp.payment_method} />
+                      {sp.reference && (
+                        <span className="font-mono text-[11px]" style={{ color: "#64748B" }}>Ref: {sp.reference}</span>
+                      )}
+                    </div>
+                    <span className="font-semibold" style={{ color: "#0F172A" }}>{formatMoneyCompact(sp.amount)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 flex justify-between border-t pt-2 text-[13px] font-semibold" style={{ borderColor: "#E2E8F0" }}>
+                <span style={{ color: "#334155" }}>Total Paid</span>
+                <span style={{ color: "#16A34A" }}>{formatMoneyCompact(sale.paid_amount)}</span>
+              </div>
+            </div>
+          )}
 
           {/* Return summary */}
           <div

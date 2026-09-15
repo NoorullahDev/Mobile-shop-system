@@ -1,6 +1,6 @@
 import { roundMoney } from "./format";
 import type { Sale } from "../types/sale";
-import type { ReceiptData, ReceiptItemData, ReceiptSettings } from "../types/receipt";
+import type { ReceiptData, ReceiptItemData, ReceiptSplitPayment, ReceiptSettings } from "../types/receipt";
 
 export const PAPER_RULES = {
   "58mm": { paperMm: 58, contentMm: 48, logoMm: 40, qtyMm: 9, amountMm: 20 },
@@ -10,7 +10,10 @@ export const PAPER_RULES = {
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: "Cash",
   bank_transfer: "Bank Transfer",
+  jazzcash: "JazzCash",
+  easypaisa: "EasyPaisa",
   card: "Card",
+  cheque: "Cheque",
   other: "Other",
 };
 
@@ -44,6 +47,17 @@ export function buildReceiptData(
   const paid = roundMoney(sale.paid_amount || 0);
   const balance = roundMoney(Math.max(0, total - paid));
 
+  // Build split payments array
+  const splitPayments: ReceiptSplitPayment[] | undefined =
+    sale.sale_payments && sale.sale_payments.length > 0
+      ? sale.sale_payments.map((sp) => ({
+          method: sp.payment_method,
+          amount: roundMoney(sp.amount),
+          reference: sp.reference ?? null,
+          notes: sp.notes ?? null,
+        }))
+      : undefined;
+
   return {
     business: {
       name: business.name || "Your Shop Name",
@@ -71,5 +85,6 @@ export function buildReceiptData(
       paymentMethod: sale.payment_method ?? "",
       balance,
     },
+    splitPayments,
   };
 }

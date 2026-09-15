@@ -13,6 +13,7 @@ pub mod product_return;
 pub mod purchase;
 pub mod report;
 pub mod sale;
+pub mod sale_payment;
 pub mod setting;
 pub mod staff;
 pub mod user;

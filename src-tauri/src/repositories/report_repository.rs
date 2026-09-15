@@ -227,16 +227,18 @@ pub fn top_sellers(
 }
 
 /// Sales grouped by payment method within the inclusive date range.
+/// Uses sale_payments for accurate per-method totals (supports split payments).
 pub fn payment_breakdown(
     conn: &Connection,
     from: &str,
     to: &str,
 ) -> Result<Vec<crate::models::report::PaymentBreakdown>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT payment_method, SUM(total_amount) AS total, COUNT(*) AS count
-         FROM sales
-         WHERE created_at >= date(?1) AND created_at < date(?2, '+1 day')
-         GROUP BY payment_method ORDER BY total DESC",
+        "SELECT sp.payment_method, SUM(sp.amount) AS total, COUNT(*) AS count
+         FROM sale_payments sp
+         JOIN sales s ON s.id = sp.sale_id
+         WHERE s.created_at >= date(?1) AND s.created_at < date(?2, '+1 day')
+         GROUP BY sp.payment_method ORDER BY total DESC",
     )?;
     let rows = stmt.query_map(params![from, to], |r| {
         Ok(crate::models::report::PaymentBreakdown {

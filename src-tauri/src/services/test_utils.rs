@@ -211,6 +211,12 @@ CREATE TABLE backups (
     size INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'success',
     created_by INTEGER, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE sale_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL,
+    amount REAL NOT NULL DEFAULT 0, payment_method TEXT NOT NULL DEFAULT 'cash',
+    reference TEXT, notes TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE UNIQUE INDEX idx_members_phone_active
     ON members(phone) WHERE phone IS NOT NULL AND is_deleted = 0;
 "#;

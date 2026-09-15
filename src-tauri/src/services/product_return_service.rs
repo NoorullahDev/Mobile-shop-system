@@ -521,6 +521,7 @@ mod tests {
                 paid_amount: None,
                 payment_method: Some("cash".into()),
                 notes: None,
+                payments: vec![],
                 items: vec![SaleItemInput {
                     sale_item_id: None,
                     item_type: "phone".into(),
@@ -615,6 +616,7 @@ mod tests {
                 paid_amount: None,
                 payment_method: Some("cash".into()),
                 notes: None,
+                payments: vec![],
                 items: vec![SaleItemInput {
                     sale_item_id: None,
                     item_type: "accessory".into(),
@@ -704,6 +706,7 @@ mod tests {
                 paid_amount: None,
                 payment_method: Some("cash".into()),
                 notes: None,
+                payments: vec![],
                 items: vec![SaleItemInput {
                     sale_item_id: None,
                     item_type: "phone".into(),

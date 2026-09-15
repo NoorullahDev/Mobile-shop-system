@@ -1088,6 +1088,42 @@ const MIGRATIONS: &[(&str, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_return_items_imei ON return_items(imei_id);
         "#,
     ),
+
+    // =====================================================================
+    // 0022: Split Payments — sale_payments table.
+    //
+    // Allows one sale to have multiple payment entries (e.g. 70k Cash +
+    // 60k Bank Transfer + 20k Easypaisa + 40k Due). Each payment entry
+    // records the amount, method, optional reference, and notes.
+    //
+    // Migrates existing single-method sales data into sale_payments.
+    // =====================================================================
+    (
+        "0022_split_payments",
+        r#"
+        CREATE TABLE IF NOT EXISTS sale_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sale_id INTEGER NOT NULL,
+            amount REAL NOT NULL DEFAULT 0,
+            payment_method TEXT NOT NULL DEFAULT 'cash',
+            reference TEXT,
+            notes TEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sale_payments_sale ON sale_payments(sale_id);
+        CREATE INDEX IF NOT EXISTS idx_sale_payments_method ON sale_payments(payment_method);
+
+        -- Migrate existing sales: create a sale_payment row for each sale
+        -- that has a paid_amount > 0, using the sale's payment_method.
+        INSERT OR IGNORE INTO sale_payments (sale_id, amount, payment_method, created_at)
+        SELECT id, paid_amount, payment_method, created_at
+        FROM sales
+        WHERE paid_amount > 0
+          AND NOT EXISTS (SELECT 1 FROM sale_payments sp WHERE sp.sale_id = sales.id);
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

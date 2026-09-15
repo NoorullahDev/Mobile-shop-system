@@ -31,6 +31,7 @@ fn sale_from_row(r: &Row) -> rusqlite::Result<Sale> {
         returned_amount: r.get("returned_amount")?,
         return_count: r.get("return_count")?,
         returns: Vec::new(),
+        sale_payments: Vec::new(),
     })
 }
 

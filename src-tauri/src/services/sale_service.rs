@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::errors::AppError;
 use crate::models::sale::{CreateSaleInput, Sale};
-use crate::repositories::{member_repository, product_return_repository, sale_repository};
+use crate::repositories::{member_repository, product_return_repository, sale_repository, sale_payment_repository};
 use crate::services;
 use crate::utils;
 
@@ -22,6 +22,7 @@ struct PreparedSale {
     total_amount: f64,
     paid_amount: f64,
     payment_method: String,
+    payments: Vec<crate::models::sale_payment::SalePaymentInput>,
 }
 
 fn prepare(
@@ -150,7 +151,38 @@ fn prepare(
         .unwrap_or("cash")
         .to_lowercase();
 
-    Ok(PreparedSale { lines, total_amount, paid_amount, payment_method })
+    // Handle split payments
+    let payments = if !input.payments.is_empty() {
+        // Validate: all payments must have positive amounts and valid methods
+        let mut total_paid = 0.0;
+        let mut validated = Vec::new();
+        for p in &input.payments {
+            if p.amount <= 0.0 {
+                return Err(AppError::validation("Each payment amount must be greater than zero"));
+            }
+            let method = p.payment_method.trim().to_lowercase();
+            if method.is_empty() {
+                return Err(AppError::validation("Payment method cannot be empty"));
+            }
+            total_paid += p.amount;
+            validated.push(crate::models::sale_payment::SalePaymentInput {
+                amount: utils::round2(p.amount),
+                payment_method: method,
+                reference: p.reference.clone(),
+                notes: p.notes.clone(),
+            });
+        }
+        // Recalculate paid_amount from split payments
+        let computed_paid = utils::round2(total_paid.min(total_amount));
+        Ok::<_, AppError>((validated, computed_paid))
+    } else {
+        Ok((vec![], paid_amount))
+    }?;
+
+    let (validated_payments, computed_paid) = payments;
+    let final_paid_amount = if !validated_payments.is_empty() { computed_paid } else { paid_amount };
+
+    Ok(PreparedSale { lines, total_amount, paid_amount: final_paid_amount, payment_method, payments: validated_payments })
 }
 
 pub fn create(
@@ -180,6 +212,20 @@ pub fn create(
         notes,
         actor,
     )?;
+
+    // Insert split payments or create a single payment entry from legacy fields
+    if !prepared.payments.is_empty() {
+        sale_payment_repository::insert_payments(&tx, sale_id, &prepared.payments)?;
+    } else if prepared.paid_amount > 0.0 {
+        sale_payment_repository::insert_sale_payment(
+            &tx,
+            sale_id,
+            prepared.paid_amount,
+            &prepared.payment_method,
+            None,
+            None,
+        )?;
+    }
 
     for line in &prepared.lines {
         sale_repository::insert_sale_item(
@@ -317,6 +363,22 @@ pub fn update(
     }
     product_return_repository::sync_sale_snapshot(&tx, id, input.member_id)?;
     product_return_repository::recalculate_for_sale(&tx, id)?;
+
+    // Update split payments: delete old, insert new
+    sale_payment_repository::delete_payments_for_sale(&tx, id)?;
+    if !prepared.payments.is_empty() {
+        sale_payment_repository::insert_payments(&tx, id, &prepared.payments)?;
+    } else if prepared.paid_amount > 0.0 {
+        sale_payment_repository::insert_sale_payment(
+            &tx,
+            id,
+            prepared.paid_amount,
+            &prepared.payment_method,
+            None,
+            None,
+        )?;
+    }
+
     tx.commit()?;
     services::record_activity(conn, actor, "sale", "update", Some(id))?;
     get(conn, id)
@@ -328,6 +390,8 @@ pub fn delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppE
     let sale_item_ids: Vec<i64> = sale.items.iter().map(|item| item.id).collect();
     let restocked = product_return_repository::restocked_qty_by_sale_items(&tx, &sale_item_ids)?;
     product_return_repository::delete_for_sale(&tx, id)?;
+    // Delete sale_payments
+    sale_payment_repository::delete_payments_for_sale(&tx, id)?;
     for item in &sale.items {
         let net_restore = item.quantity - restocked.get(&item.id).copied().unwrap_or(0);
         if net_restore > 0 {
@@ -354,6 +418,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Sale, AppError> {
     let mut sale = sale_repository::get_sale_with_items(conn, id)?
         .ok_or_else(|| AppError::validation("Sale not found"))?;
     sale.returns = product_return_repository::returns_for_sale(conn, id)?;
+    sale.sale_payments = sale_payment_repository::payments_for_sale(conn, id)?;
     Ok(sale)
 }
 
@@ -391,6 +456,7 @@ mod tests {
             paid_amount: None,
             payment_method: Some("cash".into()),
             notes: None,
+            payments: vec![],
             items: vec![SaleItemInput {
                 sale_item_id: None,
                 item_type: "phone".into(),
@@ -539,6 +605,7 @@ mod tests {
                 paid_amount: None,
                 payment_method: Some("cash".into()),
                 notes: None,
+                payments: vec![],
                 items: vec![SaleItemInput {
                     sale_item_id: None,
                     item_type: "accessory".into(),
@@ -616,6 +683,7 @@ mod tests {
                 paid_amount: Some(100.0),
                 payment_method: Some("card".into()),
                 notes: Some("corrected".into()),
+                payments: vec![],
                 items: vec![SaleItemInput {
                     sale_item_id: Some(sale.items[0].id),
                     item_type: "phone".into(),

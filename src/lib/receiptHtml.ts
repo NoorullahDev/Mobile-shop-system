@@ -111,15 +111,27 @@ export function buildReceiptInner(data: ReceiptData, settings: ReceiptSettings):
       );
     }
     tot.push(`<div class="rp-row rp-grand"><span>Total</span><span>${money(data.totals.total)}</span></div>`);
-    tot.push(`<div class="rp-row"><span>Paid</span><span>${money(data.totals.paid)}</span></div>`);
+
+    // Show split payments if available, otherwise show single payment
+    if (data.splitPayments && data.splitPayments.length > 0) {
+      tot.push(`<div class="rp-row"><span>Paid</span><span>${money(data.totals.paid)}</span></div>`);
+      for (const sp of data.splitPayments) {
+        const label = PAYMENT_METHOD_LABELS[sp.method] ?? sp.method;
+        const ref = sp.reference ? ` (${esc(sp.reference)})` : "";
+        tot.push(`<div class="rp-row rp-meta" style="padding-left:4px"><span>  ${esc(label)}${ref}</span><span>${money(sp.amount)}</span></div>`);
+      }
+    } else {
+      tot.push(`<div class="rp-row"><span>Paid</span><span>${money(data.totals.paid)}</span></div>`);
+      if (data.totals.paymentMethod) {
+        const label = PAYMENT_METHOD_LABELS[data.totals.paymentMethod] ?? data.totals.paymentMethod;
+        tot.push(`<div class="rp-row rp-meta"><span>Payment</span><span>${esc(label)}</span></div>`);
+      }
+    }
+
     if (data.totals.balance > 0) {
       tot.push(
         `<div class="rp-row rp-dues"><span>Balance Due</span><span>${money(data.totals.balance)}</span></div>`,
       );
-    }
-    if (data.totals.paymentMethod) {
-      const label = PAYMENT_METHOD_LABELS[data.totals.paymentMethod] ?? data.totals.paymentMethod;
-      tot.push(`<div class="rp-row rp-meta"><span>Payment</span><span>${esc(label)}</span></div>`);
     }
     parts.push(tot.join(""));
   }

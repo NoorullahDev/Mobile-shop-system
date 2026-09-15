@@ -9,6 +9,13 @@ export interface SaleItemInput {
   unit_price?: number | null;
 }
 
+export interface SalePaymentInput {
+  amount: number;
+  payment_method: string;
+  reference?: string | null;
+  notes?: string | null;
+}
+
 export interface CreateSaleInput {
   member_id?: number | null;
   discount: number;
@@ -16,6 +23,8 @@ export interface CreateSaleInput {
   payment_method?: string | null;
   notes?: string | null;
   items: SaleItemInput[];
+  /** Split payments: when provided, overrides paid_amount and payment_method. */
+  payments?: SalePaymentInput[];
 }
 
 export interface SaleItem {
@@ -30,6 +39,16 @@ export interface SaleItem {
   imei?: string | null;
   variant?: string | null;
   serial_no?: string | null;
+}
+
+export interface SalePayment {
+  id: number;
+  sale_id: number;
+  amount: number;
+  payment_method: string;
+  reference?: string | null;
+  notes?: string | null;
+  created_at: string;
 }
 
 export interface Sale {
@@ -52,6 +71,18 @@ export interface Sale {
   return_count?: number;
   /** Full return records (detail view only, empty in lists). */
   returns?: ProductReturn[];
+  /** Split payment entries (detail view only, empty in lists). */
+  sale_payments?: SalePayment[];
 }
 
-export const PAYMENT_METHODS = ["cash", "bank_transfer", "card", "other"] as const;
+export const PAYMENT_METHODS = ["cash", "bank_transfer", "jazzcash", "easypaisa", "card", "cheque", "other"] as const;
+
+export const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank Transfer",
+  jazzcash: "JazzCash",
+  easypaisa: "EasyPaisa",
+  card: "Card",
+  cheque: "Cheque",
+  other: "Other",
+};
