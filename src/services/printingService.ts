@@ -145,19 +145,54 @@ export function printReceiptViaDialog(
 }
 
 /**
- * Prints an A4 Invoice directly via the printer plugin (no browser chrome).
- * No headers/footers — only the designed invoice content appears.
+ * Opens the A4 Invoice in the system print dialog (Chromium Print Preview).
+ * Uses the same iframe + window.print() approach as thermal receipts.
  */
-export async function printA4InvoiceViaDialog(data: ReceiptData): Promise<void> {
+export function printA4InvoiceViaDialog(data: ReceiptData): void {
   const html = buildA4InvoicePrintHtml(data);
-  await printHtml({
-    html,
-    printerId: undefined,
-    pageWidth: 210,
-    pageHeight: 297,
-    orientation: "portrait",
-    margin: { top: 0, right: 0, bottom: 0, left: 0, unit: "mm" },
-    copies: 1,
-    grayscale: false,
-  });
+
+  // Remove any previously created print iframe
+  const existing = document.getElementById("__a4_invoice_print_frame");
+  if (existing) existing.remove();
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "__a4_invoice_print_frame";
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  // A4 at 96 DPI: 210mm ≈ 794px, 297mm ≈ 1123px
+  iframe.style.width = "794px";
+  iframe.style.height = "0";
+  iframe.style.border = "none";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.appendChild(iframe);
+
+  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!iframeDoc) {
+    window.print();
+    return;
+  }
+
+  iframeDoc.open();
+  iframeDoc.write(html);
+  iframeDoc.close();
+
+  const triggerPrint = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch {
+      window.print();
+    }
+  };
+
+  if (iframe.contentWindow) {
+    iframe.contentWindow.onafterprint = () => {
+      iframe.remove();
+    };
+  }
+
+  // Small delay to ensure content is rendered in the iframe
+  setTimeout(triggerPrint, 300);
 }
