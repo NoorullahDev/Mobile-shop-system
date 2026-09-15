@@ -121,11 +121,8 @@ export function POSPage() {
   const [error, setError] = useState<string | null>(null);
   const [justSold, setJustSold] = useState<Sale | null>(null);
 
-  // ── Payment state ───────────────────────────────────────────────
-  const [paymentTab, setPaymentTab] = useState<"cash" | "online">("cash");
-  // Cash
+  // ── Payment state (split: cash + online in the same sale) ────────
   const [cashAmount, setCashAmount] = useState("");
-  // Online transfer
   const [onlineMethod, setOnlineMethod] = useState("bank_transfer");
   const [onlineBankName, setOnlineBankName] = useState("");
   const [onlineReference, setOnlineReference] = useState("");
@@ -240,7 +237,6 @@ export function POSPage() {
     setDiscount("0");
     setSearch("");
     setProductType("phone");
-    setPaymentTab("cash");
     setCashAmount("");
     setOnlineMethod("bank_transfer");
     setOnlineBankName("");
@@ -646,62 +642,38 @@ export function POSPage() {
               />
             </div>
 
-            {/* ── Payment Tabs ─────────────────────────────── */}
-            <div className="mb-2 flex gap-1 rounded-md p-0.5" style={{ background: "#F1F5F9" }}>
-              <button
-                type="button"
-                onClick={() => setPaymentTab("cash")}
-                className="flex-1 rounded px-3 py-1.5 text-[12px] font-semibold transition-all"
-                style={{
-                  background: paymentTab === "cash" ? "#16A34A" : "transparent",
-                  color: paymentTab === "cash" ? "#FFF" : "#64748B",
-                }}
-              >
-                Cash
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentTab("online")}
-                className="flex-1 rounded px-3 py-1.5 text-[12px] font-semibold transition-all"
-                style={{
-                  background: paymentTab === "online" ? "#3B6FD4" : "transparent",
-                  color: paymentTab === "online" ? "#FFF" : "#64748B",
-                }}
-              >
-                Online Transfer
-              </button>
-            </div>
-
-            {/* ── Cash Tab ─────────────────────────────────── */}
-            {paymentTab === "cash" && (
-              <div className="mb-3">
+            {/* ── Split Payment: Cash + Online Transfer ──────── */}
+            <div className="mb-3 grid grid-cols-2 gap-3">
+              {/* Cash */}
+              <div className="rounded-md p-2.5" style={{ background: "#F0FDF4", border: "1px solid #BBF7D0" }}>
+                <div className="mb-2 flex items-center gap-1.5">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: "#16A34A" }}>₨</span>
+                  <span className="text-[12px] font-semibold" style={{ color: "#166534" }}>Cash</span>
+                </div>
                 <Input
-                  label="Cash Received (Rs)"
+                  label="Amount (Rs)"
                   type="number"
                   min={0}
                   value={cashAmount}
                   onChange={(e) => setCashAmount(e.target.value)}
-                  placeholder="Enter cash amount"
+                  placeholder="0"
                 />
-                {cashPaid > 0 && cashPaid < total && (
-                  <div className="mt-1.5 text-[11px]" style={{ color: "#B45309" }}>
-                    Remaining after cash: {formatMoney(total - cashPaid)}
-                  </div>
-                )}
-                {cashPaid >= total && cashPaid > 0 && (
-                  <div className="mt-1.5 text-[11px] font-medium" style={{ color: "#16A34A" }}>
-                    Change to return: {formatMoney(cashPaid - total)}
+                {cashPaid > 0 && cashPaid >= total && (
+                  <div className="mt-1 text-[10px] font-medium" style={{ color: "#16A34A" }}>
+                    Change: {formatMoney(cashPaid - total)}
                   </div>
                 )}
               </div>
-            )}
 
-            {/* ── Online Transfer Tab ──────────────────────── */}
-            {paymentTab === "online" && (
-              <div className="mb-3 flex flex-col gap-2 rounded-md p-2.5" style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-                <div className="grid grid-cols-2 gap-2">
+              {/* Online Transfer */}
+              <div className="rounded-md p-2.5" style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}>
+                <div className="mb-2 flex items-center gap-1.5">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: "#3B6FD4" }}>↑</span>
+                  <span className="text-[12px] font-semibold" style={{ color: "#1E3A5F" }}>Online Transfer</span>
+                </div>
+                <div className="flex flex-col gap-2">
                   <Select
-                    label="Transfer Method"
+                    label="Method"
                     options={[
                       { value: "bank_transfer", label: "Bank Transfer" },
                       { value: "easypaisa", label: "EasyPaisa" },
@@ -717,8 +689,6 @@ export function POSPage() {
                     onChange={(e) => setOnlineBankName(e.target.value)}
                     placeholder="e.g. HBL, Meezan"
                   />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
                   <Input
                     label="Transaction / Reference ID"
                     value={onlineReference}
@@ -731,16 +701,11 @@ export function POSPage() {
                     min={0}
                     value={onlineAmount}
                     onChange={(e) => setOnlineAmount(e.target.value)}
-                    placeholder="Enter amount"
+                    placeholder="0"
                   />
                 </div>
-                {onlinePaid > 0 && onlinePaid < total && (
-                  <div className="text-[11px]" style={{ color: "#B45309" }}>
-                    Remaining after online: {formatMoney(total - onlinePaid)}
-                  </div>
-                )}
               </div>
-            )}
+            </div>
 
             {error && (
               <div className="mb-3">
