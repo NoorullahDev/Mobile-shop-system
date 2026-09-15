@@ -69,6 +69,19 @@ pub struct PaymentBreakdown {
     pub count: i64,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OnlinePaymentRecord {
+    pub id: i64,
+    pub sale_id: i64,
+    pub receipt_no: String,
+    pub customer_name: Option<String>,
+    pub payment_method: String,
+    pub amount: f64,
+    pub reference: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
 /// A single monthly profit & loss point.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MonthlyProfitPoint {

@@ -2,8 +2,8 @@ use rusqlite::Connection;
 
 use crate::errors::AppError;
 use crate::models::report::{
-    ActivityLog, DashboardSummary, MonthlyPoint, MonthlyProfitPoint, PaymentBreakdown,
-    PeriodSummary, ProfitLoss, SalePoint, TopSeller,
+    ActivityLog, DashboardSummary, MonthlyPoint, MonthlyProfitPoint, OnlinePaymentRecord,
+    PaymentBreakdown, PeriodSummary, ProfitLoss, SalePoint, TopSeller,
 };
 use crate::repositories::report_repository;
 
@@ -122,6 +122,14 @@ pub fn payment_breakdown(
     to: &str,
 ) -> Result<Vec<PaymentBreakdown>, AppError> {
     report_repository::payment_breakdown(conn, from, to)
+}
+
+pub fn online_payment_records(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<OnlinePaymentRecord>, AppError> {
+    report_repository::online_payment_records(conn, from, to)
 }
 
 /// Profit & Loss statement for an inclusive range plus a monthly breakdown.

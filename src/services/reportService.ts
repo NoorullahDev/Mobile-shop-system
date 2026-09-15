@@ -3,6 +3,7 @@ import type {
   ActivityLog,
   DashboardSummary,
   MonthlyPoint,
+  OnlinePaymentRecord,
   PaymentBreakdown,
   PeriodSummary,
   ProfitLoss,
@@ -44,4 +45,8 @@ export async function getPaymentBreakdown(from: string, to: string): Promise<Pay
 
 export async function getProfitLoss(from: string, to: string): Promise<ProfitLoss> {
   return invoke<ProfitLoss>("get_profit_loss", { from, to });
+}
+
+export async function getOnlinePaymentRecords(from: string, to: string): Promise<OnlinePaymentRecord[]> {
+  return invoke<OnlinePaymentRecord[]>("get_online_payment_records", { from, to });
 }

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   TrendingUp,
-  CircleDollarSign,
   Package,
   Users,
   Banknote,
@@ -10,7 +9,8 @@ import {
   Plus,
   ShoppingBag,
   Calendar,
-  RefreshCw
+  RefreshCw,
+  CreditCard,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -40,13 +40,13 @@ import {
 } from "../lib/format";
 
 // Additional imports for real data
-import { getTopSellers, getPeriodSummary, getSalesSeries } from "../services/reportService";
+import { getTopSellers, getPeriodSummary, getSalesSeries, getPaymentBreakdown } from "../services/reportService";
 import { listSales } from "../services/saleService";
 import { listProducts } from "../services/inventoryService";
 import { listSuppliers } from "../services/supplierService";
 import { listReturns } from "../services/returnService";
 import { listMembers } from "../services/memberService";
-import type { TopSeller, PeriodSummary, SalePoint } from "../types/report";
+import type { TopSeller, PeriodSummary, SalePoint, PaymentBreakdown } from "../types/report";
 import type { Sale } from "../types/sale";
 import type { Product } from "../types/inventory";
 import type { Supplier } from "../types/inventory";
@@ -88,6 +88,7 @@ export function DashboardPage() {
   const [periodSummary, setPeriodSummary] = useState<PeriodSummary | null>(null);
   const [dailySales, setDailySales] = useState<SalePoint[]>([]);
   const [extraError, setExtraError] = useState<string | null>(null);
+  const [paymentBreakdown, setPaymentBreakdown] = useState<PaymentBreakdown[]>([]);
   const dashReq = useRef(0);
 
   const fetchDashboardData = async () => {
@@ -111,16 +112,18 @@ export function DashboardPage() {
         from = toLocalDate(start);
       }
 
-      const [pSummary, top, seriesData] = await Promise.all([
+      const [pSummary, top, seriesData, payBreakdown] = await Promise.all([
         getPeriodSummary(from, to),
         getTopSellers(from, to, 5),
         (period === "week" || period === "month") ? getSalesSeries(from, to) : Promise.resolve([]),
+        getPaymentBreakdown(from, to),
       ]);
 
       if (req !== dashReq.current) return;
       setPeriodSummary(pSummary);
       setTopSellers(top);
       setDailySales(seriesData);
+      setPaymentBreakdown(payBreakdown);
 
       const [salesData, productsData, suppliersData, returnsList, membersData] = await Promise.all([
         listSales(),
@@ -272,12 +275,15 @@ export function DashboardPage() {
               onClick={() => navigate("/members")}
             />
             <KpiCard
-              title="CUSTOMER DUES"
-              value={formatMoney(summary?.pending_payments ?? 0)}
-              sub={`${membersWithDues.length} customers`}
-              icon={CircleDollarSign}
-              tone="red"
-              onClick={() => navigate("/payments")}
+              title="ONLINE PAYMENTS"
+              value={formatMoneyCompact(
+                paymentBreakdown
+                  .filter((b) => b.payment_method !== "cash" && b.payment_method !== "credit")
+                  .reduce((sum, b) => sum + b.total, 0)
+              )}
+              sub="Bank Transfer / Easypaisa / JazzCash / Card"
+              icon={CreditCard}
+              tone="green"
             />
           </div>
 

@@ -56,6 +56,18 @@ export interface PaymentBreakdown {
   count: number;
 }
 
+export interface OnlinePaymentRecord {
+  id: number;
+  sale_id: number;
+  receipt_no: string;
+  customer_name: string | null;
+  payment_method: string;
+  amount: number;
+  reference: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
 export interface MonthlyProfitPoint {
   month: string;
   revenue: number;
@@ -90,4 +102,5 @@ export type ReportType =
   | "suppliers"
   | "supplier-dues"
   | "expenses"
-  | "profit-loss";
+  | "profit-loss"
+  | "online-payments";

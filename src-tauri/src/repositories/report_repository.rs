@@ -254,6 +254,41 @@ pub fn payment_breakdown(
     Ok(out)
 }
 
+pub fn online_payment_records(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<crate::models::report::OnlinePaymentRecord>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT sp.id, sp.sale_id, s.receipt_no, m.name AS customer_name,
+                sp.payment_method, sp.amount, sp.reference, sp.notes, sp.created_at
+         FROM sale_payments sp
+         JOIN sales s ON s.id = sp.sale_id
+         LEFT JOIN members m ON m.id = s.member_id
+         WHERE s.created_at >= date(?1) AND s.created_at < date(?2, '+1 day')
+           AND sp.payment_method != 'cash'
+         ORDER BY sp.created_at DESC",
+    )?;
+    let rows = stmt.query_map(params![from, to], |r| {
+        Ok(crate::models::report::OnlinePaymentRecord {
+            id: r.get("id")?,
+            sale_id: r.get("sale_id")?,
+            receipt_no: r.get("receipt_no")?,
+            customer_name: r.get("customer_name")?,
+            payment_method: r.get("payment_method")?,
+            amount: r.get("amount")?,
+            reference: r.get("reference")?,
+            notes: r.get("notes")?,
+            created_at: r.get("created_at")?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
 /// Profit & Loss for an inclusive date range.
 ///
 /// Returns (revenue, cogs, expenses, sales_count) where `cogs` is the cost of

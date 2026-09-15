@@ -54,7 +54,7 @@ import type { Accessory, Phone, Supplier } from "../types/inventory";
 import type { Member } from "../types/member";
 import type { MemberBalance } from "../types/payment";
 import type { Purchase, SupplierBalance } from "../types/purchase";
-import type { PaymentBreakdown, PeriodSummary, ProfitLoss, ReportType, TopSeller } from "../types/report";
+import type { OnlinePaymentRecord, PaymentBreakdown, PeriodSummary, ProfitLoss, ReportType, TopSeller } from "../types/report";
 import type { ReturnSummary } from "../types/return";
 import type { Sale } from "../types/sale";
 
@@ -72,6 +72,7 @@ const reportOptions: { value: ReportType; label: string }[] = [
   { value: "supplier-dues", label: "Supplier Dues" },
   { value: "expenses", label: "Expenses" },
   { value: "profit-loss", label: "Profit & Loss" },
+  { value: "online-payments", label: "Online Payments" },
 ];
 
 function toInputDate(date: Date) {
@@ -139,6 +140,7 @@ export function ReportsPage() {
   const [profitLoss, setProfitLoss] = useState<ProfitLoss | null>(null);
   const [salesSeries, setSalesSeries] = useState<{ day: string; label: string; Revenue: number }[]>([]);
   const [breakdown, setBreakdown] = useState<PaymentBreakdown[]>([]);
+  const [onlinePayments, setOnlinePayments] = useState<OnlinePaymentRecord[]>([]);
   const [topSellers, setTopSellers] = useState<TopSeller[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [returns, setReturns] = useState<ReturnSummary[]>([]);
@@ -183,6 +185,7 @@ export function ReportsPage() {
         nextSupplierDues,
         nextExpenses,
         nextCategories,
+        nextOnlinePayments,
       ] = await Promise.all([
         reportService.getPeriodSummary(rangeFrom, rangeTo),
         reportService.getProfitLoss(rangeFrom, rangeTo),
@@ -202,6 +205,7 @@ export function ReportsPage() {
         purchaseService.listSupplierDues(),
         expenseService.listExpenses(null, rangeFrom, rangeTo),
         expenseService.expenseCategoryTotals(rangeFrom, rangeTo),
+        reportService.getOnlinePaymentRecords(rangeFrom, rangeTo),
       ]);
       if (request !== requestId.current) return;
       setSummary(nextSummary);
@@ -222,6 +226,7 @@ export function ReportsPage() {
       setSupplierDues(nextSupplierDues);
       setExpenses(nextExpenses);
       setByCategory(nextCategories);
+      setOnlinePayments(nextOnlinePayments);
     } catch (reason) {
       if (request === requestId.current) setError(String(reason));
     } finally {
@@ -372,6 +377,14 @@ export function ReportsPage() {
       addSection("Profit & Loss Statement", ["Metric", "Value"], [["Revenue", profitLoss?.total_revenue ?? 0], ["COGS", profitLoss?.total_cogs ?? 0], ["Gross Profit", profitLoss?.gross_profit ?? 0], ["Expenses", profitLoss?.total_expenses ?? 0], ["Net Profit", profitLoss?.net_profit ?? 0]]);
       addSection("Monthly Analysis", ["Month", "Revenue", "COGS", "Expenses", "Gross Profit", "Net Profit"], (profitLoss?.monthly ?? []).map((item) => [item.month, item.revenue, item.cogs, item.expenses, item.gross_profit, item.net_profit]));
     }
+    if (reportType === "online-payments") {
+      const totalOnline = onlinePayments.reduce((s, r) => s + r.amount, 0);
+      const byMethod: Record<string, number> = {};
+      for (const r of onlinePayments) byMethod[r.payment_method] = (byMethod[r.payment_method] ?? 0) + r.amount;
+      addSection("Totals by Method", ["Method", "Total"], Object.entries(byMethod).sort((a, b) => b[1] - a[1]).map(([m, t]) => [methodLabels[m] ?? m, t]));
+      addSection("Online Payment Transactions", ["Date", "Invoice", "Customer", "Method", "Amount", "Reference"], onlinePayments.map((r) => [r.created_at, r.receipt_no, r.customer_name ?? "Walk-in", methodLabels[r.payment_method] ?? r.payment_method, r.amount, r.reference ?? r.notes ?? ""]));
+      addSection("Summary", ["Metric", "Value"], [["Total Online Received", totalOnline], ["Transactions", onlinePayments.length]]);
+    }
     const csv = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const link = document.createElement("a");
@@ -472,6 +485,71 @@ export function ReportsPage() {
           {reportType === "profit-loss" && <><div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5"><KpiCard title="Revenue" value={formatMoney(profitLoss?.total_revenue ?? 0)} icon={TrendingUp} tone="green" /><KpiCard title="COGS" value={formatMoney(profitLoss?.total_cogs ?? 0)} icon={Package} tone="navy" /><KpiCard title="Expenses" value={formatMoney(profitLoss?.total_expenses ?? 0)} icon={TrendingDown} tone="red" /><KpiCard title="Gross Profit" value={formatMoney(profitLoss?.gross_profit ?? 0)} icon={BarChart3} tone="primary" /><KpiCard title="Net Profit" value={formatMoney(profitLoss?.net_profit ?? 0)} icon={Wallet} tone={(profitLoss?.net_profit ?? 0) >= 0 ? "green" : "red"} /></div><div className="grid grid-cols-1 gap-4 lg:grid-cols-3"><Card title="Profit & Loss Statement"><div className="space-y-2">{[["Revenue", profitLoss?.total_revenue ?? 0], ["Less: COGS", -(profitLoss?.total_cogs ?? 0)], ["Gross Profit", profitLoss?.gross_profit ?? 0], ["Less: Expenses", -(profitLoss?.total_expenses ?? 0)], ["Net Profit", profitLoss?.net_profit ?? 0]].map(([label, value], index) => <div key={String(label)} className={`flex items-center justify-between px-2 py-2 ${index === 2 || index === 4 ? "rounded-md bg-slate-50 font-bold" : "border-b border-slate-100"}`}><span className="text-[13px]">{label}</span><span className="amount text-[14px]">{formatMoney(Number(value))}</span></div>)}</div></Card><Card title="Revenue vs Expenses vs Profit" className="lg:col-span-2">{profitChartData.length === 0 ? <EmptyState icon={TrendingUp} title="No activity in this period" description="Profit data will appear here." /> : <ResponsiveContainer width="100%" height={290}><ComposedChart data={profitChartData}><CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} /><XAxis dataKey="month" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={(value: number) => formatMoneyCompact(value)} width={62} /><Tooltip formatter={(value) => formatMoney(Number(value) || 0)} /><Legend /><Bar dataKey="Revenue" fill="#3B6FD4" maxBarSize={20} /><Bar dataKey="Expenses" fill="#DC2626" maxBarSize={20} /><Line type="monotone" dataKey="Net Profit" stroke="#16A34A" strokeWidth={2} /></ComposedChart></ResponsiveContainer>}</Card></div><Card title="Monthly Profit Analysis" noPadding><div className="overflow-x-auto"><table className="data-table"><thead><tr><th>Month</th><th className="text-right">Revenue</th><th className="text-right">COGS</th><th className="text-right">Expenses</th><th className="text-right">Gross Profit</th><th className="text-right">Net Profit</th></tr></thead><tbody>{!profitLoss?.monthly.length ? <EmptyRows columns={6} message="No profit and loss data in this period." /> : profitLoss.monthly.map((item) => <tr key={item.month}><td className="font-semibold">{item.month}</td><td className="text-right amount">{formatMoney(item.revenue)}</td><td className="text-right amount">{formatMoney(item.cogs)}</td><td className="text-right amount">{formatMoney(item.expenses)}</td><td className="text-right amount">{formatMoney(item.gross_profit)}</td><td className="text-right amount">{formatMoney(item.net_profit)}</td></tr>)}</tbody></table></div></Card></>}
         </div>
       )}
+
+      {reportType === "online-payments" && (() => {
+        const totalOnline = onlinePayments.reduce((s, r) => s + r.amount, 0);
+        const byMethod: Record<string, number> = {};
+        for (const r of onlinePayments) {
+          byMethod[r.payment_method] = (byMethod[r.payment_method] ?? 0) + r.amount;
+        }
+        const methodEntries = Object.entries(byMethod).sort((a, b) => b[1] - a[1]);
+        return <>
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <KpiCard title="Total Online Received" value={formatMoney(totalOnline)} icon={Wallet} tone="green" sub={`${onlinePayments.length} transactions`} />
+            <KpiCard title="Payment Methods" value={String(methodEntries.length)} icon={CreditCard} tone="primary" sub="active in period" />
+            <KpiCard title="Transactions" value={String(onlinePayments.length)} icon={Receipt} tone="navy" sub="non-cash payments" />
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Card title="Totals by Method" noPadding>
+              <table className="data-table">
+                <thead><tr><th>Method</th><th className="text-right">Total</th></tr></thead>
+                <tbody>
+                  {methodEntries.length === 0 ? <EmptyRows columns={2} message="No online payments." /> : methodEntries.map(([method, total]) => (
+                    <tr key={method}>
+                      <td className="font-semibold">{methodLabels[method] ?? method}</td>
+                      <td className="text-right amount">{formatMoney(total)}</td>
+                    </tr>
+                  ))}
+                  {methodEntries.length > 0 && (
+                    <tr style={{ borderTop: "2px solid #E2E8F0" }}>
+                      <td className="font-bold">Total Online Received</td>
+                      <td className="text-right amount font-bold" style={{ color: "#16A34A" }}>{formatMoney(totalOnline)}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </Card>
+            <Card title="Transaction Details" className="lg:col-span-2" noPadding>
+              <div className="overflow-x-auto">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Invoice</th>
+                      <th>Customer</th>
+                      <th>Method</th>
+                      <th className="text-right">Amount</th>
+                      <th>Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {onlinePayments.length === 0 ? <EmptyRows columns={6} message="No online payment records in this period." /> : onlinePayments.map((r) => (
+                      <tr key={r.id}>
+                        <td>{formatDate(r.created_at)}</td>
+                        <td className="font-semibold">{r.receipt_no}</td>
+                        <td>{r.customer_name ?? "Walk-in"}</td>
+                        <td>{methodLabels[r.payment_method] ?? r.payment_method}</td>
+                        <td className="text-right amount">{formatMoney(r.amount)}</td>
+                        <td>{r.reference ?? r.notes ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        </>;
+      })()}
 
       <PrintReport
         reportType={reportType}

@@ -20,8 +20,8 @@ use crate::models::purchase::{
 };
 use crate::models::product_return::{CreateReturnInput, ProductReturn, ReturnSummary};
 use crate::models::report::{
-    ActivityLog, DashboardSummary, MonthlyPoint, PaymentBreakdown, PeriodSummary, ProfitLoss,
-    SalePoint, TopSeller,
+    ActivityLog, DashboardSummary, MonthlyPoint, OnlinePaymentRecord, PaymentBreakdown,
+    PeriodSummary, ProfitLoss, SalePoint, TopSeller,
 };
 use crate::models::sale::{CreateSaleInput, Sale};
 use crate::models::staff::{SalaryInput, SalaryRecord, StaffInput, StaffMember};
@@ -1219,6 +1219,17 @@ pub fn get_payment_breakdown(
 ) -> Result<Vec<PaymentBreakdown>, AppError> {
     let guard = authenticated_conn(&db, &session)?;
     report_service::payment_breakdown(&guard, &from, &to)
+}
+
+#[tauri::command]
+pub fn get_online_payment_records(
+    db: State<Database>,
+    session: State<SessionState>,
+    from: String,
+    to: String,
+) -> Result<Vec<OnlinePaymentRecord>, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    report_service::online_payment_records(&guard, &from, &to)
 }
 
 #[tauri::command]

@@ -212,6 +212,7 @@ pub fn run() {
             commands::get_sales_series,
             commands::get_top_sellers,
             commands::get_payment_breakdown,
+            commands::get_online_payment_records,
             commands::get_profit_loss,
             commands::get_all_settings,
             commands::update_setting,
