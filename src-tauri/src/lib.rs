@@ -103,6 +103,13 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                // Only intercept close for the main window.
+                // Hidden windows created by the printer plugin also fire
+                // CloseRequested when the plugin calls webview.close().
+                // Acting on those kills the entire application.
+                if window.label() != "main" {
+                    return;
+                }
                 api.prevent_close();
 
                 let app_handle = window.app_handle().clone();

@@ -27,6 +27,7 @@ fn sale_from_row(r: &Row) -> rusqlite::Result<Sale> {
         created_by: r.get("created_by")?,
         created_at: r.get("created_at")?,
         items: Vec::new(),
+        sold_qty,
         return_status,
         returned_amount: r.get("returned_amount")?,
         return_count: r.get("return_count")?,

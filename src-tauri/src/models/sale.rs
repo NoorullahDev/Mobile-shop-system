@@ -68,6 +68,9 @@ pub struct Sale {
     pub created_by: Option<i64>,
     pub created_at: String,
     pub items: Vec<SaleItem>,
+    /// Total quantity of items sold (computed from sale_items, always populated).
+    #[serde(default)]
+    pub sold_qty: i64,
     /// Return status for this sale: "none" | "partial" | "full".
     pub return_status: String,
     /// Total amount refunded across all returns on this sale.

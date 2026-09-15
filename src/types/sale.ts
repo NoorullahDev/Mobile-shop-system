@@ -65,6 +65,8 @@ export interface Sale {
   created_by?: number | null;
   created_at: string;
   items: SaleItem[];
+  /** Total quantity of items sold (populated in both list and detail). */
+  sold_qty: number;
   /** "none" | "partial" | "full" */
   return_status?: string;
   returned_amount?: number;

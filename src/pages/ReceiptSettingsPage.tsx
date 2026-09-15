@@ -33,6 +33,7 @@ const PREVIEW_SALE: Sale = {
   notes: null,
   created_by: null,
   created_at: new Date().toISOString(),
+  sold_qty: 3,
   items: [
     {
       id: 1,

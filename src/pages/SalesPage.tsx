@@ -230,7 +230,7 @@ export function SalesPage() {
 
                     {/* Items count */}
                     <td style={{ color: "#64748B", fontSize: "13px" }}>
-                      {s.items.length} item{s.items.length !== 1 ? "s" : ""}
+                      {s.sold_qty} item{s.sold_qty !== 1 ? "s" : ""}
                     </td>
 
                     {/* Total */}
