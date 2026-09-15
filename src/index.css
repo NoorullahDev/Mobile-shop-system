@@ -374,26 +374,13 @@ h3 { font-size: 14px; font-weight: 600; line-height: 1.4;  margin: 0; }
 .app-content::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 99px; }
 .app-content::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
 
-/* ---- Print report ---- */
-.print-report { display: none; }
-
 @page {
   size: A4 portrait;
-  margin: 0 0 14mm;
+  margin: 12mm;
+}
 
-  @bottom-center {
-    content: "Software developed by EagleNest Creations (0346-4451505)";
-    font-family: Inter, "Segoe UI", Arial, sans-serif;
-    font-size: 8px;
-    color: #64748b;
-  }
-
-  @bottom-right {
-    content: "Page " counter(page) " of " counter(pages);
-    font-family: Inter, "Segoe UI", Arial, sans-serif;
-    font-size: 8px;
-    color: #64748b;
-  }
+.print-report {
+  display: none;
 }
 
 @media print {
@@ -432,10 +419,10 @@ h3 { font-size: 14px; font-weight: 600; line-height: 1.4;  margin: 0; }
     font-size: 10.5px;
     line-height: 1.4;
     color: #0f172a;
-    print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
-    box-decoration-break: clone;
+    print-color-adjust: exact;
     -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
   body.printing .report-print-header {
     display: flex;

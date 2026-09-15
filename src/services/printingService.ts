@@ -145,50 +145,19 @@ export function printReceiptViaDialog(
 }
 
 /**
- * Opens an A4 Invoice in the system print dialog.
+ * Prints an A4 Invoice directly via the printer plugin (no browser chrome).
+ * No headers/footers — only the designed invoice content appears.
  */
-export function printA4InvoiceViaDialog(data: ReceiptData): void {
+export async function printA4InvoiceViaDialog(data: ReceiptData): Promise<void> {
   const html = buildA4InvoicePrintHtml(data);
-
-  const existing = document.getElementById("__a4_invoice_print_frame");
-  if (existing) existing.remove();
-
-  const iframe = document.createElement("iframe");
-  iframe.id = "__a4_invoice_print_frame";
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "210mm";
-  iframe.style.height = "0";
-  iframe.style.border = "none";
-  iframe.style.opacity = "0";
-  iframe.style.pointerEvents = "none";
-  document.body.appendChild(iframe);
-
-  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!iframeDoc) {
-    window.print();
-    return;
-  }
-
-  iframeDoc.open();
-  iframeDoc.write(html);
-  iframeDoc.close();
-
-  const triggerPrint = () => {
-    try {
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    } catch {
-      window.print();
-    }
-  };
-
-  if (iframe.contentWindow) {
-    iframe.contentWindow.onafterprint = () => {
-      iframe.remove();
-    };
-  }
-
-  setTimeout(triggerPrint, 300);
+  await printHtml({
+    html,
+    printerId: undefined,
+    pageWidth: Math.round(210 * 96 / 25.4),
+    pageHeight: Math.round(297 * 96 / 25.4),
+    orientation: "portrait",
+    margin: { top: 0, right: 0, bottom: 0, left: 0, unit: "mm" },
+    copies: 1,
+    grayscale: false,
+  });
 }

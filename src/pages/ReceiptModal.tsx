@@ -66,11 +66,11 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
     rs,
   );
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     setError(null);
     try {
       if (printType === "a4") {
-        printA4InvoiceViaDialog(data);
+        await printA4InvoiceViaDialog(data);
       } else {
         // For thermal, temporarily override paper width
         const thermalSettings = {

@@ -48,20 +48,19 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
 <div style="max-width:750px;margin:0 auto;padding:32px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1F2937;background:#fff">
 
   <!-- Header -->
-  <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+  <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
     <tr>
-      <td style="vertical-align:top;width:60%">
-        ${data.business.logo ? `<img src="${esc(data.business.logo)}" style="max-height:64px;max-width:200px;margin-bottom:8px" />` : ""}
-        <div style="font-size:20px;font-weight:700;color:#111827">${esc(data.business.name)}</div>
-        ${data.business.tagline ? `<div style="font-size:12px;color:#6B7280;font-style:italic;margin-top:2px">${esc(data.business.tagline)}</div>` : ""}
-        ${data.business.address ? `<div style="font-size:12px;color:#6B7280;margin-top:4px">${esc(data.business.address)}</div>` : ""}
-        ${data.business.phone ? `<div style="font-size:12px;color:#6B7280">Phone: ${esc(data.business.phone)}</div>` : ""}
-        ${data.business.email ? `<div style="font-size:12px;color:#6B7280">Email: ${esc(data.business.email)}</div>` : ""}
+      <td style="vertical-align:top;width:58%">
+        ${data.business.logo ? `<img src="${esc(data.business.logo)}" style="max-height:56px;max-width:180px;margin-bottom:6px" />` : ""}
+        <div style="font-size:18px;font-weight:700;color:#111827;line-height:1.3">${esc(data.business.name)}</div>
+        ${data.business.address ? `<div style="font-size:11px;color:#6B7280;margin-top:3px;line-height:1.4">${esc(data.business.address)}</div>` : ""}
+        ${data.business.phone ? `<div style="font-size:11px;color:#6B7280;margin-top:1px">Phone: ${esc(data.business.phone)}</div>` : ""}
+        ${data.business.email ? `<div style="font-size:11px;color:#6B7280;margin-top:1px">Email: ${esc(data.business.email)}</div>` : ""}
       </td>
-      <td style="vertical-align:top;text-align:right">
-        <div style="font-size:28px;font-weight:700;color:#2563EB;letter-spacing:1px">INVOICE</div>
-        <div style="font-size:13px;color:#6B7280;margin-top:6px"><strong style="color:#374151">Invoice #:</strong> ${esc(data.invoice.receiptNo)}</div>
-        <div style="font-size:13px;color:#6B7280;margin-top:2px"><strong style="color:#374151">Date:</strong> ${esc(formatDateTime(data.invoice.datetime))}</div>
+      <td style="vertical-align:top;text-align:right;width:42%">
+        <div style="font-size:26px;font-weight:700;color:#2563EB;letter-spacing:1px;margin-bottom:8px">INVOICE</div>
+        <div style="font-size:12px;color:#6B7280;margin-top:4px"><strong style="color:#374151">Invoice #:</strong> ${esc(data.invoice.receiptNo)}</div>
+        <div style="font-size:12px;color:#6B7280;margin-top:2px"><strong style="color:#374151">Date:</strong> ${esc(formatDateTime(data.invoice.datetime))}</div>
       </td>
     </tr>
   </table>
