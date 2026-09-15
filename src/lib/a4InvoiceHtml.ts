@@ -45,7 +45,7 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
   }
 
   return `
-<div style="max-width:750px;margin:0 auto;padding:32px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1F2937;background:#fff">
+<div style="max-width:750px;margin:0 auto;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#1F2937;background:#fff">
 
   <!-- Header -->
   <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
@@ -57,7 +57,7 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
         ${data.business.phone ? `<div style="font-size:11px;color:#6B7280;margin-top:1px">Phone: ${esc(data.business.phone)}</div>` : ""}
         ${data.business.email ? `<div style="font-size:11px;color:#6B7280;margin-top:1px">Email: ${esc(data.business.email)}</div>` : ""}
       </td>
-      <td style="vertical-align:top;text-align:right;width:42%">
+      <td style="vertical-align:top;text-align:right;width:42%;padding-top:4px">
         <div style="font-size:26px;font-weight:700;color:#2563EB;letter-spacing:1px;margin-bottom:8px">INVOICE</div>
         <div style="font-size:12px;color:#6B7280;margin-top:4px"><strong style="color:#374151">Invoice #:</strong> ${esc(data.invoice.receiptNo)}</div>
         <div style="font-size:12px;color:#6B7280;margin-top:2px"><strong style="color:#374151">Date:</strong> ${esc(formatDateTime(data.invoice.datetime))}</div>
@@ -158,9 +158,10 @@ export function buildA4InvoicePrintHtml(data: ReceiptData): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8" />
 <title>Invoice - ${esc(data.invoice.receiptNo)}</title>
 <style>
-  @page { size: A4 portrait; margin: 12mm; }
+  @page { size: A4 portrait; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; background: #fff; }
+  body { padding: 12mm; }
 </style>
 </head><body>${inner}</body></html>`;
 }
