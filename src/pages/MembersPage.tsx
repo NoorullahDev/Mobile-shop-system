@@ -22,6 +22,7 @@ export function MembersPage() {
   const { members, loading, error, load, add, update, remove } =
     useMemberStore();
   const businessName = useSettingsStore((s) => s.businessName);
+  const whatsappTemplate = useSettingsStore((s) => s.whatsappTemplate);
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Member | null>(null);
@@ -287,7 +288,7 @@ export function MembersPage() {
                                     alert("Customer phone number is invalid or missing. Please update the phone number to send a WhatsApp reminder.");
                                     return;
                                   }
-                                  await openDuesReminder(m.phone, due, businessName || undefined);
+                                  await openDuesReminder(m.phone, due, businessName || undefined, whatsappTemplate || undefined, m.name || undefined);
                                 }}
                                 className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
                                 style={{ color: "#25D366" }}

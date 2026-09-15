@@ -35,28 +35,31 @@ function normalizePhone(phone: string | null | undefined): string | null {
   return null;
 }
 
+const FALLBACK_TEMPLATE =
+  "Assalam-o-Alaikum {customer_name},\n{shop_name} mein aapki Rs. {due_amount} payment baqi hai.\nBaraye meherbani jald ada karein.\nShukriya.";
+
 /**
- * Build the WhatsApp deep link URL with a pre-filled Urdu dues reminder.
+ * Build the WhatsApp deep link URL with a pre-filled dues reminder.
+ * Uses the saved template if provided, otherwise falls back to the default message.
  */
 export function duesReminderUrl(
   phone: string | null | undefined,
   amount: number,
   businessName?: string,
+  template?: string,
+  customerName?: string,
 ): string | null {
   const cleanPhone = normalizePhone(phone);
   if (!cleanPhone) return null;
   if (amount <= 0) return null;
 
   const formattedAmount = formatMoneyCompact(amount);
-  const shopLine = businessName
-    ? `${businessName} mein aapki`
-    : "Aap ki dukaan mein aapki";
+  const resolvedTemplate = template || FALLBACK_TEMPLATE;
 
-  const message =
-    `Assalamualaikum!\n` +
-    `${shopLine} Rs. ${formattedAmount} payment baqi hai.\n` +
-    `Baraye meherbani jald se jald ada karein.\n` +
-    `Shukriya.`;
+  const message = resolvedTemplate
+    .split("{customer_name}").join(customerName || "Customer")
+    .split("{shop_name}").join(businessName || "Shop")
+    .split("{due_amount}").join(formattedAmount);
 
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
 }
@@ -69,8 +72,10 @@ export async function openDuesReminder(
   phone: string | null | undefined,
   amount: number,
   businessName?: string,
+  template?: string,
+  customerName?: string,
 ): Promise<boolean> {
-  const url = duesReminderUrl(phone, amount, businessName);
+  const url = duesReminderUrl(phone, amount, businessName, template, customerName);
   if (!url) return false;
   try {
     await openUrl(url);

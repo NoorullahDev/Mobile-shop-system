@@ -19,12 +19,13 @@ import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Button";
 import { StatusBadge } from "../components/StatusBadge";
+import { KpiCard } from "../components/KpiCard";
 import { PaymentForm } from "./PaymentForm";
 import { usePaymentStore } from "../store/payments";
 import { useMemberStore } from "../store/members";
 import * as paymentService from "../services/paymentService";
 import { useSessionStore } from "../store/session";
-import { formatMoneyCompact, methodLabels } from "../lib/format";
+import { formatMoney, formatMoneyCompact, methodLabels } from "../lib/format";
 import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
 import type { Payment } from "../types/payment";
@@ -35,6 +36,7 @@ export function PaymentsPage() {
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
   const businessName = useSettingsStore((s) => s.businessName);
+  const whatsappTemplate = useSettingsStore((s) => s.whatsappTemplate);
   const isAdmin = user?.role.toLowerCase() === "admin";
   
   const [search, setSearch] = useState("");
@@ -125,125 +127,118 @@ export function PaymentsPage() {
         </div>
       )}
 
+      {/* KPI Summary Cards */}
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title="Total Customer Outstanding"
+          value={formatMoney(totalOutstanding)}
+          icon={CircleDollarSign}
+          tone="amber"
+          sub="across all customers"
+        />
+        <KpiCard
+          title="Customers Owing"
+          value={String(dues.length)}
+          icon={Users}
+          tone="red"
+          sub={`${dues.length} active`}
+        />
+        <KpiCard
+          title="Payments Received"
+          value={String(payments.length)}
+          icon={Wallet}
+          tone="green"
+          sub="all recorded"
+        />
+        <KpiCard
+          title="Recorded Transactions"
+          value={String(payments.length)}
+          icon={History}
+          tone="primary"
+          sub="in history"
+        />
+      </div>
+
       {/* Customer Dues */}
-      <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2" noPadding>
-          <div
-            className="flex items-center justify-between px-4 py-3"
-            style={{ borderBottom: "1px solid #E2E8F0" }}
-          >
-            <div className="flex items-center gap-2">
-              <Users className="h-4 w-4" style={{ color: "#3B6FD4" }} />
-              <span className="text-[13px] font-semibold" style={{ color: "#0F172A" }}>
-                Customer Dues
-              </span>
-              <span
-                className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                style={{ background: "#FEF3C7", color: "#B45309" }}
-              >
-                {dues.length} owing
-              </span>
-            </div>
+      <Card className="mb-4" noPadding>
+        <div
+          className="flex items-center justify-between px-4 py-3"
+          style={{ borderBottom: "1px solid #E2E8F0" }}
+        >
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4" style={{ color: "#3B6FD4" }} />
+            <span className="text-[13px] font-semibold" style={{ color: "#0F172A" }}>
+              Customer Dues
+            </span>
+            <span
+              className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+              style={{ background: "#FEF3C7", color: "#B45309" }}
+            >
+              {dues.length} owing
+            </span>
           </div>
-          {dues.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[13px]" style={{ color: "#64748B" }}>
-              No outstanding customer dues. All balances are clear.
-            </p>
-          ) : (
-            <div className="max-h-72 overflow-y-auto p-3">
-              <div className="flex flex-col gap-2">
-                {dues.map((d) => (
-                  <div
-                    key={d.member_id}
-                    className="flex items-center justify-between rounded-md p-2.5 transition-colors"
-                    style={{ border: "1px solid #E2E8F0", background: "#F8FAFC" }}
+        </div>
+        {dues.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px]" style={{ color: "#64748B" }}>
+            No outstanding customer dues. All balances are clear.
+          </p>
+        ) : (
+          <div className="max-h-72 overflow-y-auto p-3">
+            <div className="flex flex-col gap-2">
+              {dues.map((d) => (
+                <div
+                  key={d.member_id}
+                  className="flex items-center justify-between rounded-md p-2.5 transition-colors"
+                  style={{ border: "1px solid #E2E8F0", background: "#F8FAFC" }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => openHistory(d.member_id)}
+                    className="min-w-0 flex-1 text-left transition-colors hover:bg-blue-50/50 rounded"
                   >
-                    <button
-                      type="button"
-                      onClick={() => openHistory(d.member_id)}
-                      className="min-w-0 flex-1 text-left transition-colors hover:bg-blue-50/50 rounded"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-[13px] font-semibold" style={{ color: "#0F172A" }}>
-                          {d.member_name}
-                        </span>
-                        <History className="h-3.5 w-3.5 shrink-0" style={{ color: "#94A3B8" }} />
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[13px] font-semibold" style={{ color: "#0F172A" }}>
+                        {d.member_name}
+                      </span>
+                      <History className="h-3.5 w-3.5 shrink-0" style={{ color: "#94A3B8" }} />
+                    </div>
+                    <div className="truncate text-[11px]" style={{ color: "#64748B" }}>
+                      {d.phone ?? "—"} · {d.payment_count} payment{d.payment_count !== 1 ? "s" : ""}
+                    </div>
+                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {d.phone && d.balance > 0 && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!isPhoneValid(d.phone)) {
+                            alert("Customer phone number is invalid or missing. Please update the phone number to send a WhatsApp reminder.");
+                            return;
+                          }
+                            await openDuesReminder(d.phone, d.balance, businessName || undefined, whatsappTemplate || undefined, d.member_name || undefined);
+                        }}
+                        className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
+                        style={{ color: "#25D366" }}
+                        title="Send WhatsApp dues reminder"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <div className="text-right">
+                      <div className="amount font-bold text-[14px]" style={{ color: "#B45309" }}>
+                        {formatMoneyCompact(d.balance)}
                       </div>
-                      <div className="truncate text-[11px]" style={{ color: "#64748B" }}>
-                        {d.phone ?? "—"} · {d.payment_count} payment{d.payment_count !== 1 ? "s" : ""}
-                      </div>
-                    </button>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {d.phone && d.balance > 0 && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!isPhoneValid(d.phone)) {
-                              alert("Customer phone number is invalid or missing. Please update the phone number to send a WhatsApp reminder.");
-                              return;
-                            }
-                            await openDuesReminder(d.phone, d.balance, businessName || undefined);
-                          }}
-                          className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
-                          style={{ color: "#25D366" }}
-                          title="Send WhatsApp dues reminder"
-                        >
-                          <MessageCircle className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                      <div className="text-right">
-                        <div className="amount font-bold text-[14px]" style={{ color: "#B45309" }}>
-                          {formatMoneyCompact(d.balance)}
-                        </div>
-                        <div className="text-[10px]" style={{ color: "#94A3B8" }}>
-                          due balance
-                        </div>
+                      <div className="text-[10px]" style={{ color: "#94A3B8" }}>
+                        due balance
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
-
-        <Card>
-          <div className="flex h-full flex-col justify-center gap-3">
-            <div className="flex items-center gap-3">
-              <span
-                className="flex h-10 w-10 items-center justify-center rounded-lg"
-                style={{ background: "#FEF3C7", color: "#B45309" }}
-              >
-                <CircleDollarSign className="h-5 w-5" />
-              </span>
-              <div>
-                <div className="text-[12px] font-medium uppercase tracking-wide" style={{ color: "#64748B" }}>
-                  Total Outstanding
                 </div>
-                <div className="amount text-[22px] font-bold" style={{ color: "#B45309" }}>
-                  {formatMoneyCompact(totalOutstanding)}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3" style={{ borderTop: "1px solid #E2E8F0", paddingTop: 12 }}>
-              <span
-                className="flex h-10 w-10 items-center justify-center rounded-lg"
-                style={{ background: "#DBEAFE", color: "#2563EB" }}
-              >
-                <Wallet className="h-5 w-5" />
-              </span>
-              <div>
-                <div className="text-[12px] font-medium uppercase tracking-wide" style={{ color: "#64748B" }}>
-                  Transactions
-                </div>
-                <div className="text-[16px] font-bold" style={{ color: "#0F172A" }}>
-                  {payments.length} recorded
-                </div>
-              </div>
+              ))}
             </div>
           </div>
-        </Card>
-      </div>
+        )}
+      </Card>
 
       <Card noPadding>
         {/* Filter bar */}

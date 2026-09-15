@@ -11,6 +11,7 @@ import {
   Bell,
   Shield,
   Cpu,
+  MessageCircle,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -24,6 +25,7 @@ import { UsersPage } from "./UsersPage";
 import { ActivityLogsPage } from "./ActivityLogsPage";
 import { NotificationsPage } from "./NotificationsPage";
 import { LicensePage } from "./LicensePage";
+import { WhatsAppReminderSettings } from "./WhatsAppReminderSettings";
 import * as settingsService from "../services/settingsService";
 import { setCurrency as setActiveCurrency } from "../lib/format";
 import { useSessionStore } from "../store/session";
@@ -33,6 +35,7 @@ import type { LucideIcon } from "lucide-react";
 type SettingsTab =
   | "business"
   | "receipt"
+  | "whatsapp"
   | "backup"
   | "users"
   | "activity"
@@ -49,6 +52,7 @@ interface NavSection {
 const NAV: NavSection[] = [
   { id: "business", label: "Business", icon: Store },
   { id: "receipt", label: "Receipt", icon: Printer },
+  { id: "whatsapp", label: "WhatsApp Reminder", icon: MessageCircle },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
   { id: "users", label: "Users & Roles", icon: UserCog },
   { id: "activity", label: "Activity Logs", icon: ClipboardList },
@@ -345,6 +349,7 @@ export function SettingsPage() {
             ))}
 
           {activeTab === "receipt" && <ReceiptSettingsPage />}
+          {activeTab === "whatsapp" && <WhatsAppReminderSettings />}
           {activeTab === "backup" && <BackupManagerPage />}
           {activeTab === "users" && <UsersPage />}
           {activeTab === "activity" && <ActivityLogsPage />}

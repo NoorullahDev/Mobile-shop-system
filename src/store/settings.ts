@@ -10,7 +10,11 @@ export interface BusinessProfile {
   email: string;
   address: string;
   currency: Currency;
+  whatsappTemplate: string;
 }
+
+const DEFAULT_WHATSAPP_TEMPLATE =
+  "Assalam-o-Alaikum {customer_name},\n{shop_name} mein aapki Rs. {due_amount} payment baqi hai.\nBaraye meherbani jald ada karein.\nShukriya.";
 
 interface SettingsState extends BusinessProfile {
   loaded: boolean;
@@ -26,6 +30,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   email: "",
   address: "",
   currency: "PKR",
+  whatsappTemplate: DEFAULT_WHATSAPP_TEMPLATE,
   loaded: false,
 
   load: async () => {
@@ -40,6 +45,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         email: map.get("email") ?? "",
         address: map.get("address") ?? "",
         currency: (map.get("currency") as Currency | undefined) ?? "PKR",
+        whatsappTemplate: map.get("whatsapp_template") || DEFAULT_WHATSAPP_TEMPLATE,
         loaded: true,
       });
     } catch (e) {
