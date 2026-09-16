@@ -295,12 +295,12 @@ export function PurchaseForm({
       });
     }
 
-    if (items.length === 0) {
-      setError("Add at least one mobile phone or accessory before recording the purchase.");
-      return;
-    }
     if (errs.length > 0) {
       setError(errs[0]);
+      return;
+    }
+    if (items.length === 0) {
+      setError("Add at least one mobile phone or accessory before recording the purchase.");
       return;
     }
 
