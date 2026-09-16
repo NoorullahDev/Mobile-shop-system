@@ -48,7 +48,7 @@ import * as reportService from "../services/reportService";
 import * as returnService from "../services/returnService";
 import * as saleService from "../services/saleService";
 import * as supplierService from "../services/supplierService";
-import { printElementViaPlugin } from "../services/printingService";
+import { printReportViaDialog } from "../services/printingService";
 import { formatDate, formatMoney, formatMoneyCompact, methodLabels } from "../lib/format";
 import type { CategoryTotal, Expense } from "../types/expense";
 import type { Accessory, Phone, Supplier } from "../types/inventory";
@@ -261,22 +261,11 @@ export function ReportsPage() {
     runReport(rangeFrom, rangeTo);
   };
 
-  const handlePrint = async () => {
+  const handlePrint = () => {
     try {
-      await printElementViaPlugin("report-print-area");
+      printReportViaDialog("report-print-area");
     } catch (e) {
-      // Fallback to window.print() if plugin fails
-      console.warn("Plugin print failed, falling back to window.print():", e);
-      const previousTitle = document.title;
-      document.title = "";
-      document.body.classList.add("printing");
-      const cleanup = () => {
-        document.body.classList.remove("printing");
-        document.title = previousTitle;
-      };
-      window.addEventListener("afterprint", cleanup, { once: true });
-      window.print();
-      window.setTimeout(cleanup, 1000);
+      console.error("Print failed:", e);
     }
   };
 

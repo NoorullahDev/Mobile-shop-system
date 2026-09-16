@@ -198,11 +198,11 @@ export function printA4InvoiceViaDialog(data: ReceiptData): void {
 }
 
 /**
- * Prints a DOM element using the printer-v2 plugin.
- * Sends HTML directly to the printer via WebView2 PrintAsync —
- * no browser print dialog, no Chromium headers/footers.
+ * Opens the Report in the system print dialog (Windows Print Preview).
+ * Uses the same iframe + window.print() approach as A4 invoices and
+ * thermal receipts — no direct printer selection, no browser headers/footers.
  */
-export async function printElementViaPlugin(elementId: string): Promise<void> {
+export function printReportViaDialog(elementId: string): void {
   const el = document.getElementById(elementId);
   if (!el) {
     throw new Error("Report element not found");
@@ -229,42 +229,53 @@ ${styleTexts.join("\n")}
 * { box-sizing: border-box; }
 html, body { width: 210mm; background: #fff; margin: 0; padding: 0; }
 body { font-family: Inter, "Segoe UI", Arial, sans-serif; }
-body.printing,
-body.printing #root,
-body.printing .app-shell,
-body.printing .app-main,
-body.printing .app-content {
-  width: auto !important;
-  height: auto !important;
-  min-height: 0 !important;
-  overflow: visible !important;
-  background: #fff !important;
-}
-body.printing .app-shell > aside,
-body.printing .app-main > header,
-body.printing .app-main > div,
-body.printing .app-content > div > :not(.print-report) {
-  display: none !important;
-}
-body.printing .app-content {
-  display: block !important;
-  margin: 0 !important;
-  padding: 0 !important;
-}
 </style>
-</head>
-<body class="printing">
+</head><body>
 ${el.outerHTML}
 </body></html>`;
 
-  await printHtml({
-    html,
-    printerId: undefined,
-    pageWidth: 210,
-    pageHeight: 297,
-    orientation: "portrait",
-    margin: { top: 10, right: 10, bottom: 10, left: 10, unit: "mm" },
-    copies: 1,
-    grayscale: false,
-  });
+  // Remove any previously created print iframe
+  const existing = document.getElementById("__report_print_frame");
+  if (existing) existing.remove();
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "__report_print_frame";
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  // A4 at 96 DPI: 210mm ≈ 794px
+  iframe.style.width = "794px";
+  iframe.style.height = "0";
+  iframe.style.border = "none";
+  iframe.style.opacity = "0";
+  iframe.style.pointerEvents = "none";
+  document.body.appendChild(iframe);
+
+  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!iframeDoc) {
+    window.print();
+    return;
+  }
+
+  iframeDoc.open();
+  iframeDoc.write(html);
+  iframeDoc.close();
+
+  const triggerPrint = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch {
+      window.print();
+    }
+  };
+
+  if (iframe.contentWindow) {
+    iframe.contentWindow.onafterprint = () => {
+      iframe.remove();
+    };
+  }
+
+  // Small delay to ensure content is rendered in the iframe
+  setTimeout(triggerPrint, 300);
 }
