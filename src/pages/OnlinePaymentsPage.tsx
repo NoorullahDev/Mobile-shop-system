@@ -13,7 +13,7 @@ import { Card } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
 import { EmptyState } from "../components/EmptyState";
 import { Spinner } from "../components/Button";
-import { formatDate, formatMoney, methodLabels, toLocalDate } from "../lib/format";
+import { formatDate, formatMoney, methodLabels } from "../lib/format";
 import { getOnlinePaymentRecords } from "../services/reportService";
 import type { OnlinePaymentRecord } from "../types/report";
 
@@ -98,13 +98,15 @@ export function OnlinePaymentsPage() {
     return true;
   });
 
-  // Summary calculations
-  const now = new Date();
-  const todayStr = toLocalDate(now);
-  const monthStart = toLocalDate(new Date(now.getFullYear(), now.getMonth(), 1));
-  const todayTotal = records.filter((r) => r.created_at.slice(0, 10) === todayStr).reduce((s, r) => s + r.amount, 0);
-  const monthTotal = records.filter((r) => r.created_at.slice(0, 10) >= monthStart && r.created_at.slice(0, 10) <= todayStr).reduce((s, r) => s + r.amount, 0);
+  // Summary calculations — always derived from the same period-filtered `records`
   const totalReceived = records.reduce((s, r) => s + r.amount, 0);
+  const totalTransactions = records.length;
+  const periodLabel =
+    activePreset === "Today" ? "Today" :
+    activePreset === "This Week" ? "This Week" :
+    activePreset === "This Month" ? "This Month" :
+    activePreset === "This Year" ? "This Year" :
+    "Selected Period";
 
   return (
     <div>
@@ -123,12 +125,12 @@ export function OnlinePaymentsPage() {
         </div>
       )}
 
-      {/* Summary Cards */}
+      {/* Summary Cards — all values derived from period-filtered `records` */}
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Today's Online Received" value={formatMoney(todayTotal)} icon={Calendar} tone="green" sub={todayStr} />
-        <KpiCard title="This Month" value={formatMoney(monthTotal)} icon={TrendingUp} tone="primary" sub={monthStart} />
-        <KpiCard title="Total Online Received" value={formatMoney(totalReceived)} icon={Wallet} tone="amber" sub={`${records.length} transactions`} />
-        <KpiCard title="Online Transactions" value={String(records.length)} icon={Receipt} tone="navy" sub="in selected period" />
+        <KpiCard title={`${periodLabel} Received`} value={formatMoney(totalReceived)} icon={Calendar} tone="green" sub={`${totalTransactions} transactions`} />
+        <KpiCard title={`${periodLabel} Transactions`} value={String(totalTransactions)} icon={Receipt} tone="navy" sub={`${periodLabel.toLowerCase()} count`} />
+        <KpiCard title="Total Online Received" value={formatMoney(totalReceived)} icon={Wallet} tone="amber" sub={`${totalTransactions} transactions`} />
+        <KpiCard title="Online Transactions" value={String(totalTransactions)} icon={TrendingUp} tone="primary" sub="in selected period" />
       </div>
 
       {/* Filters */}
