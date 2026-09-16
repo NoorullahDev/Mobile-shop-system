@@ -230,7 +230,7 @@ ${styleTexts.join("\n")}
 html, body { width: 210mm; background: #fff; margin: 0; padding: 0; }
 body { font-family: Inter, "Segoe UI", Arial, sans-serif; }
 </style>
-</head><body>
+</head><body class="printing">
 ${el.outerHTML}
 </body></html>`;
 
