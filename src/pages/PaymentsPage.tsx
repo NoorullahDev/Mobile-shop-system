@@ -40,7 +40,7 @@ export function PaymentsPage() {
   const whatsappTemplate = useSettingsStore((s) => s.whatsappTemplate);
   const isAdmin = user?.role.toLowerCase() === "admin";
   
-  const [search, setSearch] = useState("");
+  const [duesSearch, setDuesSearch] = useState("");
   const [recordOpen, setRecordOpen] = useState(false);
   const [historyFor, setHistoryFor] = useState<number | null>(null);
   const [history, setHistory] = useState<Payment[]>([]);
@@ -61,20 +61,22 @@ export function PaymentsPage() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([paymentService.listCustomerDues(), paymentService.listMemberBalances()])
-      .then(([dueRows, balanceRows]) => {
-        if (active) {
-          setDues(dueRows);
-          setBalances(balanceRows);
-        }
-      })
-      .catch(() => {
-        /* dues are supplementary */
-      });
-    return () => {
-      active = false;
-    };
+    paymentService.listCustomerDues().then((dueRows) => {
+      if (active) setDues(dueRows);
+    }).catch(() => {});
+    paymentService.listMemberBalances().then((balanceRows) => {
+      if (active) setBalances(balanceRows);
+    }).catch(() => {});
+    return () => { active = false; };
   }, [payments]);
+
+  const searchDues = async (q: string) => {
+    setDuesSearch(q);
+    try {
+      const rows = await paymentService.listCustomerDues(q || undefined);
+      setDues(rows);
+    } catch { /* ignore */ }
+  };
 
   const totalOutstanding = dues.reduce((s, d) => s + d.balance, 0);
 
@@ -88,8 +90,6 @@ export function PaymentsPage() {
       .then(setUnpaidSales)
       .catch(() => setUnpaidSales([]));
   }, [recordOpen, recordMemberId]);
-
-  const searchPayments = () => load(search);
 
   const openHistory = async (memberId: number) => {
     const req = ++historyReq.current;
@@ -192,9 +192,45 @@ export function PaymentsPage() {
             </span>
           </div>
         </div>
+
+        {/* Search bar — above the dues list */}
+        <div className="px-4 pt-3 pb-2">
+          <div className="relative max-w-xs">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
+              style={{ color: "#94A3B8" }}
+            />
+            <input
+              className="h-9 w-full rounded border bg-white pl-9 pr-8 text-[13px] outline-none transition-all placeholder:text-[#94A3B8]"
+              style={{ borderColor: "#CBD5E1", color: "#0F172A" }}
+              placeholder="Search by customer name or phone..."
+              value={duesSearch}
+              onChange={(e) => searchDues(e.target.value)}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = "#3B6FD4";
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(59,111,212,0.12)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "#CBD5E1";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+            {duesSearch && (
+              <button
+                type="button"
+                onClick={() => searchDues("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2"
+                style={{ color: "#94A3B8" }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
         {dues.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px]" style={{ color: "#64748B" }}>
-            No outstanding customer dues. All balances are clear.
+            {duesSearch ? "No customers match your search." : "No outstanding customer dues. All balances are clear."}
           </p>
         ) : (
           <div className="max-h-72 overflow-y-auto p-3">
@@ -255,48 +291,6 @@ export function PaymentsPage() {
       </Card>
 
       <Card noPadding>
-        {/* Filter bar */}
-        <div
-          className="flex items-center gap-3 px-4 py-3"
-          style={{ borderBottom: "1px solid #E2E8F0" }}
-        >
-          <div className="relative flex-1 max-w-xs">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-              style={{ color: "#94A3B8" }}
-            />
-            <input
-              className="h-9 w-full rounded border bg-white pl-9 pr-8 text-[13px] outline-none transition-all placeholder:text-[#94A3B8]"
-              style={{ borderColor: "#CBD5E1", color: "#0F172A" }}
-              placeholder="Search by member, method or reference..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && searchPayments()}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#3B6FD4";
-                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(59,111,212,0.12)";
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = "#CBD5E1";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => { setSearch(""); load(""); }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2"
-                style={{ color: "#94A3B8" }}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-          <Button variant="secondary" size="sm" onClick={searchPayments}>
-            Search
-          </Button>
-        </div>
-
         {/* Table / States */}
         {loading ? (
           <div
@@ -311,20 +305,14 @@ export function PaymentsPage() {
             <EmptyState
               icon={Wallet}
               title="No payments recorded"
-              description={
-                search
-                  ? "No payments match your search."
-                  : "Record your first customer payment."
-              }
+              description="Record your first customer payment."
               action={
-                !search ? (
-                  <Button
-                    onClick={() => setRecordOpen(true)}
-                    icon={<Plus className="h-3.5 w-3.5" />}
-                  >
-                    Record Payment
-                  </Button>
-                ) : undefined
+                <Button
+                  onClick={() => setRecordOpen(true)}
+                  icon={<Plus className="h-3.5 w-3.5" />}
+                >
+                  Record Payment
+                </Button>
               }
             />
           </div>

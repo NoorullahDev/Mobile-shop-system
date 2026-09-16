@@ -108,10 +108,23 @@ pub fn update(
     input: CreatePaymentInput,
     actor: Option<i64>,
 ) -> Result<Payment, AppError> {
-    get(conn, id)?;
+    let existing = get(conn, id)?;
     let normalized = normalize_input(conn, input)?;
     if !payment_repository::update(conn, id, &normalized)? {
         return Err(AppError::validation("Payment not found"));
+    }
+    // If the sale link changed, recalculate the old and new sale's paid_amount
+    let old_sale = existing.sale_id;
+    let new_sale = normalized.sale_id;
+    if old_sale != new_sale {
+        if let Some(sid) = old_sale {
+            let _ = update_sale_paid_amount(conn, sid);
+        }
+        if let Some(sid) = new_sale {
+            let _ = update_sale_paid_amount(conn, sid);
+        }
+    } else if let Some(sid) = new_sale {
+        let _ = update_sale_paid_amount(conn, sid);
     }
     services::record_activity(conn, actor, "payment", "update", Some(id))?;
     get(conn, id)
@@ -139,9 +152,13 @@ pub fn soft_delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(),
             ));
         }
     }
+    let sale_id = payment.sale_id;
     let deleted = payment_repository::soft_delete(conn, id)?;
     if !deleted {
         return Err(AppError::validation("Payment not found"));
+    }
+    if let Some(sid) = sale_id {
+        let _ = update_sale_paid_amount(conn, sid);
     }
     services::record_activity(conn, actor, "payment", "delete", Some(id))
 }
