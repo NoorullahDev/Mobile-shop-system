@@ -5,7 +5,7 @@ import { Select } from "../components/Select";
 import { Alert } from "../components/Alert";
 import { methodLabels } from "../lib/format";
 import type { Member } from "../types/member";
-import type { CreatePaymentInput, Payment } from "../types/payment";
+import type { CreatePaymentInput, Payment, UnpaidSaleInfo } from "../types/payment";
 import { PAYMENT_METHODS, PAYMENT_STATUSES } from "../types/payment";
 
 interface PaymentFormProps {
@@ -14,9 +14,11 @@ interface PaymentFormProps {
   members: Member[];
   initialMemberId?: number | null;
   initialPayment?: Payment | null;
+  unpaidSales?: UnpaidSaleInfo[];
+  onMemberChange?: (memberId: number | null) => void;
 }
 
-export function PaymentForm({ onSubmit, onCancel, members, initialMemberId, initialPayment }: PaymentFormProps) {
+export function PaymentForm({ onSubmit, onCancel, members, initialMemberId, initialPayment, unpaidSales, onMemberChange }: PaymentFormProps) {
   const [form, setForm] = useState<CreatePaymentInput>({
     member_id: initialPayment?.member_id ?? initialMemberId ?? null,
     amount: initialPayment?.amount ?? 0,
@@ -26,6 +28,7 @@ export function PaymentForm({ onSubmit, onCancel, members, initialMemberId, init
     reference: initialPayment?.reference ?? "",
     notes: initialPayment?.notes ?? "",
     payment_date: initialPayment?.payment_date?.slice(0, 10) ?? "",
+    sale_id: initialPayment?.sale_id ?? null,
   });
   const [amountStr, setAmountStr] = useState(initialPayment ? String(initialPayment.amount) : "");
   const [saving, setSaving] = useState(false);
@@ -59,6 +62,7 @@ export function PaymentForm({ onSubmit, onCancel, members, initialMemberId, init
         reference: form.reference ? form.reference.trim() : "",
         notes: form.notes ? form.notes.trim() : "",
         payment_date: form.payment_date || null,
+        sale_id: form.sale_id ?? null,
       });
     } catch (err) {
       setError(String(err));
@@ -75,11 +79,32 @@ export function PaymentForm({ onSubmit, onCancel, members, initialMemberId, init
         label="Member"
         options={memberOptions}
         value={form.member_id ? String(form.member_id) : ""}
-        onChange={(e) =>
-          setForm((f) => ({ ...f, member_id: e.target.value ? Number(e.target.value) : null }))
-        }
-        disabled={saving}
-      />
+          onChange={(e) => {
+            const mid = e.target.value ? Number(e.target.value) : null;
+            setForm((f) => ({ ...f, member_id: mid, sale_id: null }));
+            onMemberChange?.(mid);
+          }}
+          disabled={saving}
+        />
+        {unpaidSales && unpaidSales.length > 0 && (
+          <Select
+            name="sale_id"
+            label="Apply to Invoice"
+            placeholder="— Select an unpaid invoice —"
+            options={[
+              { value: "", label: "— General payment (not linked) —" },
+              ...unpaidSales.map((s) => ({
+                value: String(s.id),
+                label: `${s.receipt_no} — Due: Rs. ${s.due_amount.toLocaleString()}`,
+              })),
+            ]}
+            value={form.sale_id ? String(form.sale_id) : ""}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, sale_id: e.target.value ? Number(e.target.value) : null }))
+            }
+            disabled={saving}
+          />
+        )}
       <div className="grid grid-cols-2 gap-4">
         <Input
           name="amount"

@@ -18,12 +18,13 @@ fn payment_from_row(r: &Row) -> rusqlite::Result<Payment> {
         created_by: r.get("created_by")?,
         created_at: r.get("created_at")?,
         is_deleted: r.get::<_, i64>("is_deleted")? != 0,
+        sale_id: r.get("sale_id")?,
     })
 }
 
 const COLS: &str = "p.id, p.member_id, m.name AS member_name, p.amount, p.payment_method, \
      p.payment_type, p.status, p.reference, p.notes, p.payment_date, p.created_by, p.created_at, \
-     p.is_deleted";
+     p.is_deleted, p.sale_id";
 
 const JOIN: &str =
     "FROM payments p LEFT JOIN members m ON m.id = p.member_id WHERE p.is_deleted = 0";
@@ -34,8 +35,8 @@ pub fn insert(
     created_by: Option<i64>,
 ) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO payments (member_id, amount, payment_method, payment_type, status, reference, notes, payment_date, created_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(?8, CURRENT_TIMESTAMP), ?9)",
+        "INSERT INTO payments (member_id, amount, payment_method, payment_type, status, reference, notes, payment_date, created_by, sale_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(?8, CURRENT_TIMESTAMP), ?9, ?10)",
         params![
             input.member_id,
             input.amount,
@@ -46,6 +47,7 @@ pub fn insert(
             input.notes,
             input.payment_date,
             created_by,
+            input.sale_id,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -53,8 +55,8 @@ pub fn insert(
 
 pub fn update(conn: &Connection, id: i64, input: &CreatePaymentInput) -> Result<bool, AppError> {
     let affected = conn.execute(
-        "UPDATE payments SET member_id = ?2, amount = ?3, payment_method = ?4, payment_type = ?5, status = ?6, reference = ?7, notes = ?8, payment_date = COALESCE(?9, payment_date), updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0",
-        params![id, input.member_id, input.amount, input.payment_method, input.payment_type, input.status, input.reference, input.notes, input.payment_date],
+        "UPDATE payments SET member_id = ?2, amount = ?3, payment_method = ?4, payment_type = ?5, status = ?6, reference = ?7, notes = ?8, payment_date = COALESCE(?9, payment_date), sale_id = ?10, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0",
+        params![id, input.member_id, input.amount, input.payment_method, input.payment_type, input.status, input.reference, input.notes, input.payment_date, input.sale_id],
     )?;
     Ok(affected > 0)
 }
@@ -203,3 +205,45 @@ fn balance_from_row(r: &Row) -> rusqlite::Result<MemberBalance> {
 }
 
 use crate::utils;
+
+/// Returns sales for a member that still have an outstanding balance.
+pub fn unpaid_sales_for_member(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<Vec<(i64, String, f64, f64, String)>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.receipt_no, s.total_amount, s.paid_amount, s.created_at
+         FROM sales s
+         WHERE s.member_id = ?1 AND s.is_deleted = 0
+           AND (s.total_amount - s.paid_amount) > 0.001
+         ORDER BY s.created_at ASC",
+    )?;
+    let rows = stmt.query_map([member_id], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, f64>(2)?,
+            r.get::<_, f64>(3)?,
+            r.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/// Returns completed payments linked to a specific sale.
+pub fn list_by_sale(conn: &Connection, sale_id: i64) -> Result<Vec<Payment>, AppError> {
+    let sql = format!(
+        "SELECT {COLS} {JOIN} AND p.sale_id = ?1 ORDER BY p.payment_date ASC, p.id ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([sale_id], payment_from_row)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}

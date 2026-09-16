@@ -21,6 +21,8 @@ pub struct Payment {
     pub created_by: Option<i64>,
     pub created_at: String,
     pub is_deleted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sale_id: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -33,6 +35,7 @@ pub struct CreatePaymentInput {
     pub reference: Option<String>,
     pub notes: Option<String>,
     pub payment_date: Option<String>,
+    pub sale_id: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -47,4 +50,14 @@ pub struct MemberBalance {
     /// Outstanding balance = total_credit - total_paid.
     pub balance: f64,
     pub payment_count: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UnpaidSaleInfo {
+    pub id: i64,
+    pub receipt_no: String,
+    pub total_amount: f64,
+    pub paid_amount: f64,
+    pub due_amount: f64,
+    pub created_at: String,
 }

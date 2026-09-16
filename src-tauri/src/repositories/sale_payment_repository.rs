@@ -65,30 +65,3 @@ pub fn payments_for_sale(conn: &Connection, sale_id: i64) -> Result<Vec<SalePaym
     Ok(out)
 }
 
-/// Payment breakdown by method within the inclusive date range.
-/// Uses sale_payments for accurate per-method totals.
-pub fn payment_breakdown_by_method(
-    conn: &Connection,
-    from: &str,
-    to: &str,
-) -> Result<Vec<crate::models::report::PaymentBreakdown>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT sp.payment_method, SUM(sp.amount) AS total, COUNT(*) AS count
-         FROM sale_payments sp
-         JOIN sales s ON s.id = sp.sale_id
-         WHERE s.created_at >= date(?1) AND s.created_at < date(?2, '+1 day')
-         GROUP BY sp.payment_method ORDER BY total DESC",
-    )?;
-    let rows = stmt.query_map(params![from, to], |r| {
-        Ok(crate::models::report::PaymentBreakdown {
-            payment_method: r.get("payment_method")?,
-            total: r.get("total")?,
-            count: r.get("count")?,
-        })
-    })?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r?);
-    }
-    Ok(out)
-}

@@ -12,6 +12,7 @@ export interface Payment {
   created_by?: number | null;
   created_at: string;
   is_deleted: boolean;
+  sale_id?: number | null;
 }
 
 export interface CreatePaymentInput {
@@ -23,6 +24,7 @@ export interface CreatePaymentInput {
   reference?: string | null;
   notes?: string | null;
   payment_date?: string | null;
+  sale_id?: number | null;
 }
 
 export interface MemberBalance {
@@ -33,6 +35,15 @@ export interface MemberBalance {
   total_paid: number;
   balance: number;
   payment_count: number;
+}
+
+export interface UnpaidSaleInfo {
+  id: number;
+  receipt_no: string;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  created_at: string;
 }
 
 export const PAYMENT_METHODS = ["cash", "bank_transfer", "card", "other"] as const;

@@ -30,6 +30,7 @@ import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
 import type { Payment } from "../types/payment";
 import type { MemberBalance } from "../types/payment";
+import type { UnpaidSaleInfo } from "../types/payment";
 
 export function PaymentsPage() {
   const { payments, loading, error, load, add, remove, update } = usePaymentStore();
@@ -49,6 +50,8 @@ export function PaymentsPage() {
   const [dues, setDues] = useState<MemberBalance[]>([]);
   const [balances, setBalances] = useState<MemberBalance[]>([]);
   const [editPayment, setEditPayment] = useState<Payment | null>(null);
+  const [unpaidSales, setUnpaidSales] = useState<UnpaidSaleInfo[]>([]);
+  const [recordMemberId, setRecordMemberId] = useState<number | null>(null);
   const historyReq = useRef(0);
 
   useEffect(() => {
@@ -74,6 +77,17 @@ export function PaymentsPage() {
   }, [payments]);
 
   const totalOutstanding = dues.reduce((s, d) => s + d.balance, 0);
+
+  useEffect(() => {
+    if (!recordOpen || recordMemberId == null) {
+      setUnpaidSales([]);
+      return;
+    }
+    paymentService
+      .unpaidSalesForMember(recordMemberId)
+      .then(setUnpaidSales)
+      .catch(() => setUnpaidSales([]));
+  }, [recordOpen, recordMemberId]);
 
   const searchPayments = () => load(search);
 
@@ -393,16 +407,19 @@ export function PaymentsPage() {
         open={recordOpen}
         title="Record Payment"
         subtitle="Log a customer payment"
-        onClose={() => setRecordOpen(false)}
+        onClose={() => { setRecordOpen(false); setRecordMemberId(null); }}
         size="md"
       >
         <PaymentForm
           onSubmit={async (input) => {
             await add(input, user?.id ?? null);
             setRecordOpen(false);
+            setRecordMemberId(null);
           }}
-          onCancel={() => setRecordOpen(false)}
+          onCancel={() => { setRecordOpen(false); setRecordMemberId(null); }}
           members={members}
+          unpaidSales={unpaidSales}
+          onMemberChange={setRecordMemberId}
         />
       </Modal>
 

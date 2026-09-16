@@ -1144,6 +1144,20 @@ const MIGRATIONS: &[(&str, &str)] = &[
             ('pta_status', 'JV', 3);
         "#,
     ),
+
+    // =====================================================================
+    // 0024: Link due payments to specific sales — sale_id on payments.
+    //
+    // When a customer pays off a due from Customer Dues, the payment
+    // can now reference the original sale. The sale's paid_amount is
+    // updated so Sales History reflects the true payment status.
+    // =====================================================================
+    (
+        "0024_link_due_payments_to_sales",
+        r#"
+        ALTER TABLE payments ADD COLUMN sale_id INTEGER;
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {

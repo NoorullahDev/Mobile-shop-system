@@ -6,9 +6,11 @@ import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { StatusBadge } from "../components/StatusBadge";
 import * as saleService from "../services/saleService";
+import * as paymentService from "../services/paymentService";
 import { formatMoneyCompact, formatDateTime } from "../lib/format";
 import type { Sale } from "../types/sale";
 import type { ReturnItem } from "../types/return";
+import type { Payment } from "../types/payment";
 
 function returnStatusLabel(s?: string) {
   if (s === "full") return "Fully Returned";
@@ -28,16 +30,25 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
   const [sale, setSale] = useState<Sale | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [linkedPayments, setLinkedPayments] = useState<Payment[]>([]);
 
   useEffect(() => {
     if (!open || saleId == null) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setLinkedPayments([]);
     saleService
       .getSale(saleId)
       .then((full) => {
         if (!cancelled) setSale(full);
+        // Fetch linked due payments for this sale
+        if (!cancelled) {
+          paymentService
+            .listPaymentsForSale(saleId)
+            .then((pays) => { if (!cancelled) setLinkedPayments(pays); })
+            .catch(() => {});
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(String(e));
@@ -138,6 +149,37 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
               <div className="mt-2 flex justify-between border-t pt-2 text-[13px] font-semibold" style={{ borderColor: "#E2E8F0" }}>
                 <span style={{ color: "#334155" }}>Total Paid</span>
                 <span style={{ color: "#16A34A" }}>{formatMoneyCompact(sale.paid_amount)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Linked due payments */}
+          {linkedPayments.length > 0 && (
+            <div className="rounded p-3" style={{ background: "#F0FDF4", border: "1px solid #DCFCE7" }}>
+              <div className="mb-1 text-[12px] font-semibold uppercase tracking-wider" style={{ color: "#16A34A" }}>
+                Due Payments Applied ({linkedPayments.length})
+              </div>
+              <div className="flex flex-col gap-1">
+                {linkedPayments.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between text-[13px]">
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={p.payment_method} />
+                      <span style={{ color: "#64748B", fontSize: "11px" }}>
+                        {new Date(p.payment_date).toLocaleDateString("en-PK", { day: "numeric", month: "short", year: "numeric" })}
+                      </span>
+                      {p.reference && (
+                        <span className="font-mono text-[11px]" style={{ color: "#64748B" }}>Ref: {p.reference}</span>
+                      )}
+                    </div>
+                    <span className="font-semibold" style={{ color: "#16A34A" }}>{formatMoneyCompact(p.amount)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 flex justify-between border-t pt-2 text-[13px]" style={{ borderColor: "#DCFCE7" }}>
+                <span style={{ color: "#334155" }}>Total Due Paid</span>
+                <span className="font-semibold" style={{ color: "#16A34A" }}>
+                  {formatMoneyCompact(linkedPayments.reduce((s, p) => s + p.amount, 0))}
+                </span>
               </div>
             </div>
           )}

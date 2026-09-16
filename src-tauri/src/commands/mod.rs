@@ -12,7 +12,7 @@ use crate::models::inventory::{CreateSupplierInput, Supplier};
 use crate::models::license::{ActivateLicenseInput, LicenseStatus};
 use crate::models::member::{CreateMemberInput, Member};
 use crate::models::notification::{AppNotification, CreateNotificationInput, NotificationCount};
-use crate::models::payment::{CreatePaymentInput, MemberBalance, Payment};
+use crate::models::payment::{CreatePaymentInput, MemberBalance, Payment, UnpaidSaleInfo};
 use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
 use crate::models::product_category::{CreateProductCategoryInput, ProductCategory};
 use crate::models::purchase::{
@@ -553,6 +553,26 @@ pub fn list_customer_dues(
 ) -> Result<Vec<MemberBalance>, AppError> {
     let guard = authenticated_conn(&db, &session)?;
     payment_service::list_customer_dues(&guard, search)
+}
+
+#[tauri::command]
+pub fn unpaid_sales_for_member(
+    db: State<Database>,
+    session: State<SessionState>,
+    member_id: i64,
+) -> Result<Vec<UnpaidSaleInfo>, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    payment_service::unpaid_sales_for_member(&guard, member_id)
+}
+
+#[tauri::command]
+pub fn list_payments_for_sale(
+    db: State<Database>,
+    session: State<SessionState>,
+    sale_id: i64,
+) -> Result<Vec<Payment>, AppError> {
+    let guard = authenticated_conn(&db, &session)?;
+    payment_service::list_payments_for_sale(&guard, sale_id)
 }
 
 // ---- Suppliers ----

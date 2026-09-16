@@ -1,9 +1,10 @@
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 use crate::errors::AppError;
-use crate::models::payment::{CreatePaymentInput, MemberBalance, Payment};
+use crate::models::payment::{CreatePaymentInput, MemberBalance, Payment, UnpaidSaleInfo};
 use crate::repositories::{member_repository, payment_repository};
 use crate::services;
+use crate::utils;
 
 fn normalize_method(m: &str) -> String {
     let m = m.trim().to_lowercase();
@@ -47,8 +48,15 @@ pub fn create(
 ) -> Result<Payment, AppError> {
     let normalized = normalize_input(conn, input)?;
     let amount = normalized.amount;
+    let sale_id = normalized.sale_id;
 
     let id = payment_repository::insert(conn, &normalized, actor)?;
+
+    // If linked to a sale, update the sale's paid_amount
+    if let Some(sid) = sale_id {
+        update_sale_paid_amount(conn, sid)?;
+    }
+
     services::record_activity(conn, actor, "payment", "create", Some(id))?;
     services::notification_service::notify(
         conn,
@@ -90,6 +98,7 @@ fn normalize_input(conn: &Connection, input: CreatePaymentInput) -> Result<Creat
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty()),
         payment_date: input.payment_date,
+        sale_id: input.sale_id,
     })
 }
 
@@ -155,6 +164,66 @@ pub fn list_customer_dues(
     payment_repository::list_customer_dues(conn, search.as_deref())
 }
 
+/// Recalculate a sale's paid_amount from all completed payments linked to it,
+/// then update the sale row so Sales History reflects the true payment status.
+fn update_sale_paid_amount(conn: &Connection, sale_id: i64) -> Result<(), AppError> {
+    let total_from_payments: f64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments
+             WHERE sale_id = ?1 AND is_deleted = 0 AND status = 'completed'",
+            [sale_id],
+            |r| r.get(0),
+        )?;
+
+    let total_from_split: f64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM sale_payments WHERE sale_id = ?1",
+            [sale_id],
+            |r| r.get(0),
+        )?;
+
+    // paid_amount = original split payments + linked due payments, capped at total_amount
+    let total_amount: f64 = conn
+        .query_row(
+            "SELECT total_amount FROM sales WHERE id = ?1",
+            [sale_id],
+            |r| r.get(0),
+        )?;
+
+    let new_paid = utils::round2((total_from_split + total_from_payments).min(total_amount));
+
+    conn.execute(
+        "UPDATE sales SET paid_amount = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![new_paid, sale_id],
+    )?;
+    Ok(())
+}
+
+pub fn unpaid_sales_for_member(
+    conn: &Connection,
+    member_id: i64,
+) -> Result<Vec<UnpaidSaleInfo>, AppError> {
+    let rows = payment_repository::unpaid_sales_for_member(conn, member_id)?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, receipt_no, total_amount, paid_amount, created_at)| UnpaidSaleInfo {
+            id,
+            receipt_no,
+            total_amount,
+            paid_amount,
+            due_amount: utils::round2(total_amount - paid_amount),
+            created_at,
+        })
+        .collect())
+}
+
+pub fn list_payments_for_sale(
+    conn: &Connection,
+    sale_id: i64,
+) -> Result<Vec<Payment>, AppError> {
+    payment_repository::list_by_sale(conn, sale_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,6 +254,7 @@ mod tests {
             reference: Some("REF-1".into()),
             notes: None,
             payment_date: None,
+            sale_id: None,
         }
     }
 
