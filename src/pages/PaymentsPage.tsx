@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Plus,
   Search,
   Wallet,
-  Trash2,
   History,
   Users,
   CircleDollarSign,
   X,
-  Pencil,
   MessageCircle,
   Banknote,
 } from "lucide-react";
@@ -16,14 +13,12 @@ import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
-import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Button";
 import { StatusBadge } from "../components/StatusBadge";
 import { KpiCard } from "../components/KpiCard";
 import { Input } from "../components/Input";
 import { Select } from "../components/Select";
-import { PaymentForm } from "./PaymentForm";
 import { usePaymentStore } from "../store/payments";
 import { useMemberStore } from "../store/members";
 import * as paymentService from "../services/paymentService";
@@ -37,25 +32,18 @@ import type { MemberBalance } from "../types/payment";
 import type { UnpaidSaleInfo } from "../types/payment";
 
 export function PaymentsPage() {
-  const { payments, loading, error, load, add, remove, update } = usePaymentStore();
+  const { add } = usePaymentStore();
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
   const businessName = useSettingsStore((s) => s.businessName);
   const whatsappTemplate = useSettingsStore((s) => s.whatsappTemplate);
-  const isAdmin = user?.role.toLowerCase() === "admin";
-  
+
   const [duesSearch, setDuesSearch] = useState("");
-  const [recordOpen, setRecordOpen] = useState(false);
+  const [dues, setDues] = useState<MemberBalance[]>([]);
   const [historyFor, setHistoryFor] = useState<number | null>(null);
   const [history, setHistory] = useState<Payment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [memberTotal, setMemberTotal] = useState(0);
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
-  const [dues, setDues] = useState<MemberBalance[]>([]);
-  const [balances, setBalances] = useState<MemberBalance[]>([]);
-  const [editPayment, setEditPayment] = useState<Payment | null>(null);
-  const [unpaidSales, setUnpaidSales] = useState<UnpaidSaleInfo[]>([]);
-  const [recordMemberId, setRecordMemberId] = useState<number | null>(null);
   const [payMemberId, setPayMemberId] = useState<number | null>(null);
   const [payMemberName, setPayMemberName] = useState("");
   const [payDueBalance, setPayDueBalance] = useState(0);
@@ -68,20 +56,16 @@ export function PaymentsPage() {
   const historyReq = useRef(0);
 
   useEffect(() => {
-    load();
     loadMembers();
-  }, [load, loadMembers]);
+  }, [loadMembers]);
 
   useEffect(() => {
     let active = true;
     paymentService.listCustomerDues().then((dueRows) => {
       if (active) setDues(dueRows);
     }).catch(() => {});
-    paymentService.listMemberBalances().then((balanceRows) => {
-      if (active) setBalances(balanceRows);
-    }).catch(() => {});
     return () => { active = false; };
-  }, [payments]);
+  }, []);
 
   const searchDues = async (q: string) => {
     setDuesSearch(q);
@@ -121,7 +105,6 @@ export function PaymentsPage() {
         user?.id ?? null,
       );
       setPayMemberId(null);
-      // Refresh dues list
       const rows = await paymentService.listCustomerDues(duesSearch || undefined);
       setDues(rows);
     } catch (err) {
@@ -132,17 +115,7 @@ export function PaymentsPage() {
   };
 
   const totalOutstanding = dues.reduce((s, d) => s + d.balance, 0);
-
-  useEffect(() => {
-    if (!recordOpen || recordMemberId == null) {
-      setUnpaidSales([]);
-      return;
-    }
-    paymentService
-      .unpaidSalesForMember(recordMemberId)
-      .then(setUnpaidSales)
-      .catch(() => setUnpaidSales([]));
-  }, [recordOpen, recordMemberId]);
+  const totalPaymentsReceived = dues.reduce((s, d) => s + d.payment_count, 0);
 
   useEffect(() => {
     if (payMemberId == null) {
@@ -153,7 +126,6 @@ export function PaymentsPage() {
       .unpaidSalesForMember(payMemberId)
       .then((rows) => {
         setPayUnpaidSales(rows);
-        // Auto-select the first unpaid sale
         if (rows.length > 0) {
           setPaySaleId(rows[0].id);
           setPayAmount(String(rows[0].due_amount));
@@ -182,42 +154,20 @@ export function PaymentsPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (confirmDelete === null) return;
-    await remove(confirmDelete);
-    setConfirmDelete(null);
-    if (historyFor != null) await openHistory(historyFor);
-  };
-
-  const isCleared = (payment: Payment) => payment.member_id != null
-    && (balances.find((balance) => balance.member_id === payment.member_id)?.balance ?? Number.POSITIVE_INFINITY) <= 0.001;
-
   const historyMember = members.find((m) => m.id === historyFor);
 
   return (
     <div>
       <PageHeader
-        title="Customer Dues & Payments"
-        description="Record and track customer payments and balances"
-        breadcrumb={[{ label: "Customers" }, { label: "Payments" }]}
-        meta={`${payments.length} transactions`}
-        actions={
-          <Button onClick={() => setRecordOpen(true)} icon={<Plus className="h-3.5 w-3.5" />}>
-            Record Payment
-          </Button>
-        }
+        title="Customer Dues"
+        description="Track and collect outstanding customer balances"
+        breadcrumb={[{ label: "Customers" }, { label: "Customer Dues" }]}
       />
 
-      {error && (
-        <div className="mb-4">
-          <Alert message={error} variant="error" />
-        </div>
-      )}
-
       {/* KPI Summary Cards */}
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard
-          title="Total Customer Outstanding"
+          title="Total Outstanding"
           value={formatMoney(totalOutstanding)}
           icon={CircleDollarSign}
           tone="amber"
@@ -231,18 +181,11 @@ export function PaymentsPage() {
           sub={`${dues.length} active`}
         />
         <KpiCard
-          title="Payments Received"
-          value={String(payments.length)}
+          title="Due Payments Received"
+          value={String(totalPaymentsReceived)}
           icon={Wallet}
           tone="green"
-          sub="all recorded"
-        />
-        <KpiCard
-          title="Recorded Transactions"
-          value={String(payments.length)}
-          icon={History}
-          tone="primary"
-          sub="in history"
+          sub="collected so far"
         />
       </div>
 
@@ -373,142 +316,6 @@ export function PaymentsPage() {
         )}
       </Card>
 
-      <Card noPadding>
-        {/* Table / States */}
-        {loading ? (
-          <div
-            className="flex items-center justify-center gap-2 py-16"
-            style={{ color: "#64748B" }}
-          >
-            <Spinner className="h-5 w-5" />
-            <span className="text-[13px]">Loading payments...</span>
-          </div>
-        ) : payments.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              icon={Wallet}
-              title="No payments recorded"
-              description="Record your first customer payment."
-              action={
-                <Button
-                  onClick={() => setRecordOpen(true)}
-                  icon={<Plus className="h-3.5 w-3.5" />}
-                >
-                  Record Payment
-                </Button>
-              }
-            />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Customer</th>
-                  <th className="text-right">Amount</th>
-                  <th>Method</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th className="text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments.map((p, idx) => (
-                  <tr key={p.id}>
-                    <td style={{ color: "#94A3B8", fontSize: "12px" }}>
-                      {idx + 1}
-                    </td>
-                    <td>
-                      <span className="font-semibold" style={{ fontSize: "13px", color: "#0F172A" }}>
-                        {p.member_name ?? (
-                          <span style={{ color: "#94A3B8", fontStyle: "italic" }}>
-                            Walk-in
-                          </span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="text-right">
-                      <span className="amount font-semibold text-[13px]" style={{ color: "#16A34A" }}>
-                        {formatMoneyCompact(p.amount)}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={{ color: "#475569", fontSize: "13px" }}>
-                        {methodLabels[p.payment_method] ?? p.payment_method}
-                      </span>
-                    </td>
-                    <td>
-                      <StatusBadge status={p.status} />
-                    </td>
-                    <td style={{ color: "#64748B", fontSize: "12px" }}>
-                      {new Date(p.payment_date).toLocaleDateString("en-PK", {
-                        day: "numeric", month: "short", year: "numeric",
-                      })}
-                    </td>
-                    <td>
-                      <div className="flex items-center justify-end gap-1">
-                        {p.member_id != null && (
-                          <button
-                            type="button"
-                            onClick={() => openHistory(p.member_id!)}
-                            className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50"
-                            style={{ color: "#3B6FD4" }}
-                            title="View history"
-                          >
-                            <History className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        <button type="button" onClick={() => setEditPayment(p)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit payment"><Pencil className="h-3.5 w-3.5" /></button>
-                        {isAdmin && isCleared(p) && (
-                          <button type="button" onClick={() => setConfirmDelete(p.id)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50" style={{ color: "#DC2626" }} title="Delete cleared payment"><Trash2 className="h-3.5 w-3.5" /></button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {/* Record Modal */}
-      <Modal
-        open={recordOpen}
-        title="Record Payment"
-        subtitle="Log a customer payment"
-        onClose={() => { setRecordOpen(false); setRecordMemberId(null); }}
-        size="md"
-      >
-        <PaymentForm
-          onSubmit={async (input) => {
-            await add(input, user?.id ?? null);
-            setRecordOpen(false);
-            setRecordMemberId(null);
-          }}
-          onCancel={() => { setRecordOpen(false); setRecordMemberId(null); }}
-          members={members}
-          unpaidSales={unpaidSales}
-          onMemberChange={setRecordMemberId}
-        />
-      </Modal>
-
-      <Modal open={editPayment !== null} title="Edit Customer Payment" subtitle="Correct this due/payment transaction" onClose={() => setEditPayment(null)} size="md">
-        {editPayment && (
-          <PaymentForm
-            key={editPayment.id}
-            initialPayment={editPayment}
-            onSubmit={async (input) => {
-              await update(editPayment.id, input, user?.id ?? null);
-              setEditPayment(null);
-            }}
-            onCancel={() => setEditPayment(null)}
-            members={members}
-          />
-        )}
-      </Modal>
-
       {/* History Modal */}
       <Modal
         open={historyFor !== null}
@@ -561,8 +368,6 @@ export function PaymentsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusBadge status={p.status} />
-                      <button type="button" onClick={() => { setHistoryFor(null); setEditPayment(p); }} className="flex h-7 w-7 items-center justify-center rounded hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit payment"><Pencil className="h-3.5 w-3.5" /></button>
-                      {isAdmin && isCleared(p) && <button type="button" onClick={() => setConfirmDelete(p.id)} className="flex h-7 w-7 items-center justify-center rounded hover:bg-red-50" style={{ color: "#DC2626" }} title="Delete cleared payment"><Trash2 className="h-3.5 w-3.5" /></button>}
                     </div>
                   </div>
                 ))}
@@ -633,29 +438,6 @@ export function PaymentsPage() {
             </Button>
           </div>
         </div>
-      </Modal>
-
-      {/* Delete Confirmation Modal */}
-      <Modal
-        open={confirmDelete !== null}
-        title="Delete Payment"
-        onClose={() => setConfirmDelete(null)}
-        size="sm"
-        footer={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(null)}>
-              Cancel
-            </Button>
-            <Button variant="danger" size="sm" onClick={handleDelete}>
-              Delete
-            </Button>
-          </>
-        }
-      >
-        <Alert
-          variant="warning"
-          message="Delete this cleared payment record? The customer balance will be recalculated and any reopened due will appear again. This cannot be undone."
-        />
       </Modal>
     </div>
   );
