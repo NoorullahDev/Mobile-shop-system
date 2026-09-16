@@ -104,7 +104,7 @@ export const PrintReport = memo(function PrintReport({
   const deductionTotal = returns.reduce((sum, item) => sum + item.deduction_amount, 0);
 
   return (
-    <article className="print-report report-print-document">
+    <article id="report-print-area" className="print-report report-print-document">
       <header className="report-print-header">
         <div className="report-print-brand">
           {logo && <img src={logo} alt="" />}

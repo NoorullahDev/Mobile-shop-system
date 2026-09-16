@@ -196,3 +196,75 @@ export function printA4InvoiceViaDialog(data: ReceiptData): void {
   // Small delay to ensure content is rendered in the iframe
   setTimeout(triggerPrint, 300);
 }
+
+/**
+ * Prints a DOM element using the printer-v2 plugin.
+ * Sends HTML directly to the printer via WebView2 PrintAsync —
+ * no browser print dialog, no Chromium headers/footers.
+ */
+export async function printElementViaPlugin(elementId: string): Promise<void> {
+  const el = document.getElementById(elementId);
+  if (!el) {
+    throw new Error("Report element not found");
+  }
+
+  // Capture all stylesheet text from the document
+  const styleTexts: string[] = [];
+  for (const sheet of document.styleSheets) {
+    try {
+      for (const rule of sheet.cssRules) {
+        styleTexts.push(rule.cssText);
+      }
+    } catch {
+      // Cross-origin stylesheets — skip
+    }
+  }
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<title>Report - Print</title>
+<style>
+${styleTexts.join("\n")}
+@page { size: A4 portrait; margin: 10mm; }
+* { box-sizing: border-box; }
+html, body { width: 210mm; background: #fff; margin: 0; padding: 0; }
+body { font-family: Inter, "Segoe UI", Arial, sans-serif; }
+body.printing,
+body.printing #root,
+body.printing .app-shell,
+body.printing .app-main,
+body.printing .app-content {
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  background: #fff !important;
+}
+body.printing .app-shell > aside,
+body.printing .app-main > header,
+body.printing .app-main > div,
+body.printing .app-content > div > :not(.print-report) {
+  display: none !important;
+}
+body.printing .app-content {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+</style>
+</head>
+<body class="printing">
+${el.outerHTML}
+</body></html>`;
+
+  await printHtml({
+    html,
+    printerId: undefined,
+    pageWidth: 210,
+    pageHeight: 297,
+    orientation: "portrait",
+    margin: { top: 10, right: 10, bottom: 10, left: 10, unit: "mm" },
+    copies: 1,
+    grayscale: false,
+  });
+}
