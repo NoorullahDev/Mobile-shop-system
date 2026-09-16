@@ -10,6 +10,7 @@ import {
   X,
   Pencil,
   MessageCircle,
+  Banknote,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -20,6 +21,8 @@ import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Button";
 import { StatusBadge } from "../components/StatusBadge";
 import { KpiCard } from "../components/KpiCard";
+import { Input } from "../components/Input";
+import { Select } from "../components/Select";
 import { PaymentForm } from "./PaymentForm";
 import { usePaymentStore } from "../store/payments";
 import { useMemberStore } from "../store/members";
@@ -28,6 +31,7 @@ import { useSessionStore } from "../store/session";
 import { formatMoney, formatMoneyCompact, methodLabels } from "../lib/format";
 import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
+import { PAYMENT_METHODS } from "../types/payment";
 import type { Payment } from "../types/payment";
 import type { MemberBalance } from "../types/payment";
 import type { UnpaidSaleInfo } from "../types/payment";
@@ -52,6 +56,15 @@ export function PaymentsPage() {
   const [editPayment, setEditPayment] = useState<Payment | null>(null);
   const [unpaidSales, setUnpaidSales] = useState<UnpaidSaleInfo[]>([]);
   const [recordMemberId, setRecordMemberId] = useState<number | null>(null);
+  const [payMemberId, setPayMemberId] = useState<number | null>(null);
+  const [payMemberName, setPayMemberName] = useState("");
+  const [payDueBalance, setPayDueBalance] = useState(0);
+  const [payUnpaidSales, setPayUnpaidSales] = useState<UnpaidSaleInfo[]>([]);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState("cash");
+  const [paySaleId, setPaySaleId] = useState<number | null>(null);
+  const [paySaving, setPaySaving] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
   const historyReq = useRef(0);
 
   useEffect(() => {
@@ -78,6 +91,46 @@ export function PaymentsPage() {
     } catch { /* ignore */ }
   };
 
+  const openQuickPay = (memberId: number, name: string, balance: number) => {
+    setPayMemberId(memberId);
+    setPayMemberName(name);
+    setPayDueBalance(balance);
+    setPayAmount(String(Math.floor(balance)));
+    setPayMethod("cash");
+    setPayError(null);
+  };
+
+  const submitQuickPay = async () => {
+    if (payMemberId == null) return;
+    const amount = Number(payAmount);
+    if (!amount || amount <= 0) {
+      setPayError("Amount must be greater than zero");
+      return;
+    }
+    setPaySaving(true);
+    setPayError(null);
+    try {
+      await add(
+        {
+          member_id: payMemberId,
+          amount,
+          payment_method: payMethod,
+          status: "completed",
+          sale_id: paySaleId,
+        },
+        user?.id ?? null,
+      );
+      setPayMemberId(null);
+      // Refresh dues list
+      const rows = await paymentService.listCustomerDues(duesSearch || undefined);
+      setDues(rows);
+    } catch (err) {
+      setPayError(String(err));
+    } finally {
+      setPaySaving(false);
+    }
+  };
+
   const totalOutstanding = dues.reduce((s, d) => s + d.balance, 0);
 
   useEffect(() => {
@@ -90,6 +143,26 @@ export function PaymentsPage() {
       .then(setUnpaidSales)
       .catch(() => setUnpaidSales([]));
   }, [recordOpen, recordMemberId]);
+
+  useEffect(() => {
+    if (payMemberId == null) {
+      setPayUnpaidSales([]);
+      return;
+    }
+    paymentService
+      .unpaidSalesForMember(payMemberId)
+      .then((rows) => {
+        setPayUnpaidSales(rows);
+        // Auto-select the first unpaid sale
+        if (rows.length > 0) {
+          setPaySaleId(rows[0].id);
+          setPayAmount(String(rows[0].due_amount));
+        } else {
+          setPaySaleId(null);
+        }
+      })
+      .catch(() => setPayUnpaidSales([]));
+  }, [payMemberId]);
 
   const openHistory = async (memberId: number) => {
     const req = ++historyReq.current;
@@ -274,6 +347,16 @@ export function PaymentsPage() {
                         <MessageCircle className="h-3.5 w-3.5" />
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => openQuickPay(d.member_id, d.member_name, d.balance)}
+                      className="flex h-7 items-center gap-1.5 rounded px-2.5 text-[12px] font-medium text-white transition-colors hover:opacity-90"
+                      style={{ background: "#16A34A" }}
+                      title={`Pay Rs. ${formatMoneyCompact(d.balance)} due`}
+                    >
+                      <Banknote className="h-3.5 w-3.5" />
+                      Pay
+                    </button>
                     <div className="text-right">
                       <div className="amount font-bold text-[14px]" style={{ color: "#B45309" }}>
                         {formatMoneyCompact(d.balance)}
@@ -487,6 +570,69 @@ export function PaymentsPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Quick Pay Modal */}
+      <Modal
+        open={payMemberId !== null}
+        title={`Pay — ${payMemberName}`}
+        subtitle={`Due: ${formatMoneyCompact(payDueBalance)}`}
+        onClose={() => setPayMemberId(null)}
+        size="sm"
+      >
+        <div className="flex flex-col gap-4">
+          {payError && <Alert message={payError} />}
+
+          {payUnpaidSales.length > 0 && (
+            <Select
+              name="pay_sale_id"
+              label="Apply to Invoice"
+              options={payUnpaidSales.map((s) => ({
+                value: String(s.id),
+                label: `${s.receipt_no} — Due: Rs. ${s.due_amount.toLocaleString()}`,
+              }))}
+              value={paySaleId != null ? String(paySaleId) : ""}
+              onChange={(e) => {
+                const sid = e.target.value ? Number(e.target.value) : null;
+                setPaySaleId(sid);
+                const sale = payUnpaidSales.find((s) => s.id === sid);
+                if (sale) setPayAmount(String(sale.due_amount));
+              }}
+              disabled={paySaving}
+            />
+          )}
+
+          <Input
+            name="pay_amount"
+            label="Amount"
+            type="number"
+            step="0.01"
+            min="0"
+            max={payDueBalance}
+            required
+            value={payAmount}
+            onChange={(e) => setPayAmount(e.target.value)}
+            disabled={paySaving}
+          />
+
+          <Select
+            name="pay_method"
+            label="Payment Method"
+            options={PAYMENT_METHODS.map((m) => ({ value: m, label: methodLabels[m] ?? m }))}
+            value={payMethod}
+            onChange={(e) => setPayMethod(e.target.value)}
+            disabled={paySaving}
+          />
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPayMemberId(null)} disabled={paySaving}>
+              Cancel
+            </Button>
+            <Button onClick={submitQuickPay} loading={paySaving} icon={<Banknote className="h-3.5 w-3.5" />}>
+              Record Payment
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* Delete Confirmation Modal */}
