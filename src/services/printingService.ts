@@ -225,7 +225,7 @@ export function printReportViaDialog(elementId: string): void {
 <title>Report - Print</title>
 <style>
 ${styleTexts.join("\n")}
-@page { size: A4 portrait; margin: 10mm; }
+@page { size: A4 portrait; margin: 0; }
 * { box-sizing: border-box; }
 html, body { width: 210mm; background: #fff; margin: 0; padding: 0; }
 body { font-family: Inter, "Segoe UI", Arial, sans-serif; }

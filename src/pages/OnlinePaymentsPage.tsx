@@ -13,7 +13,7 @@ import { Card } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
 import { EmptyState } from "../components/EmptyState";
 import { Spinner } from "../components/Button";
-import { formatDate, formatMoney, methodLabels } from "../lib/format";
+import { formatDateTime, formatMoney, methodLabels } from "../lib/format";
 import { getOnlinePaymentRecords } from "../services/reportService";
 import type { OnlinePaymentRecord } from "../types/report";
 
@@ -92,6 +92,7 @@ export function OnlinePaymentsPage() {
         r.receipt_no.toLowerCase().includes(q) ||
         (r.customer_name ?? "").toLowerCase().includes(q) ||
         (r.reference ?? "").toLowerCase().includes(q) ||
+        (r.account_details ?? "").toLowerCase().includes(q) ||
         (r.notes ?? "").toLowerCase().includes(q);
       if (!match) return false;
     }
@@ -244,7 +245,7 @@ export function OnlinePaymentsPage() {
               <tbody>
                 {filtered.map((r) => (
                   <tr key={r.id}>
-                    <td>{formatDate(r.created_at)}</td>
+                    <td>{formatDateTime(r.created_at)}</td>
                     <td className="font-semibold">{r.receipt_no}</td>
                     <td>{r.customer_name ?? "Walk-in"}</td>
                     <td>
@@ -262,7 +263,7 @@ export function OnlinePaymentsPage() {
                     <td className="text-right amount font-semibold" style={{ color: "#16A34A" }}>
                       {formatMoney(r.amount)}
                     </td>
-                    <td>{r.notes ?? "—"}</td>
+                    <td>{r.account_details ?? "—"}</td>
                     <td>{r.reference ?? "—"}</td>
                   </tr>
                 ))}

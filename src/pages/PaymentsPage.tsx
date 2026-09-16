@@ -28,8 +28,7 @@ import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
 import { PAYMENT_METHODS } from "../types/payment";
 import type { Payment } from "../types/payment";
-import type { MemberBalance } from "../types/payment";
-import type { UnpaidSaleInfo } from "../types/payment";
+import type { CustomerDueInvoice } from "../types/payment";
 
 export function PaymentsPage() {
   const { add } = usePaymentStore();
@@ -39,7 +38,7 @@ export function PaymentsPage() {
   const whatsappTemplate = useSettingsStore((s) => s.whatsappTemplate);
 
   const [duesSearch, setDuesSearch] = useState("");
-  const [dues, setDues] = useState<MemberBalance[]>([]);
+  const [dueInvoices, setDueInvoices] = useState<CustomerDueInvoice[]>([]);
   const [historyFor, setHistoryFor] = useState<number | null>(null);
   const [history, setHistory] = useState<Payment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -47,9 +46,12 @@ export function PaymentsPage() {
   const [payMemberId, setPayMemberId] = useState<number | null>(null);
   const [payMemberName, setPayMemberName] = useState("");
   const [payDueBalance, setPayDueBalance] = useState(0);
-  const [payUnpaidSales, setPayUnpaidSales] = useState<UnpaidSaleInfo[]>([]);
+  const [payReceiptNo, setPayReceiptNo] = useState("");
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("cash");
+  const [payReference, setPayReference] = useState("");
+  const [payAccountDetails, setPayAccountDetails] = useState("");
+  const [payNote, setPayNote] = useState("");
   const [paySaleId, setPaySaleId] = useState<number | null>(null);
   const [paySaving, setPaySaving] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
@@ -61,8 +63,8 @@ export function PaymentsPage() {
 
   useEffect(() => {
     let active = true;
-    paymentService.listCustomerDues().then((dueRows) => {
-      if (active) setDues(dueRows);
+    paymentService.listCustomerDueInvoices().then((rows) => {
+      if (active) setDueInvoices(rows);
     }).catch(() => {});
     return () => { active = false; };
   }, []);
@@ -70,25 +72,43 @@ export function PaymentsPage() {
   const searchDues = async (q: string) => {
     setDuesSearch(q);
     try {
-      const rows = await paymentService.listCustomerDues(q || undefined);
-      setDues(rows);
+      const rows = await paymentService.listCustomerDueInvoices(q || undefined);
+      setDueInvoices(rows);
     } catch { /* ignore */ }
   };
 
-  const openQuickPay = (memberId: number, name: string, balance: number) => {
-    setPayMemberId(memberId);
-    setPayMemberName(name);
-    setPayDueBalance(balance);
-    setPayAmount(String(Math.floor(balance)));
+  const openQuickPay = (invoice: CustomerDueInvoice) => {
+    setPayMemberId(invoice.member_id);
+    setPayMemberName(invoice.member_name);
+    setPayReceiptNo(invoice.receipt_no);
+    setPaySaleId(invoice.sale_id);
+    setPayDueBalance(invoice.due_amount);
+    setPayAmount(String(invoice.due_amount));
     setPayMethod("cash");
+    setPayReference("");
+    setPayAccountDetails("");
+    setPayNote("");
     setPayError(null);
   };
 
   const submitQuickPay = async () => {
-    if (payMemberId == null) return;
+    if (payMemberId == null || paySaleId == null) return;
     const amount = Number(payAmount);
     if (!amount || amount <= 0) {
       setPayError("Amount must be greater than zero");
+      return;
+    }
+    if (amount > payDueBalance + 0.005) {
+      setPayError(`Amount cannot exceed the remaining due of ${formatMoneyCompact(payDueBalance)}`);
+      return;
+    }
+    const isOnlinePayment = payMethod !== "cash";
+    if (isOnlinePayment && !payReference.trim()) {
+      setPayError("Reference / Transaction ID is required for online payments");
+      return;
+    }
+    if (payMethod === "bank_transfer" && !payAccountDetails.trim()) {
+      setPayError("Bank / Account details are required for bank transfers");
       return;
     }
     setPaySaving(true);
@@ -101,12 +121,15 @@ export function PaymentsPage() {
           payment_method: payMethod,
           status: "completed",
           sale_id: paySaleId,
+          reference: isOnlinePayment ? payReference.trim() : null,
+          account_details: isOnlinePayment ? payAccountDetails.trim() || null : null,
+          notes: isOnlinePayment ? payNote.trim() || null : null,
         },
         user?.id ?? null,
       );
       setPayMemberId(null);
-      const rows = await paymentService.listCustomerDues(duesSearch || undefined);
-      setDues(rows);
+      const rows = await paymentService.listCustomerDueInvoices(duesSearch || undefined);
+      setDueInvoices(rows);
     } catch (err) {
       setPayError(String(err));
     } finally {
@@ -114,27 +137,9 @@ export function PaymentsPage() {
     }
   };
 
-  const totalOutstanding = dues.reduce((s, d) => s + d.balance, 0);
-  const totalPaymentsReceived = dues.reduce((s, d) => s + d.payment_count, 0);
-
-  useEffect(() => {
-    if (payMemberId == null) {
-      setPayUnpaidSales([]);
-      return;
-    }
-    paymentService
-      .unpaidSalesForMember(payMemberId)
-      .then((rows) => {
-        setPayUnpaidSales(rows);
-        if (rows.length > 0) {
-          setPaySaleId(rows[0].id);
-          setPayAmount(String(rows[0].due_amount));
-        } else {
-          setPaySaleId(null);
-        }
-      })
-      .catch(() => setPayUnpaidSales([]));
-  }, [payMemberId]);
+  const totalOutstanding = dueInvoices.reduce((sum, invoice) => sum + invoice.due_amount, 0);
+  const customersOwing = new Set(dueInvoices.map((invoice) => invoice.member_id)).size;
+  const totalPaymentsReceived = dueInvoices.reduce((sum, invoice) => sum + invoice.payment_count, 0);
 
   const openHistory = async (memberId: number) => {
     const req = ++historyReq.current;
@@ -175,10 +180,10 @@ export function PaymentsPage() {
         />
         <KpiCard
           title="Customers Owing"
-          value={String(dues.length)}
+          value={String(customersOwing)}
           icon={Users}
           tone="red"
-          sub={`${dues.length} active`}
+          sub={`${customersOwing} active`}
         />
         <KpiCard
           title="Due Payments Received"
@@ -204,7 +209,7 @@ export function PaymentsPage() {
               className="rounded-full px-2 py-0.5 text-[11px] font-medium"
               style={{ background: "#FEF3C7", color: "#B45309" }}
             >
-              {dues.length} owing
+              {dueInvoices.length} invoice{dueInvoices.length !== 1 ? "s" : ""}
             </span>
           </div>
         </div>
@@ -219,7 +224,7 @@ export function PaymentsPage() {
             <input
               className="h-9 w-full rounded border bg-white pl-9 pr-8 text-[13px] outline-none transition-all placeholder:text-[#94A3B8]"
               style={{ borderColor: "#CBD5E1", color: "#0F172A" }}
-              placeholder="Search by customer name or phone..."
+              placeholder="Search customer, phone, or invoice..."
               value={duesSearch}
               onChange={(e) => searchDues(e.target.value)}
               onFocus={(e) => {
@@ -244,16 +249,16 @@ export function PaymentsPage() {
           </div>
         </div>
 
-        {dues.length === 0 ? (
+        {dueInvoices.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px]" style={{ color: "#64748B" }}>
             {duesSearch ? "No customers match your search." : "No outstanding customer dues. All balances are clear."}
           </p>
         ) : (
           <div className="max-h-72 overflow-y-auto p-3">
             <div className="flex flex-col gap-2">
-              {dues.map((d) => (
+              {dueInvoices.map((d) => (
                 <div
-                  key={d.member_id}
+                  key={d.sale_id}
                   className="flex items-center justify-between rounded-md p-2.5 transition-colors"
                   style={{ border: "1px solid #E2E8F0", background: "#F8FAFC" }}
                 >
@@ -269,11 +274,25 @@ export function PaymentsPage() {
                       <History className="h-3.5 w-3.5 shrink-0" style={{ color: "#94A3B8" }} />
                     </div>
                     <div className="truncate text-[11px]" style={{ color: "#64748B" }}>
-                      {d.phone ?? "—"} · {d.payment_count} payment{d.payment_count !== 1 ? "s" : ""}
+                      {d.phone ?? "—"} · {d.receipt_no} · {new Date(d.created_at).toLocaleDateString("en-PK")}
                     </div>
                   </button>
+                  <div className="mx-4 hidden grid-cols-3 gap-5 text-right sm:grid">
+                    <div>
+                      <div className="text-[10px] uppercase" style={{ color: "#94A3B8" }}>Original Total</div>
+                      <div className="amount text-[12px] font-semibold">{formatMoneyCompact(d.total_amount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase" style={{ color: "#94A3B8" }}>Paid</div>
+                      <div className="amount text-[12px] font-semibold" style={{ color: "#16A34A" }}>{formatMoneyCompact(d.paid_amount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase" style={{ color: "#94A3B8" }}>Remaining Due</div>
+                      <div className="amount text-[12px] font-semibold" style={{ color: "#B45309" }}>{formatMoneyCompact(d.due_amount)}</div>
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {d.phone && d.balance > 0 && (
+                    {d.phone && d.due_amount > 0 && (
                       <button
                         type="button"
                         onClick={async () => {
@@ -281,7 +300,7 @@ export function PaymentsPage() {
                             alert("Customer phone number is invalid or missing. Please update the phone number to send a WhatsApp reminder.");
                             return;
                           }
-                            await openDuesReminder(d.phone, d.balance, businessName || undefined, whatsappTemplate || undefined, d.member_name || undefined);
+                            await openDuesReminder(d.phone, d.due_amount, businessName || undefined, whatsappTemplate || undefined, d.member_name || undefined);
                         }}
                         className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
                         style={{ color: "#25D366" }}
@@ -292,17 +311,17 @@ export function PaymentsPage() {
                     )}
                     <button
                       type="button"
-                      onClick={() => openQuickPay(d.member_id, d.member_name, d.balance)}
+                      onClick={() => openQuickPay(d)}
                       className="flex h-7 items-center gap-1.5 rounded px-2.5 text-[12px] font-medium text-white transition-colors hover:opacity-90"
                       style={{ background: "#16A34A" }}
-                      title={`Pay Rs. ${formatMoneyCompact(d.balance)} due`}
+                      title={`Pay ${formatMoneyCompact(d.due_amount)} on ${d.receipt_no}`}
                     >
                       <Banknote className="h-3.5 w-3.5" />
                       Pay
                     </button>
                     <div className="text-right">
                       <div className="amount font-bold text-[14px]" style={{ color: "#B45309" }}>
-                        {formatMoneyCompact(d.balance)}
+                        {formatMoneyCompact(d.due_amount)}
                       </div>
                       <div className="text-[10px]" style={{ color: "#94A3B8" }}>
                         due balance
@@ -381,31 +400,12 @@ export function PaymentsPage() {
       <Modal
         open={payMemberId !== null}
         title={`Pay — ${payMemberName}`}
-        subtitle={`Due: ${formatMoneyCompact(payDueBalance)}`}
+        subtitle={`${payReceiptNo} · Due: ${formatMoneyCompact(payDueBalance)}`}
         onClose={() => setPayMemberId(null)}
         size="sm"
       >
         <div className="flex flex-col gap-4">
           {payError && <Alert message={payError} />}
-
-          {payUnpaidSales.length > 0 && (
-            <Select
-              name="pay_sale_id"
-              label="Apply to Invoice"
-              options={payUnpaidSales.map((s) => ({
-                value: String(s.id),
-                label: `${s.receipt_no} — Due: Rs. ${s.due_amount.toLocaleString()}`,
-              }))}
-              value={paySaleId != null ? String(paySaleId) : ""}
-              onChange={(e) => {
-                const sid = e.target.value ? Number(e.target.value) : null;
-                setPaySaleId(sid);
-                const sale = payUnpaidSales.find((s) => s.id === sid);
-                if (sale) setPayAmount(String(sale.due_amount));
-              }}
-              disabled={paySaving}
-            />
-          )}
 
           <Input
             name="pay_amount"
@@ -428,6 +428,34 @@ export function PaymentsPage() {
             onChange={(e) => setPayMethod(e.target.value)}
             disabled={paySaving}
           />
+
+          {payMethod !== "cash" && (
+            <>
+              <Input
+                name="pay_reference"
+                label="Reference / Transaction ID"
+                required
+                value={payReference}
+                onChange={(e) => setPayReference(e.target.value)}
+                disabled={paySaving}
+              />
+              <Input
+                name="pay_account_details"
+                label="Bank / Account Details"
+                required={payMethod === "bank_transfer"}
+                value={payAccountDetails}
+                onChange={(e) => setPayAccountDetails(e.target.value)}
+                disabled={paySaving}
+              />
+              <Input
+                name="pay_note"
+                label="Note"
+                value={payNote}
+                onChange={(e) => setPayNote(e.target.value)}
+                disabled={paySaving}
+              />
+            </>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setPayMemberId(null)} disabled={paySaving}>

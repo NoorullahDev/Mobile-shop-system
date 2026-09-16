@@ -49,7 +49,7 @@ import * as returnService from "../services/returnService";
 import * as saleService from "../services/saleService";
 import * as supplierService from "../services/supplierService";
 import { printReportViaDialog } from "../services/printingService";
-import { formatDate, formatMoney, formatMoneyCompact, methodLabels } from "../lib/format";
+import { formatDate, formatDateTime, formatMoney, formatMoneyCompact, methodLabels } from "../lib/format";
 import type { CategoryTotal, Expense } from "../types/expense";
 import type { Accessory, Phone, Supplier } from "../types/inventory";
 import type { Member } from "../types/member";
@@ -378,7 +378,7 @@ export function ReportsPage() {
       const byMethod: Record<string, number> = {};
       for (const r of onlinePayments) byMethod[r.payment_method] = (byMethod[r.payment_method] ?? 0) + r.amount;
       addSection("Totals by Method", ["Method", "Total"], Object.entries(byMethod).sort((a, b) => b[1] - a[1]).map(([m, t]) => [methodLabels[m] ?? m, t]));
-      addSection("Online Payment Transactions", ["Date", "Invoice", "Customer", "Method", "Amount", "Reference"], onlinePayments.map((r) => [r.created_at, r.receipt_no, r.customer_name ?? "Walk-in", methodLabels[r.payment_method] ?? r.payment_method, r.amount, r.reference ?? r.notes ?? ""]));
+      addSection("Online Payment Transactions", ["Date / Time", "Invoice", "Customer", "Method", "Amount", "Bank / Account", "Reference", "Note"], onlinePayments.map((r) => [r.created_at, r.receipt_no, r.customer_name ?? "Walk-in", methodLabels[r.payment_method] ?? r.payment_method, r.amount, r.account_details ?? "", r.reference ?? "", r.notes ?? ""]));
       addSection("Summary", ["Metric", "Value"], [["Total Online Received", totalOnline], ["Transactions", onlinePayments.length]]);
     }
     const csv = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
@@ -520,23 +520,25 @@ export function ReportsPage() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Date</th>
+                      <th>Date / Time</th>
                       <th>Invoice</th>
                       <th>Customer</th>
                       <th>Method</th>
                       <th className="text-right">Amount</th>
+                      <th>Bank / Account</th>
                       <th>Reference</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {onlinePayments.length === 0 ? <EmptyRows columns={6} message="No online payment records in this period." /> : onlinePayments.map((r) => (
+                    {onlinePayments.length === 0 ? <EmptyRows columns={7} message="No online payment records in this period." /> : onlinePayments.map((r) => (
                       <tr key={r.id}>
-                        <td>{formatDate(r.created_at)}</td>
+                        <td>{formatDateTime(r.created_at)}</td>
                         <td className="font-semibold">{r.receipt_no}</td>
                         <td>{r.customer_name ?? "Walk-in"}</td>
                         <td>{methodLabels[r.payment_method] ?? r.payment_method}</td>
                         <td className="text-right amount">{formatMoney(r.amount)}</td>
-                        <td>{r.reference ?? r.notes ?? "—"}</td>
+                        <td>{r.account_details ?? "—"}</td>
+                        <td>{r.reference ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>

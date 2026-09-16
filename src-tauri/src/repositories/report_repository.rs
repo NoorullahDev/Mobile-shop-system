@@ -226,19 +226,27 @@ pub fn top_sellers(
     Ok(out)
 }
 
-/// Sales grouped by payment method within the inclusive date range.
-/// Uses sale_payments for accurate per-method totals (supports split payments).
+/// Receipts grouped by payment method within the inclusive date range.
+/// Includes both point-of-sale payments and later completed due collections.
 pub fn payment_breakdown(
     conn: &Connection,
     from: &str,
     to: &str,
 ) -> Result<Vec<crate::models::report::PaymentBreakdown>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT sp.payment_method, SUM(sp.amount) AS total, COUNT(*) AS count
-         FROM sale_payments sp
-         JOIN sales s ON s.id = sp.sale_id
-         WHERE date(s.created_at, 'localtime') >= date(?1) AND date(s.created_at, 'localtime') < date(?2, '+1 day')
-         GROUP BY sp.payment_method ORDER BY total DESC",
+        "SELECT received.payment_method, SUM(received.amount) AS total, COUNT(*) AS count
+         FROM (
+             SELECT sp.payment_method, sp.amount, sp.created_at AS received_at
+             FROM sale_payments sp
+             UNION ALL
+             SELECT p.payment_method, p.amount, COALESCE(p.payment_date, p.created_at) AS received_at
+             FROM payments p
+             WHERE p.sale_id IS NOT NULL AND p.sale_id != 0
+               AND p.is_deleted = 0 AND p.status = 'completed'
+         ) received
+         WHERE date(received.received_at, 'localtime') >= date(?1)
+           AND date(received.received_at, 'localtime') < date(?2, '+1 day')
+         GROUP BY received.payment_method ORDER BY total DESC",
     )?;
     let rows = stmt.query_map(params![from, to], |r| {
         Ok(crate::models::report::PaymentBreakdown {
@@ -260,14 +268,32 @@ pub fn online_payment_records(
     to: &str,
 ) -> Result<Vec<crate::models::report::OnlinePaymentRecord>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT sp.id, sp.sale_id, s.receipt_no, m.name AS customer_name,
-                sp.payment_method, sp.amount, sp.reference, sp.notes, sp.created_at
-         FROM sale_payments sp
-         JOIN sales s ON s.id = sp.sale_id
-         LEFT JOIN members m ON m.id = s.member_id
-         WHERE date(s.created_at, 'localtime') >= date(?1) AND date(s.created_at, 'localtime') < date(?2, '+1 day')
-           AND sp.payment_method != 'cash'
-         ORDER BY sp.created_at DESC",
+        "SELECT online.id, online.sale_id, online.receipt_no, online.customer_name,
+                online.payment_method, online.amount, online.reference,
+                online.account_details, online.notes, online.created_at
+         FROM (
+             SELECT sp.id * 2 AS id, sp.sale_id, s.receipt_no, m.name AS customer_name,
+                    sp.payment_method, sp.amount, sp.reference,
+                    sp.notes AS account_details, NULL AS notes, sp.created_at
+             FROM sale_payments sp
+             JOIN sales s ON s.id = sp.sale_id
+             LEFT JOIN members m ON m.id = s.member_id
+             WHERE LOWER(sp.payment_method) != 'cash'
+             UNION ALL
+             SELECT p.id * 2 + 1 AS id, p.sale_id, s.receipt_no, m.name AS customer_name,
+                    p.payment_method, p.amount, p.reference,
+                    p.account_details, p.notes,
+                    COALESCE(p.payment_date, p.created_at) AS created_at
+             FROM payments p
+             JOIN sales s ON s.id = p.sale_id
+             LEFT JOIN members m ON m.id = s.member_id
+             WHERE p.sale_id IS NOT NULL AND p.sale_id != 0
+               AND p.is_deleted = 0 AND p.status = 'completed'
+               AND LOWER(p.payment_method) != 'cash'
+         ) online
+         WHERE date(online.created_at, 'localtime') >= date(?1)
+           AND date(online.created_at, 'localtime') < date(?2, '+1 day')
+         ORDER BY online.created_at DESC, online.id DESC",
     )?;
     let rows = stmt.query_map(params![from, to], |r| {
         Ok(crate::models::report::OnlinePaymentRecord {
@@ -278,6 +304,7 @@ pub fn online_payment_records(
             payment_method: r.get("payment_method")?,
             amount: r.get("amount")?,
             reference: r.get("reference")?,
+            account_details: r.get("account_details")?,
             notes: r.get("notes")?,
             created_at: r.get("created_at")?,
         })

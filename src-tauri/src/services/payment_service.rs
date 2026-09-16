@@ -1,7 +1,9 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::errors::AppError;
-use crate::models::payment::{CreatePaymentInput, MemberBalance, Payment, UnpaidSaleInfo};
+use crate::models::payment::{
+    CreatePaymentInput, CustomerDueInvoice, MemberBalance, Payment, UnpaidSaleInfo,
+};
 use crate::repositories::{member_repository, payment_repository};
 use crate::services;
 use crate::utils;
@@ -50,12 +52,27 @@ pub fn create(
     let amount = normalized.amount;
     let sale_id = normalized.sale_id;
 
-    let id = payment_repository::insert(conn, &normalized, actor)?;
+    if let Some(sid) = sale_id {
+        let due: f64 = conn.query_row(
+            "SELECT MAX(total_amount - paid_amount, 0) FROM sales WHERE id = ?1",
+            [sid],
+            |r| r.get(0),
+        )?;
+        if normalized.status.as_deref() == Some("completed") && amount > due + 0.005 {
+            return Err(AppError::validation(format!(
+                "Payment cannot exceed the invoice balance of Rs {due:.2}"
+            )));
+        }
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    let id = payment_repository::insert(&tx, &normalized, actor)?;
 
     // If linked to a sale, update the sale's paid_amount
     if let Some(sid) = sale_id {
-        update_sale_paid_amount(conn, sid)?;
+        update_sale_paid_amount(&tx, sid)?;
     }
+    tx.commit()?;
 
     services::record_activity(conn, actor, "payment", "create", Some(id))?;
     services::notification_service::notify(
@@ -71,12 +88,31 @@ pub fn create(
         .ok_or_else(|| AppError::Internal("Created payment could not be retrieved".into()))
 }
 
-fn normalize_input(conn: &Connection, input: CreatePaymentInput) -> Result<CreatePaymentInput, AppError> {
+fn normalize_input(
+    conn: &Connection,
+    input: CreatePaymentInput,
+) -> Result<CreatePaymentInput, AppError> {
     let amount = validate_amount(input.amount)?;
 
     if let Some(mid) = input.member_id {
         if member_repository::get_by_id(conn, mid)?.is_none() {
             return Err(AppError::validation("Member not found"));
+        }
+    }
+
+    if let Some(sale_id) = input.sale_id {
+        let sale_member = conn
+            .query_row(
+                "SELECT member_id FROM sales WHERE id = ?1",
+                [sale_id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::validation("Invoice not found"))?;
+        if sale_member.is_none() || sale_member != input.member_id {
+            return Err(AppError::validation(
+                "Payment customer must match the selected invoice",
+            ));
         }
     }
 
@@ -93,6 +129,10 @@ fn normalize_input(conn: &Connection, input: CreatePaymentInput) -> Result<Creat
             .reference
             .map(|r| r.trim().to_string())
             .filter(|r| !r.is_empty()),
+        account_details: input
+            .account_details
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
         notes: input
             .notes
             .map(|n| n.trim().to_string())
@@ -181,36 +221,40 @@ pub fn list_customer_dues(
     payment_repository::list_customer_dues(conn, search.as_deref())
 }
 
+pub fn list_customer_due_invoices(
+    conn: &Connection,
+    search: Option<String>,
+) -> Result<Vec<CustomerDueInvoice>, AppError> {
+    payment_repository::list_customer_due_invoices(conn, search.as_deref())
+}
+
 /// Recalculate a sale's paid_amount from all completed payments linked to it,
 /// then update the sale row so Sales History reflects the true payment status.
 fn update_sale_paid_amount(conn: &Connection, sale_id: i64) -> Result<(), AppError> {
-    let total_from_payments: f64 = conn
-        .query_row(
-            "SELECT COALESCE(SUM(amount), 0) FROM payments
+    let total_from_payments: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments
              WHERE sale_id = ?1 AND is_deleted = 0 AND status = 'completed'",
-            [sale_id],
-            |r| r.get(0),
-        )?;
+        [sale_id],
+        |r| r.get(0),
+    )?;
 
-    let total_from_split: f64 = conn
-        .query_row(
-            "SELECT COALESCE(SUM(amount), 0) FROM sale_payments WHERE sale_id = ?1",
-            [sale_id],
-            |r| r.get(0),
-        )?;
+    let total_from_split: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(amount), 0) FROM sale_payments WHERE sale_id = ?1",
+        [sale_id],
+        |r| r.get(0),
+    )?;
 
     // paid_amount = original split payments + linked due payments, capped at total_amount
-    let total_amount: f64 = conn
-        .query_row(
-            "SELECT total_amount FROM sales WHERE id = ?1",
-            [sale_id],
-            |r| r.get(0),
-        )?;
+    let total_amount: f64 = conn.query_row(
+        "SELECT total_amount FROM sales WHERE id = ?1",
+        [sale_id],
+        |r| r.get(0),
+    )?;
 
     let new_paid = utils::round2((total_from_split + total_from_payments).min(total_amount));
 
     conn.execute(
-        "UPDATE sales SET paid_amount = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        "UPDATE sales SET paid_amount = ?1 WHERE id = ?2",
         params![new_paid, sale_id],
     )?;
     Ok(())
@@ -223,21 +267,20 @@ pub fn unpaid_sales_for_member(
     let rows = payment_repository::unpaid_sales_for_member(conn, member_id)?;
     Ok(rows
         .into_iter()
-        .map(|(id, receipt_no, total_amount, paid_amount, created_at)| UnpaidSaleInfo {
-            id,
-            receipt_no,
-            total_amount,
-            paid_amount,
-            due_amount: utils::round2(total_amount - paid_amount),
-            created_at,
-        })
+        .map(
+            |(id, receipt_no, total_amount, paid_amount, created_at)| UnpaidSaleInfo {
+                id,
+                receipt_no,
+                total_amount,
+                paid_amount,
+                due_amount: utils::round2(total_amount - paid_amount),
+                created_at,
+            },
+        )
         .collect())
 }
 
-pub fn list_payments_for_sale(
-    conn: &Connection,
-    sale_id: i64,
-) -> Result<Vec<Payment>, AppError> {
+pub fn list_payments_for_sale(conn: &Connection, sale_id: i64) -> Result<Vec<Payment>, AppError> {
     payment_repository::list_by_sale(conn, sale_id)
 }
 
@@ -269,6 +312,7 @@ mod tests {
             payment_type: Some("membership".into()),
             status: None,
             reference: Some("REF-1".into()),
+            account_details: None,
             notes: None,
             payment_date: None,
             sale_id: None,
@@ -345,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn balance_counts_sales_credit_minus_payments() {
+    fn balance_counts_invoice_linked_payment_once() {
         let conn = in_memory_conn();
         let mid = member_id(&conn);
         // Credit sale: Rs 500 total, only 200 paid at sale time -> 300 owed on the sale.
@@ -355,14 +399,21 @@ mod tests {
             [mid],
         )
         .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method) VALUES (?1, 200, 'cash')",
+            [sale_id],
+        )
+        .unwrap();
         // Later, the customer pays off Rs 100.
         let mut p = sample(Some(mid));
         p.amount = 100.0;
+        p.sale_id = Some(sale_id);
         create(&conn, p, None).unwrap();
 
         let bal = member_balance(&conn, mid).unwrap();
-        assert_eq!(bal.total_credit, 300.0);
-        assert_eq!(bal.total_paid, 100.0);
+        assert_eq!(bal.total_credit, 200.0);
+        assert_eq!(bal.total_paid, 0.0);
         assert_eq!(bal.balance, 200.0);
 
         let dues = list_customer_dues(&conn, None).unwrap();
@@ -421,5 +472,181 @@ mod tests {
         assert_eq!(member_balance(&conn, mid).unwrap().balance, 0.0);
         soft_delete(&conn, payment.id, None).unwrap();
         assert_eq!(member_balance(&conn, mid).unwrap().balance, 310.0);
+    }
+
+    #[test]
+    fn due_payments_update_sale_paid_amount() {
+        let conn = in_memory_conn();
+        let mid = member_id(&conn);
+
+        // Sale: total 38000, initial cash payment 20000
+        conn.execute(
+            "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method)
+             VALUES ('INV-001', ?1, 38000.0, 20000.0, 'cash')",
+            [mid],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+
+        // Initial split payment in sale_payments
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method)
+             VALUES (?1, 20000.0, 'cash')",
+            [sale_id],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO accessories (brand, product_name, quantity)
+             VALUES ('Test', 'Unchanged stock', 7)",
+            [],
+        )
+        .unwrap();
+        let stock_before: i64 = conn
+            .query_row("SELECT SUM(quantity) FROM accessories", [], |r| r.get(0))
+            .unwrap();
+
+        // An unrelated historical customer payment must not hide this invoice.
+        let mut unrelated = sample(Some(mid));
+        unrelated.amount = 50000.0;
+        create(&conn, unrelated, None).unwrap();
+
+        let dues = list_customer_due_invoices(&conn, None).unwrap();
+        assert_eq!(dues.len(), 1);
+        assert_eq!(dues[0].sale_id, sale_id);
+        assert!((dues[0].total_amount - 38000.0).abs() < 0.01);
+        assert!((dues[0].paid_amount - 20000.0).abs() < 0.01);
+        assert!((dues[0].due_amount - 18000.0).abs() < 0.01);
+        let customer_dues = list_customer_dues(&conn, None).unwrap();
+        assert_eq!(customer_dues.len(), 1);
+        assert!((customer_dues[0].balance - 18000.0).abs() < 0.01);
+
+        // Pay 10000 cash linked to sale
+        let mut p1 = sample(Some(mid));
+        p1.amount = 10000.0;
+        p1.sale_id = Some(sale_id);
+        create(&conn, p1, None).unwrap();
+
+        // Verify the same invoice remains in dues with 8000 outstanding.
+        let paid: f64 = conn
+            .query_row(
+                "SELECT paid_amount FROM sales WHERE id = ?1",
+                [sale_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            (paid - 30000.0).abs() < 0.01,
+            "after first payment paid_amount should be 30000, got {paid}"
+        );
+        let dues = list_customer_due_invoices(&conn, None).unwrap();
+        assert_eq!(dues.len(), 1);
+        assert!((dues[0].due_amount - 8000.0).abs() < 0.01);
+        assert!((list_customer_dues(&conn, None).unwrap()[0].balance - 8000.0).abs() < 0.01);
+
+        // Pay the final 8000 online, still linked to the same sale.
+        let mut p2 = sample(Some(mid));
+        p2.amount = 8000.0;
+        p2.sale_id = Some(sale_id);
+        p2.payment_method = "bank_transfer".into();
+        p2.reference = Some("TX-8000".into());
+        p2.account_details = Some("Meezan Bank / 1234".into());
+        p2.notes = Some("Final due payment".into());
+        create(&conn, p2, None).unwrap();
+
+        // Verify sale.paid_amount updated to 38000 (fully paid)
+        let paid: f64 = conn
+            .query_row(
+                "SELECT paid_amount FROM sales WHERE id = ?1",
+                [sale_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            (paid - 38000.0).abs() < 0.01,
+            "after second payment paid_amount should be 38000, got {paid}"
+        );
+
+        // Verify no unpaid sales remain
+        let dues = list_customer_due_invoices(&conn, None).unwrap();
+        assert!(
+            dues.is_empty(),
+            "fully paid invoice must leave Customer Dues"
+        );
+        assert!(list_customer_dues(&conn, None).unwrap().is_empty());
+
+        // Initial and later payments remain distinct: the sale keeps its
+        // original cash entry and payment history keeps both due collections.
+        let sale = crate::services::sale_service::get(&conn, sale_id).unwrap();
+        assert!((sale.paid_amount - 38000.0).abs() < 0.01);
+        assert!((sale.total_amount - sale.paid_amount).abs() < 0.01);
+        let payment_status = if sale.paid_amount >= sale.total_amount - 0.005 {
+            "paid"
+        } else if sale.paid_amount > 0.0 {
+            "partial"
+        } else {
+            "unpaid"
+        };
+        assert_eq!(payment_status, "paid");
+        assert_eq!(sale.sale_payments.len(), 1);
+        assert_eq!(sale.sale_payments[0].payment_method, "cash");
+        assert!((sale.sale_payments[0].amount - 20000.0).abs() < 0.01);
+
+        let linked = list_payments_for_sale(&conn, sale_id).unwrap();
+        assert_eq!(linked.len(), 2);
+        assert_eq!(linked[0].payment_method, "cash");
+        assert_eq!(linked[1].payment_method, "bank_transfer");
+        assert!((linked[0].amount - 10000.0).abs() < 0.01);
+        assert!((linked[1].amount - 8000.0).abs() < 0.01);
+        assert_eq!(linked[1].reference.as_deref(), Some("TX-8000"));
+        assert_eq!(
+            linked[1].account_details.as_deref(),
+            Some("Meezan Bank / 1234")
+        );
+        assert_eq!(linked[1].notes.as_deref(), Some("Final due payment"));
+
+        // Online Payments exposes the same non-cash payment row. The cash due
+        // collection is excluded, and no duplicate online record is created.
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let online =
+            crate::services::report_service::online_payment_records(&conn, &today, &today).unwrap();
+        assert_eq!(online.len(), 1);
+        assert_eq!(online[0].sale_id, sale_id);
+        assert!((online[0].amount - 8000.0).abs() < 0.01);
+        assert_eq!(online[0].reference.as_deref(), Some("TX-8000"));
+        assert_eq!(
+            online[0].account_details.as_deref(),
+            Some("Meezan Bank / 1234")
+        );
+
+        // Dashboard/report payment totals include both receipt sources once.
+        let breakdown =
+            crate::services::report_service::payment_breakdown(&conn, &today, &today).unwrap();
+        let cash = breakdown
+            .iter()
+            .find(|row| row.payment_method == "cash")
+            .unwrap();
+        let bank = breakdown
+            .iter()
+            .find(|row| row.payment_method == "bank_transfer")
+            .unwrap();
+        assert!((cash.total - 30000.0).abs() < 0.01);
+        assert_eq!(cash.count, 2);
+        assert!((bank.total - 8000.0).abs() < 0.01);
+        assert_eq!(bank.count, 1);
+
+        let (sale_count, revenue): (i64, f64) = conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM sales",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let stock_after: i64 = conn
+            .query_row("SELECT SUM(quantity) FROM accessories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(sale_count, 1);
+        assert!((revenue - 38000.0).abs() < 0.01);
+        assert_eq!(stock_after, stock_before);
     }
 }

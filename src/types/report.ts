@@ -64,6 +64,7 @@ export interface OnlinePaymentRecord {
   payment_method: string;
   amount: number;
   reference: string | null;
+  account_details: string | null;
   notes: string | null;
   created_at: string;
 }

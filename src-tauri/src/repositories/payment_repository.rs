@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::errors::AppError;
-use crate::models::payment::{CreatePaymentInput, MemberBalance, Payment};
+use crate::models::payment::{CreatePaymentInput, CustomerDueInvoice, MemberBalance, Payment};
 
 fn payment_from_row(r: &Row) -> rusqlite::Result<Payment> {
     Ok(Payment {
@@ -13,6 +13,7 @@ fn payment_from_row(r: &Row) -> rusqlite::Result<Payment> {
         payment_type: r.get("payment_type")?,
         status: r.get("status")?,
         reference: r.get("reference")?,
+        account_details: r.get("account_details")?,
         notes: r.get("notes")?,
         payment_date: r.get("payment_date")?,
         created_by: r.get("created_by")?,
@@ -23,7 +24,7 @@ fn payment_from_row(r: &Row) -> rusqlite::Result<Payment> {
 }
 
 const COLS: &str = "p.id, p.member_id, m.name AS member_name, p.amount, p.payment_method, \
-     p.payment_type, p.status, p.reference, p.notes, p.payment_date, p.created_by, p.created_at, \
+     p.payment_type, p.status, p.reference, p.account_details, p.notes, p.payment_date, p.created_by, p.created_at, \
      p.is_deleted, p.sale_id";
 
 const JOIN: &str =
@@ -35,8 +36,8 @@ pub fn insert(
     created_by: Option<i64>,
 ) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO payments (member_id, amount, payment_method, payment_type, status, reference, notes, payment_date, created_by, sale_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(?8, CURRENT_TIMESTAMP), ?9, ?10)",
+        "INSERT INTO payments (member_id, amount, payment_method, payment_type, status, reference, account_details, notes, payment_date, created_by, sale_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE(?9, CURRENT_TIMESTAMP), ?10, ?11)",
         params![
             input.member_id,
             input.amount,
@@ -44,6 +45,7 @@ pub fn insert(
             input.payment_type,
             input.status.as_deref().unwrap_or("completed"),
             input.reference,
+            input.account_details,
             input.notes,
             input.payment_date,
             created_by,
@@ -55,8 +57,8 @@ pub fn insert(
 
 pub fn update(conn: &Connection, id: i64, input: &CreatePaymentInput) -> Result<bool, AppError> {
     let affected = conn.execute(
-        "UPDATE payments SET member_id = ?2, amount = ?3, payment_method = ?4, payment_type = ?5, status = ?6, reference = ?7, notes = ?8, payment_date = COALESCE(?9, payment_date), sale_id = ?10, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0",
-        params![id, input.member_id, input.amount, input.payment_method, input.payment_type, input.status, input.reference, input.notes, input.payment_date, input.sale_id],
+        "UPDATE payments SET member_id = ?2, amount = ?3, payment_method = ?4, payment_type = ?5, status = ?6, reference = ?7, account_details = ?8, notes = ?9, payment_date = COALESCE(?10, payment_date), sale_id = ?11, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0",
+        params![id, input.member_id, input.amount, input.payment_method, input.payment_type, input.status, input.reference, input.account_details, input.notes, input.payment_date, input.sale_id],
     )?;
     Ok(affected > 0)
 }
@@ -126,7 +128,7 @@ pub fn member_balance(conn: &Connection, member_id: i64) -> Result<MemberBalance
         .query_row(
             "SELECT m.name, m.phone,
                 (SELECT COALESCE(SUM(MAX((s.total_amount - s.paid_amount) - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0)),0) FROM sales s WHERE s.member_id = ?1),
-                (SELECT COALESCE(SUM(amount),0) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND status = 'completed'),
+                (SELECT COALESCE(SUM(amount),0) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND status = 'completed' AND (sale_id IS NULL OR sale_id = 0)),
                 (SELECT COUNT(*) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND status = 'completed')
              FROM members m WHERE m.id = ?1 AND m.is_deleted = 0",
             [member_id],
@@ -157,7 +159,7 @@ pub fn list_balances(
     let mut sql = String::from(
         "SELECT m.id AS member_id, m.name AS member_name, m.phone AS phone,
                 COALESCE((SELECT SUM(MAX((s.total_amount - s.paid_amount) - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0)) FROM sales s WHERE s.member_id = m.id), 0) AS total_credit,
-                COALESCE(SUM(CASE WHEN p.status = 'completed' THEN p.amount ELSE 0 END), 0) AS total_paid,
+                COALESCE(SUM(CASE WHEN p.status = 'completed' AND (p.sale_id IS NULL OR p.sale_id = 0) THEN p.amount ELSE 0 END), 0) AS total_paid,
                 COUNT(CASE WHEN p.status = 'completed' THEN p.id END) AS payment_count
          FROM members m
          LEFT JOIN payments p ON p.member_id = m.id AND p.is_deleted = 0
@@ -186,8 +188,85 @@ pub fn list_customer_dues(
     conn: &Connection,
     search: Option<&str>,
 ) -> Result<Vec<MemberBalance>, AppError> {
-    let all = list_balances(conn, search)?;
-    Ok(all.into_iter().filter(|b| b.balance > 0.001).collect())
+    let mut sql = String::from(
+        "SELECT m.id AS member_id, m.name AS member_name, m.phone,
+                SUM(s.total_amount) AS total_credit,
+                SUM(s.paid_amount) AS total_paid,
+                COALESCE(SUM((SELECT COUNT(*) FROM payments p
+                              WHERE p.sale_id = s.id
+                                AND p.is_deleted = 0
+                                AND p.status = 'completed')), 0) AS payment_count
+         FROM sales s
+         JOIN members m ON m.id = s.member_id AND m.is_deleted = 0
+         WHERE (s.total_amount - s.paid_amount) > 0.001",
+    );
+    let mut q: Vec<rusqlite::types::Value> = Vec::new();
+    if let Some(search) = search.map(str::trim).filter(|value| !value.is_empty()) {
+        sql.push_str(" AND (s.receipt_no LIKE ? OR m.name LIKE ? OR COALESCE(m.phone, '') LIKE ?)");
+        let value = rusqlite::types::Value::from(format!("%{search}%"));
+        q.push(value.clone());
+        q.push(value.clone());
+        q.push(value);
+    }
+    sql.push_str(" GROUP BY m.id ORDER BY m.name");
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(q), balance_from_row)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// Invoice-level dues sourced directly from each sale's current paid amount.
+/// Unlinked customer payments never offset an unrelated invoice.
+pub fn list_customer_due_invoices(
+    conn: &Connection,
+    search: Option<&str>,
+) -> Result<Vec<CustomerDueInvoice>, AppError> {
+    let mut sql = String::from(
+        "SELECT s.id AS sale_id, s.receipt_no, s.member_id,
+                m.name AS member_name, m.phone,
+                s.total_amount, s.paid_amount,
+                ROUND(s.total_amount - s.paid_amount, 2) AS due_amount,
+                (SELECT COUNT(*) FROM payments p
+                 WHERE p.sale_id = s.id AND p.is_deleted = 0 AND p.status = 'completed') AS payment_count,
+                s.created_at
+         FROM sales s
+         JOIN members m ON m.id = s.member_id AND m.is_deleted = 0
+         WHERE (s.total_amount - s.paid_amount) > 0.001",
+    );
+    let mut q: Vec<rusqlite::types::Value> = Vec::new();
+    if let Some(search) = search.map(str::trim).filter(|value| !value.is_empty()) {
+        sql.push_str(" AND (s.receipt_no LIKE ? OR m.name LIKE ? OR COALESCE(m.phone, '') LIKE ?)");
+        let value = rusqlite::types::Value::from(format!("%{search}%"));
+        q.push(value.clone());
+        q.push(value.clone());
+        q.push(value);
+    }
+    sql.push_str(" ORDER BY s.created_at ASC, s.id ASC");
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(q), |r| {
+        Ok(CustomerDueInvoice {
+            sale_id: r.get("sale_id")?,
+            receipt_no: r.get("receipt_no")?,
+            member_id: r.get("member_id")?,
+            member_name: r.get("member_name")?,
+            phone: r.get("phone")?,
+            total_amount: r.get("total_amount")?,
+            paid_amount: r.get("paid_amount")?,
+            due_amount: r.get("due_amount")?,
+            payment_count: r.get("payment_count")?,
+            created_at: r.get("created_at")?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }
 
 fn balance_from_row(r: &Row) -> rusqlite::Result<MemberBalance> {
@@ -214,7 +293,7 @@ pub fn unpaid_sales_for_member(
     let mut stmt = conn.prepare(
         "SELECT s.id, s.receipt_no, s.total_amount, s.paid_amount, s.created_at
          FROM sales s
-         WHERE s.member_id = ?1 AND s.is_deleted = 0
+         WHERE s.member_id = ?1
            AND (s.total_amount - s.paid_amount) > 0.001
          ORDER BY s.created_at ASC",
     )?;
@@ -237,7 +316,7 @@ pub fn unpaid_sales_for_member(
 /// Returns completed payments linked to a specific sale.
 pub fn list_by_sale(conn: &Connection, sale_id: i64) -> Result<Vec<Payment>, AppError> {
     let sql = format!(
-        "SELECT {COLS} {JOIN} AND p.sale_id = ?1 ORDER BY p.payment_date ASC, p.id ASC"
+        "SELECT {COLS} {JOIN} AND p.sale_id = ?1 AND p.status = 'completed' ORDER BY p.payment_date ASC, p.id ASC"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([sale_id], payment_from_row)?;

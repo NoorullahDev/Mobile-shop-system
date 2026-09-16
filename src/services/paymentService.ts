@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { CreatePaymentInput, MemberBalance, Payment, UnpaidSaleInfo } from "../types/payment";
+import type { CreatePaymentInput, CustomerDueInvoice, MemberBalance, Payment, UnpaidSaleInfo } from "../types/payment";
 
 export async function createPayment(
   input: CreatePaymentInput,
@@ -42,6 +42,10 @@ export async function listMemberBalances(search?: string): Promise<MemberBalance
 
 export async function listCustomerDues(search?: string): Promise<MemberBalance[]> {
   return invoke<MemberBalance[]>("list_customer_dues", { search: search ?? null });
+}
+
+export async function listCustomerDueInvoices(search?: string): Promise<CustomerDueInvoice[]> {
+  return invoke<CustomerDueInvoice[]>("list_customer_due_invoices", { search: search ?? null });
 }
 
 export async function unpaidSalesForMember(memberId: number): Promise<UnpaidSaleInfo[]> {

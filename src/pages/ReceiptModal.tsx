@@ -8,9 +8,11 @@ import { A4InvoiceView } from "../components/receipt/A4InvoiceView";
 import { buildReceiptData } from "../lib/receiptLayout";
 import { printReceiptViaDialog, printA4InvoiceViaDialog } from "../services/printingService";
 import * as saleService from "../services/saleService";
+import * as paymentService from "../services/paymentService";
 import { useReceiptSettingsStore } from "../store/receiptSettings";
 import { useSettingsStore } from "../store/settings";
 import type { Sale } from "../types/sale";
+import type { Payment } from "../types/payment";
 
 type PrintType = "thermal_58" | "thermal_80" | "a4";
 
@@ -32,17 +34,32 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
   const business = useSettingsStore();
   const [error, setError] = useState<string | null>(null);
   const [fullSale, setFullSale] = useState<Sale | null>(null);
+  const [linkedPayments, setLinkedPayments] = useState<Payment[]>([]);
   const [printType, setPrintType] = useState<PrintType>(initialPrintType ?? "a4");
 
   useEffect(() => {
-    if (open && sale) {
-      if (!useReceiptSettingsStore.getState().loaded) {
-        useReceiptSettingsStore.getState().load().catch(() => {});
-      }
-      setError(null);
-      setFullSale(null);
-      saleService.getSale(sale.id).then(setFullSale).catch(() => setFullSale(sale));
+    if (!open || !sale) return;
+
+    let cancelled = false;
+    if (!useReceiptSettingsStore.getState().loaded) {
+      useReceiptSettingsStore.getState().load().catch(() => {});
     }
+    setError(null);
+    setFullSale(null);
+    setLinkedPayments([]);
+
+    Promise.all([
+      saleService.getSale(sale.id).catch(() => sale),
+      paymentService.listPaymentsForSale(sale.id).catch(() => []),
+    ]).then(([loadedSale, payments]) => {
+      if (cancelled) return;
+      setFullSale(loadedSale);
+      setLinkedPayments(payments);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, sale]);
 
   useEffect(() => {
@@ -64,6 +81,7 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
       currency: business.currency,
     },
     rs,
+    linkedPayments,
   );
 
   const handlePrint = async () => {

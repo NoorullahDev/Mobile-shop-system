@@ -71,6 +71,15 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
     return qty;
   };
 
+  const remainingDue = sale ? Math.max(0, sale.total_amount - sale.paid_amount) : 0;
+  const paymentStatus = !sale
+    ? "unpaid"
+    : remainingDue <= 0.005
+      ? "paid"
+      : sale.paid_amount > 0
+        ? "partial"
+        : "unpaid";
+
   return (
     <Modal
       open={open}
@@ -138,17 +147,26 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                   <div key={i} className="flex items-center justify-between text-[13px]">
                     <div className="flex items-center gap-2">
                       <StatusBadge status={sp.payment_method} />
+                      <span className="font-semibold" style={{ color: "#0F172A" }}>{formatMoneyCompact(sp.amount)}</span>
                       {sp.reference && (
                         <span className="font-mono text-[11px]" style={{ color: "#64748B" }}>Ref: {sp.reference}</span>
                       )}
+                      <span className="text-[11px]" style={{ color: "#64748B" }}>{formatDateTime(sp.created_at)}</span>
                     </div>
-                    <span className="font-semibold" style={{ color: "#0F172A" }}>{formatMoneyCompact(sp.amount)}</span>
                   </div>
                 ))}
               </div>
               <div className="mt-2 flex justify-between border-t pt-2 text-[13px] font-semibold" style={{ borderColor: "#E2E8F0" }}>
                 <span style={{ color: "#334155" }}>Total Paid</span>
                 <span style={{ color: "#16A34A" }}>{formatMoneyCompact(sale.paid_amount)}</span>
+              </div>
+              <div className="mt-1 flex justify-between text-[13px] font-semibold">
+                <span style={{ color: "#334155" }}>Remaining Due</span>
+                <span style={{ color: remainingDue > 0 ? "#B45309" : "#16A34A" }}>{formatMoneyCompact(remainingDue)}</span>
+              </div>
+              <div className="mt-1 flex justify-between text-[13px] font-semibold">
+                <span style={{ color: "#334155" }}>Status</span>
+                <span style={{ color: paymentStatus === "paid" ? "#16A34A" : paymentStatus === "partial" ? "#B45309" : "#DC2626", textTransform: "uppercase" }}>{paymentStatus}</span>
               </div>
             </div>
           )}
@@ -164,14 +182,14 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                   <div key={p.id} className="flex items-center justify-between text-[13px]">
                     <div className="flex items-center gap-2">
                       <StatusBadge status={p.payment_method} />
-                      <span style={{ color: "#64748B", fontSize: "11px" }}>
-                        {new Date(p.payment_date).toLocaleDateString("en-PK", { day: "numeric", month: "short", year: "numeric" })}
-                      </span>
+                      <span className="font-semibold" style={{ color: "#16A34A" }}>{formatMoneyCompact(p.amount)}</span>
                       {p.reference && (
                         <span className="font-mono text-[11px]" style={{ color: "#64748B" }}>Ref: {p.reference}</span>
                       )}
+                      <span style={{ color: "#64748B", fontSize: "11px" }}>
+                        {formatDateTime(p.payment_date)}
+                      </span>
                     </div>
-                    <span className="font-semibold" style={{ color: "#16A34A" }}>{formatMoneyCompact(p.amount)}</span>
                   </div>
                 ))}
               </div>

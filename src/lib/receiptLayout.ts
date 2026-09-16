@@ -1,5 +1,6 @@
 import { roundMoney } from "./format";
 import type { Sale } from "../types/sale";
+import type { Payment } from "../types/payment";
 import type { ReceiptData, ReceiptItemData, ReceiptSplitPayment, ReceiptSettings } from "../types/receipt";
 
 export const PAPER_RULES = {
@@ -30,6 +31,7 @@ export function buildReceiptData(
   sale: Sale,
   business: ReceiptBusiness,
   settings: ReceiptSettings,
+  linkedPayments: Payment[] = [],
 ): ReceiptData {
   const items: ReceiptItemData[] = sale.items.map((it) => ({
     name: it.product_name ?? "Item",
@@ -46,17 +48,26 @@ export function buildReceiptData(
   const total = roundMoney(sale.total_amount);
   const paid = roundMoney(sale.paid_amount || 0);
   const balance = roundMoney(Math.max(0, total - paid));
+  const status = balance <= 0.005 ? "paid" : paid > 0 ? "partial" : "unpaid";
 
-  // Build split payments array
-  const splitPayments: ReceiptSplitPayment[] | undefined =
-    sale.sale_payments && sale.sale_payments.length > 0
-      ? sale.sale_payments.map((sp) => ({
-          method: sp.payment_method,
-          amount: roundMoney(sp.amount),
-          reference: sp.reference ?? null,
-          notes: sp.notes ?? null,
-        }))
-      : undefined;
+  // The initial payment is stored with the sale; later due collections are
+  // separate payment records linked back to the same invoice.
+  const splitPayments: ReceiptSplitPayment[] = [
+    ...(sale.sale_payments ?? []).map((sp) => ({
+      method: sp.payment_method,
+      amount: roundMoney(sp.amount),
+      datetime: sp.created_at,
+      reference: sp.reference ?? null,
+      notes: sp.notes ?? null,
+    })),
+    ...linkedPayments.map((payment) => ({
+      method: payment.payment_method,
+      amount: roundMoney(payment.amount),
+      datetime: payment.payment_date || payment.created_at,
+      reference: payment.reference ?? null,
+      notes: payment.notes ?? null,
+    })),
+  ];
 
   return {
     business: {
@@ -84,7 +95,8 @@ export function buildReceiptData(
       paid,
       paymentMethod: sale.payment_method ?? "",
       balance,
+      status,
     },
-    splitPayments,
+    splitPayments: splitPayments.length > 0 ? splitPayments : undefined,
   };
 }

@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from "react";
-import { formatDate, formatMoney, methodLabels } from "../lib/format";
+import { formatDate, formatDateTime, formatMoney, methodLabels } from "../lib/format";
 import { useSettingsStore } from "../store/settings";
 import type { CategoryTotal, Expense } from "../types/expense";
 import type { Supplier } from "../types/inventory";
@@ -246,12 +246,12 @@ export const PrintReport = memo(function PrintReport({
               <tbody>
                 {onlinePayments.length === 0 ? <EmptyRow columns={7}>No online payment records in this period.</EmptyRow> : onlinePayments.map((r) => (
                   <tr key={r.id}>
-                    <td>{formatDate(r.created_at)}</td>
+                    <td>{formatDateTime(r.created_at)}</td>
                     <td>{r.receipt_no}</td>
                     <td>{r.customer_name ?? "Walk-in"}</td>
                     <td>{methodLabels[r.payment_method] ?? r.payment_method}</td>
                     <td className="num">{formatMoney(r.amount)}</td>
-                    <td>{r.notes ?? "—"}</td>
+                    <td>{r.account_details ?? "—"}</td>
                     <td>{r.reference ?? "—"}</td>
                   </tr>
                 ))}

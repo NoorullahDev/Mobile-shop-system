@@ -30,8 +30,9 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
       .map(
         (sp) => `<tr>
           <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:13px;color:#1F2937">${PAYMENT_METHOD_LABELS[sp.method] ?? sp.method}</td>
-          <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:12px;color:#6B7280">${esc(sp.reference ?? "")}</td>
           <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:13px;color:#1F2937;text-align:right;font-weight:500">${money(sp.amount)}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:12px;color:#6B7280">${esc(sp.reference ?? "")}</td>
+          <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:12px;color:#6B7280">${sp.datetime ? esc(formatDateTime(sp.datetime)) : ""}</td>
         </tr>`,
       )
       .join("");
@@ -39,8 +40,9 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
     const label = PAYMENT_METHOD_LABELS[data.totals.paymentMethod] ?? data.totals.paymentMethod;
     paymentRows = `<tr>
       <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:13px;color:#1F2937">${esc(label)}</td>
-      <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:12px;color:#6B7280"></td>
       <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:13px;color:#1F2937;text-align:right;font-weight:500">${money(data.totals.paid)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:12px;color:#6B7280"></td>
+      <td style="padding:6px 12px;border-bottom:1px solid #E5E7EB;font-size:12px;color:#6B7280">${esc(formatDateTime(data.invoice.datetime))}</td>
     </tr>`;
   }
 
@@ -114,8 +116,9 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
       <thead>
         <tr>
           <th style="padding:4px 12px;text-align:left;font-size:11px;font-weight:600;color:#6B7280;border-bottom:1px solid #E5E7EB">Method</th>
-          <th style="padding:4px 12px;text-align:left;font-size:11px;font-weight:600;color:#6B7280;border-bottom:1px solid #E5E7EB">Reference</th>
           <th style="padding:4px 12px;text-align:right;font-size:11px;font-weight:600;color:#6B7280;border-bottom:1px solid #E5E7EB">Amount</th>
+          <th style="padding:4px 12px;text-align:left;font-size:11px;font-weight:600;color:#6B7280;border-bottom:1px solid #E5E7EB">Reference</th>
+          <th style="padding:4px 12px;text-align:left;font-size:11px;font-weight:600;color:#6B7280;border-bottom:1px solid #E5E7EB">Date &amp; Time</th>
         </tr>
       </thead>
       <tbody>
@@ -123,13 +126,20 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
       </tbody>
       <tfoot>
         <tr>
-          <td style="padding:8px 12px;font-size:13px;font-weight:600;color:#111827;border-top:2px solid #D1D5DB" colspan="2">Total Paid</td>
+          <td style="padding:8px 12px;font-size:13px;font-weight:600;color:#111827;border-top:2px solid #D1D5DB">Total Paid</td>
           <td style="padding:8px 12px;font-size:13px;font-weight:600;color:#16A34A;text-align:right;border-top:2px solid #D1D5DB">${money(data.totals.paid)}</td>
+          <td style="border-top:2px solid #D1D5DB" colspan="2"></td>
         </tr>
-        ${data.totals.balance > 0 ? `<tr>
-          <td style="padding:6px 12px;font-size:13px;font-weight:600;color:#DC2626" colspan="2">Balance Due</td>
-          <td style="padding:6px 12px;font-size:13px;font-weight:600;color:#DC2626;text-align:right">${money(data.totals.balance)}</td>
-        </tr>` : ""}
+        <tr>
+          <td style="padding:6px 12px;font-size:13px;font-weight:600;color:${data.totals.balance > 0 ? "#DC2626" : "#374151"}">Remaining Due</td>
+          <td style="padding:6px 12px;font-size:13px;font-weight:600;color:${data.totals.balance > 0 ? "#DC2626" : "#16A34A"};text-align:right">${money(data.totals.balance)}</td>
+          <td colspan="2"></td>
+        </tr>
+        <tr>
+          <td style="padding:6px 12px;font-size:13px;font-weight:700;color:#374151">Status</td>
+          <td style="padding:6px 12px;font-size:13px;font-weight:700;color:${data.totals.status === "paid" ? "#16A34A" : data.totals.status === "partial" ? "#B45309" : "#DC2626"};text-align:right;text-transform:uppercase">${data.totals.status}</td>
+          <td colspan="2"></td>
+        </tr>
       </tfoot>
     </table>
   </div>

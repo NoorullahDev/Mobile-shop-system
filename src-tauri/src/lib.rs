@@ -167,6 +167,7 @@ pub fn run() {
             commands::get_member_balance,
             commands::list_member_balances,
             commands::list_customer_dues,
+            commands::list_customer_due_invoices,
             commands::unpaid_sales_for_member,
             commands::list_payments_for_sale,
             commands::create_supplier,

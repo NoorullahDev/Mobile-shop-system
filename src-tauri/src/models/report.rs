@@ -78,6 +78,7 @@ pub struct OnlinePaymentRecord {
     pub payment_method: String,
     pub amount: f64,
     pub reference: Option<String>,
+    pub account_details: Option<String>,
     pub notes: Option<String>,
     pub created_at: String,
 }

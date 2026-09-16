@@ -1088,7 +1088,6 @@ const MIGRATIONS: &[(&str, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_return_items_imei ON return_items(imei_id);
         "#,
     ),
-
     // =====================================================================
     // 0022: Split Payments — sale_payments table.
     //
@@ -1124,7 +1123,6 @@ const MIGRATIONS: &[(&str, &str)] = &[
           AND NOT EXISTS (SELECT 1 FROM sale_payments sp WHERE sp.sale_id = sales.id);
         "#,
     ),
-
     // =====================================================================
     // 0023: iPhone-specific fields — pta_status + battery_health_pct.
     //
@@ -1144,7 +1142,6 @@ const MIGRATIONS: &[(&str, &str)] = &[
             ('pta_status', 'JV', 3);
         "#,
     ),
-
     // =====================================================================
     // 0024: Link due payments to specific sales — sale_id on payments.
     //
@@ -1156,6 +1153,31 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0024_link_due_payments_to_sales",
         r#"
         ALTER TABLE payments ADD COLUMN sale_id INTEGER;
+        "#,
+    ),
+    // Rebuild the denormalized sale paid total from its two payment sources:
+    // the payment captured with the sale and later completed due collections.
+    (
+        "0025_recalculate_sale_paid_amounts",
+        r#"
+        UPDATE sales
+        SET paid_amount = MIN(
+                total_amount,
+                ROUND(
+                    COALESCE((SELECT SUM(sp.amount) FROM sale_payments sp WHERE sp.sale_id = sales.id), 0)
+                    + COALESCE((SELECT SUM(p.amount) FROM payments p
+                                WHERE p.sale_id = sales.id
+                                  AND p.is_deleted = 0
+                                  AND p.status = 'completed'), 0),
+                    2
+                )
+            );
+        "#,
+    ),
+    (
+        "0026_payment_account_details",
+        r#"
+        ALTER TABLE payments ADD COLUMN account_details TEXT;
         "#,
     ),
 ];

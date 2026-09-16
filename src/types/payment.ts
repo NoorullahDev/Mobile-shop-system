@@ -7,6 +7,7 @@ export interface Payment {
   payment_type?: string | null;
   status: string;
   reference?: string | null;
+  account_details?: string | null;
   notes?: string | null;
   payment_date: string;
   created_by?: number | null;
@@ -22,6 +23,7 @@ export interface CreatePaymentInput {
   payment_type?: string | null;
   status?: string | null;
   reference?: string | null;
+  account_details?: string | null;
   notes?: string | null;
   payment_date?: string | null;
   sale_id?: number | null;
@@ -43,6 +45,19 @@ export interface UnpaidSaleInfo {
   total_amount: number;
   paid_amount: number;
   due_amount: number;
+  created_at: string;
+}
+
+export interface CustomerDueInvoice {
+  sale_id: number;
+  receipt_no: string;
+  member_id: number;
+  member_name: string;
+  phone?: string | null;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  payment_count: number;
   created_at: string;
 }
 

@@ -119,6 +119,9 @@ export function buildReceiptInner(data: ReceiptData, settings: ReceiptSettings):
         const label = PAYMENT_METHOD_LABELS[sp.method] ?? sp.method;
         const ref = sp.reference ? ` (${esc(sp.reference)})` : "";
         tot.push(`<div class="rp-row rp-meta" style="padding-left:4px"><span>  ${esc(label)}${ref}</span><span>${money(sp.amount)}</span></div>`);
+        if (sp.datetime) {
+          tot.push(`<div class="rp-row rp-meta" style="padding-left:8px"><span>${esc(formatDateTime(sp.datetime))}</span><span></span></div>`);
+        }
       }
     } else {
       tot.push(`<div class="rp-row"><span>Paid</span><span>${money(data.totals.paid)}</span></div>`);
@@ -128,11 +131,10 @@ export function buildReceiptInner(data: ReceiptData, settings: ReceiptSettings):
       }
     }
 
-    if (data.totals.balance > 0) {
-      tot.push(
-        `<div class="rp-row rp-dues"><span>Balance Due</span><span>${money(data.totals.balance)}</span></div>`,
-      );
-    }
+    tot.push(
+      `<div class="rp-row rp-dues"><span>Remaining Due</span><span>${money(data.totals.balance)}</span></div>`,
+    );
+    tot.push(`<div class="rp-row rp-meta"><span>Status</span><span>${esc(data.totals.status.toUpperCase())}</span></div>`);
     parts.push(tot.join(""));
   }
 

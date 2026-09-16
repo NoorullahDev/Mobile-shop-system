@@ -164,4 +164,49 @@ mod tests {
             .unwrap();
         assert_eq!(still_there, 1, "record retained for audit");
     }
+
+    #[test]
+    fn migration_recalculates_existing_linked_due_payments() {
+        let conn = mem_conn();
+        migrations::run(&conn).unwrap();
+        conn.execute("INSERT INTO members (name) VALUES ('Existing Due')", [])
+            .unwrap();
+        let member_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method)
+             VALUES ('OLD-DUE', ?1, 38000, 20000, 'bank_transfer')",
+            [member_id],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method) VALUES (?1, 20000, 'bank_transfer')",
+            [sale_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO payments (member_id, amount, payment_method, status, sale_id)
+             VALUES (?1, 10000, 'cash', 'completed', ?2)",
+            rusqlite::params![member_id, sale_id],
+        )
+        .unwrap();
+
+        // Simulate a database that already had the linked payment but had not
+        // yet applied the paid-amount repair migration.
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE version = '0025_recalculate_sale_paid_amounts'",
+            [],
+        )
+        .unwrap();
+        migrations::run(&conn).unwrap();
+
+        let paid: f64 = conn
+            .query_row(
+                "SELECT paid_amount FROM sales WHERE id = ?1",
+                [sale_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(paid, 30000.0);
+    }
 }

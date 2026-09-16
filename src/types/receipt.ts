@@ -70,6 +70,7 @@ export interface ReceiptItemData {
 export interface ReceiptSplitPayment {
   method: string;
   amount: number;
+  datetime?: string | null;
   reference?: string | null;
   notes?: string | null;
 }
@@ -97,6 +98,7 @@ export interface ReceiptData {
     paid: number;
     paymentMethod: string;
     balance: number;
+    status: "paid" | "partial" | "unpaid";
   };
   /** Split payments (when multiple payments exist). */
   splitPayments?: ReceiptSplitPayment[];

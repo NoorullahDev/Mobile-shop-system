@@ -33,7 +33,7 @@ CREATE TABLE members (
 );
 CREATE TABLE payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTEGER, amount REAL NOT NULL,
-    payment_method TEXT NOT NULL, reference TEXT, notes TEXT,
+    payment_method TEXT NOT NULL, reference TEXT, account_details TEXT, notes TEXT,
     payment_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, created_by INTEGER,
     payment_type TEXT, status TEXT NOT NULL DEFAULT 'completed',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0,
