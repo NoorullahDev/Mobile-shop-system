@@ -190,7 +190,7 @@ pub fn list_customer_dues(
 ) -> Result<Vec<MemberBalance>, AppError> {
     let mut sql = String::from(
         "SELECT m.id AS member_id, m.name AS member_name, m.phone,
-                SUM(s.total_amount) AS total_credit,
+                SUM(s.total_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0)) AS total_credit,
                 SUM(s.paid_amount) AS total_paid,
                 COALESCE(SUM((SELECT COUNT(*) FROM payments p
                               WHERE p.sale_id = s.id
@@ -198,7 +198,7 @@ pub fn list_customer_dues(
                                 AND p.status = 'completed')), 0) AS payment_count
          FROM sales s
          JOIN members m ON m.id = s.member_id AND m.is_deleted = 0
-         WHERE (s.total_amount - s.paid_amount) > 0.001",
+         WHERE (s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0)) > 0.001",
     );
     let mut q: Vec<rusqlite::types::Value> = Vec::new();
     if let Some(search) = search.map(str::trim).filter(|value| !value.is_empty()) {
@@ -229,13 +229,13 @@ pub fn list_customer_due_invoices(
         "SELECT s.id AS sale_id, s.receipt_no, s.member_id,
                 m.name AS member_name, m.phone,
                 s.total_amount, s.paid_amount,
-                ROUND(s.total_amount - s.paid_amount, 2) AS due_amount,
+                ROUND(MAX(s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0), 2) AS due_amount,
                 (SELECT COUNT(*) FROM payments p
                  WHERE p.sale_id = s.id AND p.is_deleted = 0 AND p.status = 'completed') AS payment_count,
                 s.created_at
          FROM sales s
          JOIN members m ON m.id = s.member_id AND m.is_deleted = 0
-         WHERE (s.total_amount - s.paid_amount) > 0.001",
+         WHERE (s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0)) > 0.001",
     );
     let mut q: Vec<rusqlite::types::Value> = Vec::new();
     if let Some(search) = search.map(str::trim).filter(|value| !value.is_empty()) {
@@ -289,12 +289,14 @@ use crate::utils;
 pub fn unpaid_sales_for_member(
     conn: &Connection,
     member_id: i64,
-) -> Result<Vec<(i64, String, f64, f64, String)>, AppError> {
+) -> Result<Vec<(i64, String, f64, f64, f64, String)>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.receipt_no, s.total_amount, s.paid_amount, s.created_at
+        "SELECT s.id, s.receipt_no, s.total_amount, s.paid_amount,
+                MAX(s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0),
+                s.created_at
          FROM sales s
          WHERE s.member_id = ?1
-           AND (s.total_amount - s.paid_amount) > 0.001
+           AND (s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0)) > 0.001
          ORDER BY s.created_at ASC",
     )?;
     let rows = stmt.query_map([member_id], |r| {
@@ -303,7 +305,8 @@ pub fn unpaid_sales_for_member(
             r.get::<_, String>(1)?,
             r.get::<_, f64>(2)?,
             r.get::<_, f64>(3)?,
-            r.get::<_, String>(4)?,
+            r.get::<_, f64>(4)?,
+            r.get::<_, String>(5)?,
         ))
     })?;
     let mut out = Vec::new();

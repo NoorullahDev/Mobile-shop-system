@@ -91,7 +91,12 @@ pub fn run() {
             let app_data_dir = app.path().app_data_dir()?;
             let db = Database::open(&app_data_dir)?;
             {
-                let conn = db.conn.lock().expect("db lock");
+                let conn = db.conn.lock().map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "database lock is unavailable",
+                    )
+                })?;
                 database::migrations::run(&conn)?;
                 database::seed::seed(&conn)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
@@ -145,6 +150,7 @@ pub fn run() {
             commands::update_role,
             commands::delete_role,
             commands::list_permissions,
+            commands::change_password,
             commands::create_staff_member,
             commands::list_staff_members,
             commands::update_staff_member,
@@ -194,11 +200,13 @@ pub fn run() {
             commands::update_sale,
             commands::delete_sale,
             commands::list_sales,
+            commands::list_sales_for_period,
             commands::get_sale,
             commands::create_return,
             commands::update_return,
             commands::delete_return,
             commands::list_returns,
+            commands::list_returns_for_period,
             commands::get_return,
             commands::create_category,
             commands::list_categories,
@@ -256,7 +264,10 @@ pub fn run() {
             commands::get_backup_status,
             commands::create_purchase,
             commands::list_purchases,
+            commands::list_purchases_for_period,
             commands::get_purchase,
+            commands::update_purchase,
+            commands::delete_purchase,
             commands::create_supplier_payment,
             commands::update_supplier_payment,
             commands::list_supplier_payments,

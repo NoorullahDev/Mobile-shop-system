@@ -43,15 +43,17 @@ import {
 import { getTopSellers, getPeriodSummary, getSalesSeries, getPaymentBreakdown } from "../services/reportService";
 import { listSales } from "../services/saleService";
 import { listProducts } from "../services/inventoryService";
-import { listSuppliers } from "../services/supplierService";
 import { listReturns } from "../services/returnService";
 import { listMembers } from "../services/memberService";
+import { listCustomerDues } from "../services/paymentService";
+import { listSupplierDues } from "../services/purchaseService";
 import type { TopSeller, PeriodSummary, SalePoint, PaymentBreakdown } from "../types/report";
 import type { Sale } from "../types/sale";
 import type { Product } from "../types/inventory";
-import type { Supplier } from "../types/inventory";
 import type { ReturnSummary } from "../types/return";
 import type { Member } from "../types/member";
+import type { MemberBalance } from "../types/payment";
+import type { SupplierBalance } from "../types/purchase";
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -79,9 +81,9 @@ export function DashboardPage() {
   const [topSellers, setTopSellers] = useState<TopSeller[]>([]);
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
   const [outOfStock, setOutOfStock] = useState<Product[]>([]);
-  const [supplierDues, setSupplierDues] = useState<Supplier[]>([]);
+  const [supplierDues, setSupplierDues] = useState<SupplierBalance[]>([]);
   const [recentReturns, setRecentReturns] = useState<ReturnSummary[]>([]);
-  const [membersWithDues, setMembersWithDues] = useState<Member[]>([]);
+  const [membersWithDues, setMembersWithDues] = useState<MemberBalance[]>([]);
   const [totalMembers, setTotalMembers] = useState<Member[]>([]);
 
   const [period, setPeriod] = useState("today");
@@ -125,20 +127,21 @@ export function DashboardPage() {
       setDailySales(seriesData);
       setPaymentBreakdown(payBreakdown);
 
-      const [salesData, productsData, suppliersData, returnsList, membersData] = await Promise.all([
+      const [salesData, productsData, supplierDueData, returnsList, membersData, customerDueData] = await Promise.all([
         listSales(),
         listProducts(),
-        listSuppliers(),
+        listSupplierDues(),
         listReturns(),
         listMembers(),
+        listCustomerDues(),
       ]);
 
       if (req !== dashReq.current) return;
       setRecentSales(salesData.slice(0, 5));
       setOutOfStock(productsData.filter((p) => p.quantity <= 0));
-      setSupplierDues(suppliersData.filter((s) => ((s as any).balance_due || 0) > 0));
+      setSupplierDues(supplierDueData);
       setRecentReturns(returnsList.slice(0, 5));
-      setMembersWithDues(membersData.filter((m) => ((m as any).balance_due || 0) > 0));
+      setMembersWithDues(customerDueData);
       setTotalMembers(membersData);
     } catch (err) {
       if (req !== dashReq.current) return;
@@ -424,7 +427,7 @@ export function DashboardPage() {
                         <div>
                           <div className="text-[13px] font-semibold text-[#0F172A]">Customer Dues</div>
                           <div className="text-[12px] text-[#64748B]">
-                            {formatMoney(summary?.pending_payments ?? 0)} outstanding from {membersWithDues.length} customers
+                            {formatMoney(membersWithDues.reduce((sum, member) => sum + member.balance, 0))} outstanding from {membersWithDues.length} customers
                           </div>
                         </div>
                       </div>
@@ -443,11 +446,11 @@ export function DashboardPage() {
                         <div>
                           <div className="text-[13px] font-semibold text-[#0F172A]">Supplier Payments Due</div>
                           <div className="text-[12px] text-[#64748B]">
-                            {formatMoney(supplierDues.reduce((sum, s) => sum + ((s as any).balance_due || 0), 0))} due to {supplierDues.length} suppliers
+                            {formatMoney(supplierDues.reduce((sum, supplier) => sum + supplier.balance, 0))} due to {supplierDues.length} suppliers
                           </div>
                         </div>
                       </div>
-                      <Button variant="secondary" size="sm" onClick={() => navigate("/inventory/suppliers")}>
+                      <Button variant="secondary" size="sm" onClick={() => navigate("/supplier-dues")}>
                         <span className="text-[#DC2626]">View</span>
                       </Button>
                     </div>

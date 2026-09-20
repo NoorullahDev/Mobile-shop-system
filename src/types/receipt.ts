@@ -65,6 +65,8 @@ export interface ReceiptItemData {
   qty: number;
   price: number;
   total: number;
+  warranty?: string | null;
+  warranty_expiry?: string | null;
 }
 
 export interface ReceiptSplitPayment {

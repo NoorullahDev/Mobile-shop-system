@@ -48,6 +48,54 @@ function clampHeightMm(mm: number): number {
   return Math.min(1200, Math.max(10, Math.round(mm * 10) / 10));
 }
 
+function waitForFrameAssets(doc: Document): Promise<void> {
+  const images = Array.from(doc.images).filter((image) => !image.complete);
+  const imageReady = Promise.all(
+    images.map(
+      (image) => new Promise<void>((resolve) => {
+        image.addEventListener("load", () => resolve(), { once: true });
+        image.addEventListener("error", () => resolve(), { once: true });
+      }),
+    ),
+  ).then(() => undefined);
+  const fontReady = "fonts" in doc ? doc.fonts.ready.then(() => undefined) : Promise.resolve();
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, 2500));
+  return Promise.race([Promise.all([imageReady, fontReady]).then(() => undefined), timeout]);
+}
+
+function renderAndPrintFrame(iframe: HTMLIFrameElement, html: string): void {
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  const win = iframe.contentWindow;
+  if (!doc || !win) {
+    iframe.remove();
+    throw new Error("Could not prepare the print preview");
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+  const cleanup = () => {
+    if (cleanupTimer) clearTimeout(cleanupTimer);
+    iframe.remove();
+  };
+  win.onafterprint = cleanup;
+
+  void waitForFrameAssets(doc)
+    .then(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    .then(() => {
+      if (!iframe.isConnected) return;
+      win.focus();
+      win.print();
+      cleanupTimer = setTimeout(cleanup, 300_000);
+    })
+    .catch((error) => {
+      console.error("Unable to open print preview", error);
+      cleanup();
+    });
+}
+
 export async function printReceipt(
   data: ReceiptData,
   settings: ReceiptSettings,
@@ -115,33 +163,7 @@ export function printReceiptViaDialog(
   iframe.style.pointerEvents = "none";
   document.body.appendChild(iframe);
 
-  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!iframeDoc) {
-    window.print();
-    return;
-  }
-
-  iframeDoc.open();
-  iframeDoc.write(html);
-  iframeDoc.close();
-
-  const triggerPrint = () => {
-    try {
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    } catch {
-      window.print();
-    }
-  };
-
-  if (iframe.contentWindow) {
-    iframe.contentWindow.onafterprint = () => {
-      iframe.remove();
-    };
-  }
-
-  // Small delay to ensure content is rendered in the iframe
-  setTimeout(triggerPrint, 300);
+  renderAndPrintFrame(iframe, html);
 }
 
 /**
@@ -168,33 +190,7 @@ export function printA4InvoiceViaDialog(data: ReceiptData): void {
   iframe.style.pointerEvents = "none";
   document.body.appendChild(iframe);
 
-  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!iframeDoc) {
-    window.print();
-    return;
-  }
-
-  iframeDoc.open();
-  iframeDoc.write(html);
-  iframeDoc.close();
-
-  const triggerPrint = () => {
-    try {
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    } catch {
-      window.print();
-    }
-  };
-
-  if (iframe.contentWindow) {
-    iframe.contentWindow.onafterprint = () => {
-      iframe.remove();
-    };
-  }
-
-  // Small delay to ensure content is rendered in the iframe
-  setTimeout(triggerPrint, 300);
+  renderAndPrintFrame(iframe, html);
 }
 
 /**
@@ -251,31 +247,5 @@ ${el.outerHTML}
   iframe.style.pointerEvents = "none";
   document.body.appendChild(iframe);
 
-  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!iframeDoc) {
-    window.print();
-    return;
-  }
-
-  iframeDoc.open();
-  iframeDoc.write(html);
-  iframeDoc.close();
-
-  const triggerPrint = () => {
-    try {
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    } catch {
-      window.print();
-    }
-  };
-
-  if (iframe.contentWindow) {
-    iframe.contentWindow.onafterprint = () => {
-      iframe.remove();
-    };
-  }
-
-  // Small delay to ensure content is rendered in the iframe
-  setTimeout(triggerPrint, 300);
+  renderAndPrintFrame(iframe, html);
 }

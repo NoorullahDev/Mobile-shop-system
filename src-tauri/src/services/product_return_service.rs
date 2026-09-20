@@ -283,10 +283,61 @@ pub fn create(
     input: CreateReturnInput,
     actor: Option<i64>,
 ) -> Result<ProductReturn, AppError> {
-    let prepared = prepare(conn, &input, None)?;
+    let mut input = input;
+    let exchange_item = input.exchange_item.take();
+    
+    let mut prepared = prepare(conn, &input, None)?;
 
     // ----- Persist everything in a single transaction -----
     let tx = conn.unchecked_transaction()?;
+
+    let mut exchange_sale_id = None;
+    if input.return_type == "exchange" {
+        if let Some(mut sale_input) = exchange_item {
+            let s_amount = sale_input.items.iter().map(|i| i.quantity as f64 * i.unit_price.unwrap_or(0.0)).sum::<f64>();
+            let r_amount = prepared.refund_amount;
+            sale_input.discount = 0.0;
+            
+            sale_input.payments.clear();
+            if s_amount > r_amount {
+                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
+                    amount: r_amount,
+                    payment_method: "exchange_credit".to_string(),
+                    reference: None,
+                    notes: None,
+                });
+                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
+                    amount: utils::round2(s_amount - r_amount),
+                    payment_method: prepared.refund_method.clone(),
+                    reference: None,
+                    notes: None,
+                });
+                prepared.refund_amount = 0.0;
+            } else if s_amount < r_amount {
+                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
+                    amount: s_amount,
+                    payment_method: "exchange_credit".to_string(),
+                    reference: None,
+                    notes: None,
+                });
+                prepared.refund_amount = utils::round2(r_amount - s_amount);
+            } else {
+                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
+                    amount: s_amount,
+                    payment_method: "exchange_credit".to_string(),
+                    reference: None,
+                    notes: None,
+                });
+                prepared.refund_amount = 0.0;
+            }
+            
+            sale_input.member_id = prepared.sale.member_id;
+            exchange_sale_id = Some(crate::services::sale_service::create_tx(&tx, sale_input, actor)?);
+        } else {
+            return Err(AppError::validation("Exchange item details are required for an exchange"));
+        }
+    }
+
     let return_no = product_return_repository::next_return_no(&tx)?;
 
     let reason = prepared.lines.iter().find_map(|l| l.reason.clone());
@@ -309,6 +360,9 @@ pub fn create(
         &prepared.condition_label,
         prepared.notes.as_deref(),
         actor,
+        &input.return_type,
+        exchange_sale_id,
+        input.reference.as_deref(),
     )?;
 
     for line in &prepared.lines {
@@ -368,6 +422,14 @@ pub fn create(
 
 pub fn list(conn: &Connection, search: Option<String>) -> Result<Vec<ReturnSummary>, AppError> {
     product_return_repository::list_returns(conn, search.as_deref())
+}
+
+pub fn list_for_period(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<ReturnSummary>, AppError> {
+    product_return_repository::list_returns_for_period(conn, from, to)
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<ProductReturn, AppError> {
@@ -442,10 +504,63 @@ pub fn update(
     if input.sale_id != old.sale_id {
         return Err(AppError::validation("A return cannot be moved to another sale"));
     }
+    let mut input = input;
+    let exchange_item = input.exchange_item.take();
     let prepared = prepare(conn, &input, Some(id))?;
     let tx = conn.unchecked_transaction()?;
     apply_inventory_change(&tx, &old.items, &prepared.lines)?;
     tx.execute("DELETE FROM return_items WHERE return_id = ?1", [id])?;
+
+    let mut exchange_sale_id = old.exchange_sale_id;
+    if input.return_type == "exchange" {
+        if let Some(mut sale_input) = exchange_item {
+            let s_amount = sale_input.items.iter().map(|i| i.quantity as f64 * i.unit_price.unwrap_or(0.0)).sum::<f64>();
+            let r_amount = prepared.refund_amount;
+            sale_input.discount = 0.0;
+            sale_input.payments.clear();
+            if s_amount > r_amount {
+                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
+                    amount: r_amount,
+                    payment_method: "exchange_credit".to_string(),
+                    reference: None,
+                    notes: None,
+                });
+                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
+                    amount: utils::round2(s_amount - r_amount),
+                    payment_method: prepared.refund_method.clone(),
+                    reference: None,
+                    notes: None,
+                });
+            } else if s_amount < r_amount {
+                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
+                    amount: s_amount,
+                    payment_method: "exchange_credit".to_string(),
+                    reference: None,
+                    notes: None,
+                });
+            } else {
+                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
+                    amount: s_amount,
+                    payment_method: "exchange_credit".to_string(),
+                    reference: None,
+                    notes: None,
+                });
+            }
+            sale_input.member_id = prepared.sale.member_id;
+            if let Some(old_sid) = exchange_sale_id {
+                crate::services::sale_service::delete_tx(&tx, old_sid)?;
+            }
+            exchange_sale_id = Some(crate::services::sale_service::create_tx(&tx, sale_input, actor)?);
+        } else {
+            return Err(AppError::validation("Exchange item details are required for an exchange"));
+        }
+    } else if input.return_type == "return" {
+        if let Some(old_sid) = exchange_sale_id {
+            crate::services::sale_service::delete_tx(&tx, old_sid)?;
+            exchange_sale_id = None;
+        }
+    }
+
     let reason = prepared.lines.iter().find_map(|line| line.reason.clone());
     product_return_repository::update_return(
         &tx,
@@ -459,6 +574,7 @@ pub fn update(
         reason.as_deref(),
         &prepared.condition_label,
         prepared.notes.as_deref(),
+        exchange_sale_id,
     )?;
     insert_lines(&tx, id, &prepared.lines)?;
     tx.commit()?;
@@ -473,6 +589,11 @@ pub fn delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppE
     if !product_return_repository::delete_return(&tx, id)? {
         return Err(AppError::validation("Return not found"));
     }
+    
+    if let Some(exchange_sale_id) = old.exchange_sale_id {
+        crate::services::sale_service::delete_tx(&tx, exchange_sale_id)?;
+    }
+    
     tx.commit()?;
     services::record_activity(conn, actor, "return", "delete", Some(id))
 }
@@ -529,6 +650,8 @@ mod tests {
                     quantity: 1,
                     imei_id: Some(iid),
                     unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
                 }],
             },
             None,
@@ -552,10 +675,12 @@ mod tests {
     fn return_input(sale_id: i64, sale_item_id: i64, qty: i64, condition: &str) -> CreateReturnInput {
         CreateReturnInput {
             sale_id,
+            return_type: "return".into(),
             return_charge_percent: 0.0,
             fixed_deduction: None,
             refund_method: Some("cash".into()),
             return_date: None,
+            reference: None,
             notes: None,
             items: vec![ReturnItemInput {
                 sale_item_id,
@@ -564,6 +689,7 @@ mod tests {
                 reason: Some("change of mind".into()),
                 condition: condition.into(),
             }],
+            exchange_item: None,
         }
     }
 
@@ -624,6 +750,8 @@ mod tests {
                     quantity: 5,
                     imei_id: None,
                     unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
                 }],
             },
             None,
@@ -714,6 +842,8 @@ mod tests {
                     quantity: qty,
                     imei_id: None,
                     unit_price: Some(price),
+                    warranty: None,
+                    warranty_expiry: None,
                 }],
             },
             None,
@@ -921,6 +1051,80 @@ mod tests {
         assert_eq!(row.return_count, 2);
         assert!(row.returned_amount > 0.0);
         assert!(row.returns.is_empty());
+    }
+
+    #[test]
+    fn one_return_with_multiple_items_is_not_double_counted() {
+        let conn = in_memory_conn();
+        let first = phone(&conn, 2, 100.0);
+        let second = phone(&conn, 2, 100.0);
+        let sale = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                member_id: None,
+                discount: 0.0,
+                paid_amount: None,
+                payment_method: Some("cash".into()),
+                notes: None,
+                payments: vec![],
+                items: vec![
+                    SaleItemInput {
+                        sale_item_id: None,
+                        item_type: "phone".into(),
+                        item_id: first,
+                        quantity: 1,
+                        imei_id: None,
+                        unit_price: None,
+                        warranty: None,
+                        warranty_expiry: None,
+                    },
+                    SaleItemInput {
+                        sale_item_id: None,
+                        item_type: "phone".into(),
+                        item_id: second,
+                        quantity: 1,
+                        imei_id: None,
+                        unit_price: None,
+                        warranty: None,
+                        warranty_expiry: None,
+                    },
+                ],
+            },
+            None,
+        )
+        .unwrap();
+        create(
+            &conn,
+            CreateReturnInput {
+                sale_id: sale.id,
+                return_type: "return".into(),
+                return_charge_percent: 0.0,
+                fixed_deduction: None,
+                refund_method: Some("cash".into()),
+                return_date: None,
+                reference: None,
+                notes: None,
+                items: sale
+                    .items
+                    .iter()
+                    .map(|item| ReturnItemInput {
+                        sale_item_id: item.id,
+                        quantity: 1,
+                        imei_id: None,
+                        reason: None,
+                        condition: "sellable".into(),
+                    })
+                    .collect(),
+                exchange_item: None,
+            },
+            None,
+        )
+        .unwrap();
+
+        let refreshed = sale_service::get(&conn, sale.id).unwrap();
+        assert_eq!(refreshed.return_count, 1);
+        assert_eq!(refreshed.returned_amount, 200.0);
+        assert_eq!(refreshed.return_status, "full");
     }
 
     #[test]

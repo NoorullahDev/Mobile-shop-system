@@ -7,6 +7,8 @@ export interface SaleItemInput {
   quantity: number;
   imei_id?: number | null;
   unit_price?: number | null;
+  warranty?: string | null;
+  warranty_expiry?: string | null;
 }
 
 export interface SalePaymentInput {
@@ -39,6 +41,8 @@ export interface SaleItem {
   imei?: string | null;
   variant?: string | null;
   serial_no?: string | null;
+  warranty?: string | null;
+  warranty_expiry?: string | null;
 }
 
 export interface SalePayment {

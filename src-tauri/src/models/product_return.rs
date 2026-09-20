@@ -18,6 +18,9 @@ pub struct ReturnItemInput {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct CreateReturnInput {
     pub sale_id: i64,
+    /// "return" (default) or "exchange".
+    #[serde(default = "default_return_type")]
+    pub return_type: String,
     /// Restock charge as a percentage of the returned value
     /// (0, 10, 20, 30 or any custom value).
     pub return_charge_percent: f64,
@@ -30,8 +33,16 @@ pub struct CreateReturnInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     pub items: Vec<ReturnItemInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exchange_item: Option<crate::models::sale::CreateSaleInput>,
+}
+
+fn default_return_type() -> String {
+    "return".to_string()
 }
 
 /// A returned line joined with its product snapshot (used in return detail).
@@ -82,6 +93,8 @@ pub struct ReturnSummary {
     pub refund_method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
     pub condition: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,6 +107,9 @@ pub struct ReturnSummary {
     pub created_by_name: Option<String>,
     pub created_at: String,
     pub item_count: i64,
+    pub return_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exchange_sale_id: Option<i64>,
 }
 
 /// Full return record: header + items.
@@ -117,6 +133,8 @@ pub struct ProductReturn {
     pub refund_method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
     pub condition: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,4 +147,7 @@ pub struct ProductReturn {
     pub created_by_name: Option<String>,
     pub created_at: String,
     pub items: Vec<ReturnItem>,
+    pub return_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exchange_sale_id: Option<i64>,
 }

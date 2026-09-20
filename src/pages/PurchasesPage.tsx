@@ -8,6 +8,7 @@ import {
   ArrowLeftRight,
   X,
   FileText,
+  Trash2,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -34,13 +35,19 @@ const methodLabels: Record<string, string> = {
 };
 
 export function PurchasesPage() {
-  const { purchases, loading, error, load, add } = usePurchaseStore();
+  const { purchases, loading, error, load, add, update, remove } = usePurchaseStore();
   const { phones, accessories, load: loadInventory, addPhone, addAccessory } = useInventoryStore();
   const { suppliers, load: loadSuppliers } = useSupplierStore();
   const user = useSessionStore((s) => s.user);
 
   const [search, setSearch] = useState("");
   const [recordOpen, setRecordOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Purchase | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const [detail, setDetail] = useState<Purchase | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -243,7 +250,7 @@ export function PurchasesPage() {
                       </td>
                       <td style={{ color: "#64748B", fontSize: "12px" }}>{formatDate(p.created_at)}</td>
                       <td>
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-1">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -252,6 +259,31 @@ export function PurchasesPage() {
                             title={`View ${p.purchase_no}`}
                           >
                             View
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              // We need the full purchase details (items, imeis) to edit properly
+                              let toEdit = p;
+                              if (!p.items || p.items.length === 0) {
+                                const full = await purchaseService.getPurchase(p.id);
+                                if (full) toEdit = full;
+                              }
+                              setEditTarget(toEdit);
+                            }}
+                            title={`Edit ${p.purchase_no}`}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeleteTarget(p)}
+                            title={`Delete ${p.purchase_no}`}
+                            style={{ color: "#EF4444" }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                       </td>
@@ -284,6 +316,81 @@ export function PurchasesPage() {
           addPhone={addPhone}
           addAccessory={addAccessory}
         />
+      </Modal>
+
+      <Modal
+        open={editTarget !== null}
+        title="Edit Purchase"
+        subtitle={`Modify purchase ${editTarget?.purchase_no}`}
+        onClose={() => setEditTarget(null)}
+        size="lg"
+      >
+        {editTarget && (
+          <PurchaseForm
+            initial={editTarget}
+            onSubmit={async (input) => {
+              await update(editTarget.id, input);
+              await loadInventory();
+              setEditTarget(null);
+            }}
+            onCancel={() => setEditTarget(null)}
+            suppliers={suppliers}
+            phones={phones}
+            accessories={accessories}
+            addPhone={addPhone}
+            addAccessory={addAccessory}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        open={deleteTarget !== null}
+        title="Delete Purchase"
+        subtitle={`Are you sure you want to delete ${deleteTarget?.purchase_no}?`}
+        onClose={() => { setDeleteTarget(null); setDeleteReason(""); setDeleteError(null); }}
+      >
+        <div className="flex flex-col gap-4">
+          <Alert variant="warning" message="This will reverse all inventory and payment effects of this purchase. This action cannot be undone." />
+          {deleteError && <Alert variant="error" message={deleteError} />}
+          <div>
+            <label className="mb-1 block text-[13px] font-semibold text-[#1E293B]">Reason for Deletion</label>
+            <input
+              type="text"
+              className="h-9 w-full rounded border border-[#CBD5E1] px-3 text-[13px] outline-none transition-colors focus:border-[#3B6FD4]"
+              placeholder="e.g. Entered by mistake"
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              disabled={deleting}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => { setDeleteTarget(null); setDeleteReason(""); setDeleteError(null); }} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!deleteReason.trim() || deleting}
+              onClick={async () => {
+                if (!deleteTarget) return;
+                setDeleting(true);
+                setDeleteError(null);
+                try {
+                  await remove(deleteTarget.id, deleteReason.trim());
+                  await loadInventory();
+                  setDeleteTarget(null);
+                  setDeleteReason("");
+                } catch (e) {
+                  setDeleteError(String(e));
+                } finally {
+                  setDeleting(false);
+                }
+              }}
+              style={{ backgroundColor: "#EF4444" }}
+            >
+              {deleting ? "Deleting..." : "Delete Purchase"}
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* Detail Modal */}

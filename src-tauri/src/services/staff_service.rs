@@ -249,8 +249,10 @@ pub fn create_salary(
             "A salary record already exists for this staff member and month",
         ));
     }
-    let expense_id = sync_salary_expense(conn, &input, None, user_id)?;
-    let id = staff_repository::insert_salary(conn, &input, net, remaining, &status, expense_id)?;
+    let tx = conn.unchecked_transaction()?;
+    let expense_id = sync_salary_expense(&tx, &input, None, user_id)?;
+    let id = staff_repository::insert_salary(&tx, &input, net, remaining, &status, expense_id)?;
+    tx.commit()?;
     record_activity(conn, user_id, "salary", "create", Some(id))?;
     staff_repository::get_salary(conn, id)?
         .ok_or_else(|| AppError::Internal("Created salary record could not be retrieved".into()))
@@ -286,10 +288,12 @@ pub fn update_salary(
             "A salary record already exists for this staff member and month",
         ));
     }
-    let expense_id = sync_salary_expense(conn, &input, current.expense_id, user_id)?;
-    if !staff_repository::update_salary(conn, id, &input, net, remaining, &status, expense_id)? {
+    let tx = conn.unchecked_transaction()?;
+    let expense_id = sync_salary_expense(&tx, &input, current.expense_id, user_id)?;
+    if !staff_repository::update_salary(&tx, id, &input, net, remaining, &status, expense_id)? {
         return Err(AppError::validation("Salary record not found"));
     }
+    tx.commit()?;
     record_activity(conn, user_id, "salary", "update", Some(id))?;
     staff_repository::get_salary(conn, id)?
         .ok_or_else(|| AppError::Internal("Updated salary record could not be retrieved".into()))
@@ -298,12 +302,14 @@ pub fn update_salary(
 pub fn delete_salary(conn: &Connection, id: i64, user_id: Option<i64>) -> Result<(), AppError> {
     let current = staff_repository::get_salary(conn, id)?
         .ok_or_else(|| AppError::validation("Salary record not found"))?;
+    let tx = conn.unchecked_transaction()?;
     if let Some(expense_id) = current.expense_id {
-        expense_repository::soft_delete(conn, expense_id)?;
+        expense_repository::soft_delete(&tx, expense_id)?;
     }
-    if !staff_repository::soft_delete_salary(conn, id)? {
+    if !staff_repository::soft_delete_salary(&tx, id)? {
         return Err(AppError::validation("Salary record not found"));
     }
+    tx.commit()?;
     record_activity(conn, user_id, "salary", "delete", Some(id))
 }
 

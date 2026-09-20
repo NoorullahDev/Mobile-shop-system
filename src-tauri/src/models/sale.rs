@@ -15,6 +15,12 @@ pub struct SaleItemInput {
     pub imei_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit_price: Option<f64>,
+    /// Optional warranty label (e.g. "7 Days", "1 Year", or custom text).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warranty: Option<String>,
+    /// Computed expiry ISO date (YYYY-MM-DD). Sent by frontend after calculating from sale date + duration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warranty_expiry: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -50,6 +56,12 @@ pub struct SaleItem {
     /// Serial number when the product records one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_no: Option<String>,
+    /// Warranty label (e.g. "7 Days", "1 Year", custom text). None/empty = no warranty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warranty: Option<String>,
+    /// Warranty expiry ISO date (YYYY-MM-DD).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warranty_expiry: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

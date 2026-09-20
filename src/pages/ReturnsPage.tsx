@@ -290,8 +290,17 @@ export function ReturnsPage() {
                 <div style={{ color: "#94A3B8" }}>Refund method</div>
                 <div className="font-medium capitalize" style={{ color: "#0F172A" }}>
                   {detail.refund_method.replace("_", " ")}
+                  {detail.reference && ` (${detail.reference})`}
                 </div>
               </div>
+              {detail.return_type === "exchange" && (
+                <div>
+                  <div style={{ color: "#166534" }}>Exchange Sale</div>
+                  <div className="font-mono font-medium" style={{ color: "#0F172A" }}>
+                    ID: {detail.exchange_sale_id ?? "—"}
+                  </div>
+                </div>
+              )}
               <div>
                 <div style={{ color: "#94A3B8" }}>Returned</div>
                 <div style={{ color: "#0F172A" }}>{formatDate(detail.return_date)}</div>

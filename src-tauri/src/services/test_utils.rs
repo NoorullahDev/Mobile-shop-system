@@ -157,7 +157,8 @@ CREATE TABLE sales (
 CREATE TABLE sale_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL,
     phone_id INTEGER, accessory_id INTEGER,
-    imei_id INTEGER, quantity INTEGER NOT NULL DEFAULT 1, unit_price REAL NOT NULL DEFAULT 0
+    imei_id INTEGER, quantity INTEGER NOT NULL DEFAULT 1, unit_price REAL NOT NULL DEFAULT 0,
+    warranty TEXT, warranty_expiry TEXT
 );
 CREATE TABLE purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_no TEXT NOT NULL UNIQUE, supplier_id INTEGER,
@@ -194,6 +195,9 @@ CREATE TABLE returns (
     return_charge_percent REAL NOT NULL DEFAULT 0, refund_method TEXT NOT NULL DEFAULT 'cash',
     return_date TEXT, reason TEXT, condition TEXT NOT NULL DEFAULT 'sellable',
     status TEXT NOT NULL DEFAULT 'processed', notes TEXT, created_by INTEGER,
+    return_type TEXT NOT NULL DEFAULT 'return',
+    exchange_sale_id INTEGER,
+    reference TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE return_items (

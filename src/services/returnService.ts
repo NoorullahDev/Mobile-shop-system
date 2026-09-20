@@ -12,6 +12,10 @@ export async function listReturns(search?: string): Promise<ReturnSummary[]> {
   return invoke<ReturnSummary[]>("list_returns", { search: search ?? null });
 }
 
+export async function listReturnsForPeriod(from: string, to: string): Promise<ReturnSummary[]> {
+  return invoke<ReturnSummary[]>("list_returns_for_period", { from, to });
+}
+
 export async function getReturn(id: number): Promise<ProductReturn> {
   return invoke<ProductReturn>("get_return", { id });
 }

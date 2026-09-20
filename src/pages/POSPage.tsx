@@ -31,6 +31,7 @@ import type { PhoneImei, Product } from "../types/inventory";
 import type { CreateMemberInput } from "../types/member";
 import type { CreateSaleInput, Sale, SalePaymentInput } from "../types/sale";
 import { PAYMENT_METHOD_LABELS } from "../types/sale";
+import { WARRANTY_OPTIONS, computeWarrantyExpiry } from "../lib/warranty";
 
 const posImageCache = new Map<string, Promise<string>>();
 
@@ -99,6 +100,9 @@ interface CartLine {
   quantity: number;
   imei_id: number | null;
   unit_price: number;
+  warranty: string;
+  warranty_expiry: string | null;
+  custom_warranty_expiry: string;
 }
 
 let lineKey = 0;
@@ -194,6 +198,9 @@ export function POSPage() {
           quantity: 1,
           imei_id: null,
           unit_price: item.sale_price,
+          warranty: "",
+          warranty_expiry: null,
+          custom_warranty_expiry: "",
         },
       ]);
       if (item.item_type === "phone") loadImeis(item.item_id);
@@ -277,6 +284,8 @@ export function POSPage() {
         quantity: l.quantity,
         imei_id: l.imei_id ?? null,
         unit_price: l.unit_price > 0 ? l.unit_price : null,
+        warranty: l.warranty || null,
+        warranty_expiry: l.warranty === "custom" ? l.custom_warranty_expiry || null : l.warranty_expiry,
       })),
       payments: payments.length > 0 ? payments : undefined,
     };
@@ -599,6 +608,38 @@ export function POSPage() {
                             updateLine(l.key, { imei_id: e.target.value ? Number(e.target.value) : null })
                           }
                         />
+                      )}
+
+                      {l.item_type === "phone" && (
+                        <>
+                          <Select
+                            name={`warranty-${l.key}`}
+                            className="mt-2"
+                            options={[...WARRANTY_OPTIONS]}
+                            value={l.warranty}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === "custom") {
+                                updateLine(l.key, { warranty: "custom", warranty_expiry: null });
+                              } else {
+                                updateLine(l.key, {
+                                  warranty: val,
+                                  warranty_expiry: val ? computeWarrantyExpiry(new Date().toISOString(), val) : null,
+                                  custom_warranty_expiry: "",
+                                });
+                              }
+                            }}
+                          />
+                          {l.warranty === "custom" && (
+                            <Input
+                              label="Expiry Date"
+                              type="date"
+                              className="mt-2"
+                              value={l.custom_warranty_expiry}
+                              onChange={(e) => updateLine(l.key, { custom_warranty_expiry: e.target.value })}
+                            />
+                          )}
+                        </>
                       )}
                     </div>
                   );

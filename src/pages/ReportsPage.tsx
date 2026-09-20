@@ -104,12 +104,6 @@ const presets: Preset[] = [
   { label: "All Time", range: () => ["1970-01-01", toInputDate(new Date())] },
 ];
 
-function inRange(value: string | null | undefined, from: string, to: string) {
-  if (!value) return false;
-  const date = value.slice(0, 10);
-  return date >= from && date <= to;
-}
-
 function shortDay(value: string) {
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-PK", { day: "numeric", month: "short" });
@@ -193,11 +187,11 @@ export function ReportsPage() {
         reportService.getSalesSeries(rangeFrom, rangeTo),
         reportService.getPaymentBreakdown(rangeFrom, rangeTo),
         reportService.getTopSellers(rangeFrom, rangeTo, 10),
-        saleService.listSales(),
-        returnService.listReturns(),
+        saleService.listSalesForPeriod(rangeFrom, rangeTo),
+        returnService.listReturnsForPeriod(rangeFrom, rangeTo),
         inventoryService.listPhones(),
         inventoryService.listAccessories(),
-        purchaseService.listPurchases(),
+        purchaseService.listPurchasesForPeriod(rangeFrom, rangeTo),
         memberService.listMembers(),
         paymentService.listMemberBalances(),
         paymentService.listCustomerDues(),
@@ -214,11 +208,11 @@ export function ReportsPage() {
       setSalesSeries(nextSeries.map((point) => ({ day: point.day, label: shortDay(point.day), Revenue: point.total })));
       setBreakdown(nextBreakdown);
       setTopSellers(nextTopSellers);
-      setSales(nextSales.filter((sale) => inRange(sale.created_at, rangeFrom, rangeTo)));
-      setReturns(nextReturns.filter((item) => inRange(item.return_date ?? item.created_at, rangeFrom, rangeTo)));
+      setSales(nextSales);
+      setReturns(nextReturns);
       setPhones(nextPhones);
       setAccessories(nextAccessories);
-      setPurchases(nextPurchases.filter((purchase) => inRange(purchase.purchase_date ?? purchase.created_at, rangeFrom, rangeTo)));
+      setPurchases(nextPurchases);
       setMembers(nextMembers);
       setCustomerBalances(nextCustomerBalances);
       setCustomerDues(nextCustomerDues);
@@ -360,7 +354,7 @@ export function ReportsPage() {
       addSection("Payment Methods", ["Method", "Count", "Total"], breakdown.map((item) => [methodLabels[item.payment_method] ?? item.payment_method, item.count, item.total]));
       addSection("Top Products", ["Product", "Type", "Quantity", "Revenue"], topSellers.map((item) => [item.product_name, item.item_type, item.quantity, item.revenue]));
     }
-    if (reportType === "sales-history") addSection("Sales History", ["Date", "Sale #", "Customer", "Total", "Paid", "Due", "Payment", "Return Status"], sales.map((item) => [item.created_at, item.receipt_no, item.member_name ?? "Walk-in", item.total_amount, item.paid_amount, Math.max(0, item.total_amount - item.paid_amount), methodLabels[item.payment_method] ?? item.payment_method, item.return_status ?? "none"]));
+    if (reportType === "sales-history") addSection("Sales History", ["Date", "Sale #", "Customer", "Total", "Paid", "Due", "Payment", "Return Status"], sales.map((item) => [item.created_at, item.receipt_no, item.member_name ?? "Walk-in", item.total_amount, item.paid_amount, Math.max(0, item.total_amount - item.paid_amount - (item.returned_amount ?? 0)), methodLabels[item.payment_method] ?? item.payment_method, item.return_status ?? "none"]));
     if (reportType === "returns") addSection("Returns & Exchanges", ["Date", "Return #", "Sale #", "Customer", "Items", "Deduction", "Refund", "Status"], returns.map((item) => [item.return_date ?? item.created_at, item.return_no, item.receipt_no ?? item.sale_id, item.customer_name ?? "Walk-in", item.item_count, item.deduction_amount, item.refund_amount, item.status]));
     if (reportType === "products" || reportType === "inventory") addSection(reportLabel, ["Type", "Product", "Category", "Variant", "Cost", "Sale", "Stock", "Status"], products.map((item) => [item.type, item.name, item.category, item.variant, item.costPrice, item.salePrice, item.quantity, item.quantity === 0 ? "Out of Stock" : item.lowStockThreshold > 0 && item.quantity <= item.lowStockThreshold ? "Low Stock" : "In Stock"]));
     if (reportType === "purchases") addSection("Purchases", ["Date", "Purchase #", "Supplier", "Invoice Ref", "Total", "Paid", "Due", "Status"], purchases.map((item) => [item.purchase_date ?? item.created_at, item.purchase_no, item.supplier_name ?? "—", item.invoice_reference ?? "—", item.total_amount, item.paid_amount, item.balance_due, item.payment_status]));
@@ -457,7 +451,7 @@ export function ReportsPage() {
 
           {reportType === "sales-history" && <>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3"><KpiCard title="Net Sales" value={formatMoney(summary?.revenue ?? 0)} icon={TrendingUp} tone="green" sub={`${sales.length} transactions`} /><KpiCard title="Total Paid" value={formatMoney(summary?.received ?? 0)} icon={Wallet} tone="primary" sub="Collected" /><KpiCard title="Outstanding" value={formatMoney(summary?.outstanding ?? 0)} icon={CreditCard} tone="amber" sub="Unpaid" /></div>
-            <Card title="Sales History" noPadding><div className="overflow-x-auto"><table className="data-table"><thead><tr><th>Date</th><th>Sale #</th><th>Customer</th><th className="text-right">Total</th><th className="text-right">Paid</th><th className="text-right">Due</th><th>Payment</th><th>Return Status</th></tr></thead><tbody>{sales.length === 0 ? <EmptyRows columns={8} message="No sales in this period." /> : sales.map((item) => <tr key={item.id}><td>{formatDate(item.created_at)}</td><td className="font-mono font-semibold">{item.receipt_no}</td><td>{item.member_name ?? "Walk-in"}</td><td className="text-right amount">{formatMoney(item.total_amount)}</td><td className="text-right amount">{formatMoney(item.paid_amount)}</td><td className="text-right amount">{formatMoney(Math.max(0, item.total_amount - item.paid_amount))}</td><td>{methodLabels[item.payment_method] ?? item.payment_method}</td><td className="capitalize">{item.return_status ?? "none"}</td></tr>)}</tbody></table></div></Card>
+            <Card title="Sales History" noPadding><div className="overflow-x-auto"><table className="data-table"><thead><tr><th>Date</th><th>Sale #</th><th>Customer</th><th className="text-right">Total</th><th className="text-right">Paid</th><th className="text-right">Due</th><th>Payment</th><th>Return Status</th></tr></thead><tbody>{sales.length === 0 ? <EmptyRows columns={8} message="No sales in this period." /> : sales.map((item) => <tr key={item.id}><td>{formatDate(item.created_at)}</td><td className="font-mono font-semibold">{item.receipt_no}</td><td>{item.member_name ?? "Walk-in"}</td><td className="text-right amount">{formatMoney(item.total_amount)}</td><td className="text-right amount">{formatMoney(item.paid_amount)}</td><td className="text-right amount">{formatMoney(Math.max(0, item.total_amount - item.paid_amount - (item.returned_amount ?? 0)))}</td><td>{methodLabels[item.payment_method] ?? item.payment_method}</td><td className="capitalize">{item.return_status ?? "none"}</td></tr>)}</tbody></table></div></Card>
           </>}
 
           {reportType === "returns" && <><div className="grid grid-cols-2 gap-4 xl:grid-cols-4"><KpiCard title="Return Records" value={String(returns.length)} icon={RotateCcw} tone="red" /><KpiCard title="Returned Items" value={String(returnedItems)} icon={Package} tone="amber" /><KpiCard title="Refunds" value={formatMoney(returnRefunds)} icon={Wallet} tone="red" /><KpiCard title="Deductions" value={formatMoney(returnDeductions)} icon={Receipt} tone="navy" /></div><Card title="Returns & Exchanges" noPadding><div className="overflow-x-auto"><table className="data-table"><thead><tr><th>Date</th><th>Return #</th><th>Sale #</th><th>Customer</th><th className="text-center">Items</th><th className="text-right">Deduction</th><th className="text-right">Refund</th><th>Status</th></tr></thead><tbody>{returns.length === 0 ? <EmptyRows columns={8} message="No returns in this period." /> : returns.map((item) => <tr key={item.id}><td>{formatDate(item.return_date ?? item.created_at)}</td><td className="font-semibold">{item.return_no}</td><td>{item.receipt_no ?? `#${item.sale_id}`}</td><td>{item.customer_name ?? "Walk-in"}</td><td className="text-center">{item.item_count}</td><td className="text-right amount">{formatMoney(item.deduction_amount)}</td><td className="text-right amount">{formatMoney(item.refund_amount)}</td><td className="capitalize">{item.status}</td></tr>)}</tbody></table></div></Card></>}

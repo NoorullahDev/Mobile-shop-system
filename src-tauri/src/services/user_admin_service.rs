@@ -221,8 +221,10 @@ pub fn create_role(
         return Err(AppError::validation("A role with this name already exists"));
     }
     let description = clean_opt(input.description);
-    let id = repo::insert_role(conn, &name, description.as_deref())?;
-    repo::set_role_permissions(conn, id, &input.permissions)?;
+    let tx = conn.unchecked_transaction()?;
+    let id = repo::insert_role(&tx, &name, description.as_deref())?;
+    repo::set_role_permissions(&tx, id, &input.permissions)?;
+    tx.commit()?;
     services::record_activity(conn, actor, "role", "create", Some(id))?;
     get_role(conn, id)
 }
@@ -245,11 +247,13 @@ pub fn update_role(
     let description = clean_opt(input.description);
 
     // Builtin roles cannot be renamed/deleted but their permissions may be edited by an admin.
-    let ok = repo::update_role(conn, id, &name, description.as_deref())?;
+    let tx = conn.unchecked_transaction()?;
+    let ok = repo::update_role(&tx, id, &name, description.as_deref())?;
     if !ok {
         return Err(AppError::validation("Role not found"));
     }
-    repo::set_role_permissions(conn, id, &input.permissions)?;
+    repo::set_role_permissions(&tx, id, &input.permissions)?;
+    tx.commit()?;
     services::record_activity(conn, actor, "role", "update", Some(id))?;
     get_role(conn, id)
 }
@@ -275,6 +279,30 @@ pub fn delete_role(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(),
 
 pub fn list_permissions(conn: &Connection) -> Result<Vec<Permission>, AppError> {
     repo::list_permissions(conn)
+}
+
+pub fn change_password(
+    conn: &Connection,
+    user_id: i64,
+    current_password: &str,
+    new_password: &str,
+) -> Result<(), AppError> {
+    if new_password.len() < 6 {
+        return Err(AppError::validation(
+            "New password must be at least 6 characters",
+        ));
+    }
+    let hash = repo::get_password_hash(conn, user_id)?
+        .ok_or_else(|| AppError::validation("User not found"))?;
+    if !crate::security::verify_password(current_password, &hash)? {
+        return Err(AppError::validation("Current password is incorrect"));
+    }
+    let new_hash = hash_password(new_password)?;
+    let ok = repo::set_password_hash(conn, user_id, &new_hash)?;
+    if !ok {
+        return Err(AppError::validation("User not found"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

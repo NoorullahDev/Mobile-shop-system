@@ -16,8 +16,8 @@ interface AccessoryFormProps {
   onSubmit: (input: CreateAccessoryInput) => Promise<void>;
   onCancel: () => void;
   initial?: Accessory | null;
-  suppliers: Supplier[];
-  categories: ProductCategory[];
+  suppliers?: Supplier[];
+  categories?: ProductCategory[];
 }
 
 function toOptions(items: { value: string }[]): { value: string; label: string }[] {
@@ -68,7 +68,7 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
 
   const supplierOptions = [
     { value: "", label: "— No supplier —" },
-    ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
+    ...(suppliers ?? []).map((s) => ({ value: String(s.id), label: s.name })),
   ];
 
   const typeOptions = [

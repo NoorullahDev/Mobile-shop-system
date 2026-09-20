@@ -18,12 +18,15 @@ export interface ReturnItemInput {
 
 export interface CreateReturnInput {
   sale_id: number;
+  return_type?: string;
   return_charge_percent: number;
   fixed_deduction?: number | null;
   refund_method?: string | null;
   return_date?: string | null;
+  reference?: string | null;
   notes?: string | null;
   items: ReturnItemInput[];
+  exchange_item?: import("./sale").CreateSaleInput | null;
 }
 
 export interface ReturnItem {
@@ -61,6 +64,7 @@ export interface ReturnSummary {
   return_charge_percent: number;
   refund_method: string;
   return_date?: string | null;
+  reference?: string | null;
   condition: string;
   status: string;
   reason?: string | null;
@@ -69,6 +73,8 @@ export interface ReturnSummary {
   created_by_name?: string | null;
   created_at: string;
   item_count: number;
+  return_type: string;
+  exchange_sale_id?: number | null;
 }
 
 export interface ProductReturn extends Omit<ReturnSummary, "item_count"> {
@@ -93,3 +99,8 @@ export const RETURN_CHARGE_OPTIONS = [
 ] as const;
 
 export const REFUND_METHODS = PAYMENT_METHODS;
+
+export const RETURN_TYPES = [
+  { value: "return", label: "Return" },
+  { value: "exchange", label: "Exchange" },
+] as const;

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ChangePasswordInput,
   CreateRoleInput,
   CreateUserInput,
   Permission,
@@ -80,4 +81,13 @@ export async function deleteRole(id: number, actor?: number | null): Promise<voi
 
 export async function listPermissions(): Promise<Permission[]> {
   return invoke<Permission[]>("list_permissions");
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  return invoke<void>("change_password", {
+    input: { current_password: currentPassword, new_password: newPassword } as ChangePasswordInput,
+  });
 }

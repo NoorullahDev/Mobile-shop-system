@@ -129,7 +129,6 @@ pub fn set_password_hash(conn: &Connection, id: i64, hash: &str) -> Result<bool,
     Ok(affected > 0)
 }
 
-#[cfg(test)]
 pub fn get_password_hash(conn: &Connection, id: i64) -> Result<Option<String>, AppError> {
     let h: Option<String> = conn
         .query_row(

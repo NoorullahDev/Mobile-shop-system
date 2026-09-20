@@ -57,13 +57,18 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
   })) ?? []);
   const [imeiByItem, setImeiByItem] = useState<Record<number, PhoneImei[]>>({});
   const [discount, setDiscount] = useState(String(initialSale?.discount ?? 0));
-  const [paidAmount, setPaidAmount] = useState(initialSale ? String(initialSale.paid_amount) : "");
+  const initialInvoicePayments = initialSale?.sale_payments ?? [];
+  const [paidAmount, setPaidAmount] = useState(initialSale
+    ? String(roundMoney(initialInvoicePayments.length > 0
+      ? initialInvoicePayments.reduce((sum, payment) => sum + payment.amount, 0)
+      : initialSale.paid_amount))
+    : "");
   const [paymentMethod, setPaymentMethod] = useState(initialSale?.payment_method ?? "cash");
   const [memberId, setMemberId] = useState(initialSale?.member_id ? String(initialSale.member_id) : "");
   const [notes, setNotes] = useState(initialSale?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useSplitPayments, setUseSplitPayments] = useState(false);
+  const [useSplitPayments, setUseSplitPayments] = useState(initialInvoicePayments.length > 0);
   const [paymentLines, setPaymentLines] = useState<PaymentLine[]>(() => {
     if (initialSale?.sale_payments && initialSale.sale_payments.length > 0) {
       return initialSale.sale_payments.map((sp) => ({

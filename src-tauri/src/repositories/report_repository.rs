@@ -5,14 +5,25 @@ use crate::errors::AppError;
 /// Dashboard KPIs for the current period (all-time ledger).
 pub fn dashboard_summary(
     conn: &Connection,
-) -> Result<(f64, f64, i64, i64, i64, i64, f64), AppError> {
+) -> Result<(f64, f64, f64, i64, i64, i64, i64, f64), AppError> {
     let revenue = conn.query_row(
-        "SELECT COALESCE(SUM(total_amount), 0) FROM sales",
+        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales",
         [],
         |r| r.get::<_, f64>(0),
     )?;
     let expenses = conn.query_row(
-        "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE is_deleted = 0",
+        "SELECT 
+            (SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE is_deleted = 0) +
+            (SELECT COALESCE(SUM(refund_amount), 0) FROM returns)
+        ",
+        [],
+        |r| r.get::<_, f64>(0),
+    )?;
+    let cogs = conn.query_row(
+        "SELECT COALESCE(SUM(si.quantity * COALESCE(p.cost_price, a.cost_price, 0)), 0)
+         FROM sale_items si
+         LEFT JOIN phones p ON p.id = si.phone_id
+         LEFT JOIN accessories a ON a.id = si.accessory_id",
         [],
         |r| r.get::<_, f64>(0),
     )?;
@@ -45,6 +56,7 @@ pub fn dashboard_summary(
     )?;
     Ok((
         revenue,
+        cogs,
         expenses,
         members_total,
         members_active,
@@ -57,7 +69,7 @@ pub fn dashboard_summary(
 /// Monthly revenue (by sale `created_at`) for the last `months` months.
 pub fn monthly_revenue(conn: &Connection, months: i64) -> Result<Vec<(String, f64)>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT strftime('%Y-%m', created_at) AS m, SUM(total_amount) AS total
+        "SELECT strftime('%Y-%m', created_at) AS m, SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)) AS total
          FROM sales
          WHERE created_at >= datetime('now', ?1)
          GROUP BY m ORDER BY m",
@@ -76,10 +88,15 @@ pub fn monthly_revenue(conn: &Connection, months: i64) -> Result<Vec<(String, f6
 /// Monthly expenses (by `expense_date`) for the last `months` months.
 pub fn monthly_expenses(conn: &Connection, months: i64) -> Result<Vec<(String, f64)>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT strftime('%Y-%m', expense_date) AS m, SUM(amount) AS total
-         FROM expenses
-         WHERE is_deleted = 0 AND expense_date >= datetime('now', ?1)
-         GROUP BY m ORDER BY m",
+        "SELECT m, SUM(total) AS total FROM (
+            SELECT strftime('%Y-%m', expense_date) AS m, amount AS total
+            FROM expenses
+            WHERE is_deleted = 0 AND expense_date >= datetime('now', ?1)
+            UNION ALL
+            SELECT strftime('%Y-%m', created_at) AS m, refund_amount AS total
+            FROM returns
+            WHERE created_at >= datetime('now', ?1)
+         ) GROUP BY m ORDER BY m",
     )?;
     let cutoff = format!("-{months} months");
     let rows = stmt.query_map([cutoff], |r| {
@@ -119,21 +136,25 @@ pub fn recent_activity(
 }
 
 /// Revenue + expense + sale count for an inclusive date range (YYYY-MM-DD).
-/// Returns (revenue, expenses, sales_count, received, discount). Outstanding = revenue - received.
+/// Returns (revenue, expenses, sales_count, received, discount, current outstanding).
 pub fn period_summary(
     conn: &Connection,
     from: &str,
     to: &str,
-) -> Result<(f64, f64, i64, f64, f64), AppError> {
+) -> Result<(f64, f64, i64, f64, f64, f64), AppError> {
     let revenue = conn.query_row(
-        "SELECT COALESCE(SUM(total_amount), 0) FROM sales
+        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
     let expenses = conn.query_row(
-        "SELECT COALESCE(SUM(amount), 0) FROM expenses
-         WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')",
+        "SELECT 
+            (SELECT COALESCE(SUM(amount), 0) FROM expenses
+             WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')) +
+            (SELECT COALESCE(SUM(refund_amount), 0) FROM returns
+             WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day'))
+        ",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
@@ -143,7 +164,7 @@ pub fn period_summary(
         |r| r.get::<_, i64>(0),
     )?;
     let received = conn.query_row(
-        "SELECT COALESCE(SUM(paid_amount), 0) FROM sales
+        "SELECT COALESCE(SUM(paid_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
@@ -154,7 +175,15 @@ pub fn period_summary(
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
-    Ok((revenue, expenses, sales_count, received, discount))
+    let outstanding = conn.query_row(
+        "SELECT COALESCE(SUM(MAX(s.total_amount - s.paid_amount
+                    - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0)), 0)
+         FROM sales s
+         WHERE date(s.created_at, 'localtime') >= date(?1) AND date(s.created_at, 'localtime') < date(?2, '+1 day')",
+        params![from, to],
+        |r| r.get::<_, f64>(0),
+    )?;
+    Ok((revenue, expenses, sales_count, received, discount, outstanding))
 }
 
 /// Daily sales revenue grouped by date within an inclusive range (earliest..latest).
@@ -164,7 +193,7 @@ pub fn sales_series(
     to: &str,
 ) -> Result<Vec<(String, f64)>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT date(created_at, 'localtime') AS day, SUM(total_amount) AS total
+        "SELECT date(created_at, 'localtime') AS day, SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)) AS total
          FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')
          GROUP BY day ORDER BY day",
@@ -246,6 +275,7 @@ pub fn payment_breakdown(
          ) received
          WHERE date(received.received_at, 'localtime') >= date(?1)
            AND date(received.received_at, 'localtime') < date(?2, '+1 day')
+           AND received.payment_method != 'exchange_credit'
          GROUP BY received.payment_method ORDER BY total DESC",
     )?;
     let rows = stmt.query_map(params![from, to], |r| {
@@ -290,6 +320,16 @@ pub fn online_payment_records(
              WHERE p.sale_id IS NOT NULL AND p.sale_id != 0
                AND p.is_deleted = 0 AND p.status = 'completed'
                AND LOWER(p.payment_method) != 'cash'
+               AND LOWER(p.payment_method) != 'exchange_credit'
+             UNION ALL
+             SELECT -(r.id) AS id, r.sale_id, s.receipt_no, m.name AS customer_name,
+                    r.refund_method AS payment_method, -r.refund_amount AS amount, r.reference,
+                    r.notes AS account_details, NULL AS notes, r.created_at
+             FROM returns r
+             JOIN sales s ON s.id = r.sale_id
+             LEFT JOIN members m ON m.id = s.member_id
+             WHERE LOWER(r.refund_method) != 'cash'
+               AND LOWER(r.refund_method) != 'exchange_credit'
          ) online
          WHERE date(online.created_at, 'localtime') >= date(?1)
            AND date(online.created_at, 'localtime') < date(?2, '+1 day')
@@ -327,7 +367,7 @@ pub fn profit_loss_summary(
     to: &str,
 ) -> Result<(f64, f64, f64, i64), AppError> {
     let revenue = conn.query_row(
-        "SELECT COALESCE(SUM(total_amount), 0) FROM sales
+        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
@@ -352,8 +392,12 @@ pub fn profit_loss_summary(
         |r| r.get::<_, f64>(0),
     )?;
     let expenses = conn.query_row(
-        "SELECT COALESCE(SUM(amount), 0) FROM expenses
-         WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')",
+        "SELECT 
+            (SELECT COALESCE(SUM(amount), 0) FROM expenses
+             WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')) +
+            (SELECT COALESCE(SUM(refund_amount), 0) FROM returns
+             WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day'))
+        ",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
@@ -375,7 +419,7 @@ pub fn monthly_profit_loss(
     let mut stmt = conn.prepare(
         "SELECT m, SUM(revenue) AS revenue, SUM(cogs) AS cogs, SUM(expenses) AS expenses FROM (
             SELECT strftime('%Y-%m', created_at) AS m,
-                   SUM(total_amount) AS revenue,
+                   SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)) AS revenue,
                    0.0 AS cogs,
                    0.0 AS expenses
             FROM sales
@@ -405,6 +449,14 @@ pub fn monthly_profit_loss(
             FROM expenses
             WHERE is_deleted = 0 AND expense_date >= date(?1) AND expense_date < date(?2, '+1 day')
             GROUP BY m
+            UNION ALL
+            SELECT strftime('%Y-%m', created_at) AS m,
+                   0.0 AS revenue,
+                   0.0 AS cogs,
+                   SUM(refund_amount) AS expenses
+            FROM returns
+            WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')
+            GROUP BY m
         ) sub
         GROUP BY m
         ORDER BY m",
@@ -429,7 +481,7 @@ pub fn monthly_profit_loss(
 /// accurate day boundary matching.
 pub fn today_summary(conn: &Connection, today: &str) -> Result<(f64, i64), AppError> {
     let revenue = conn.query_row(
-        "SELECT COALESCE(SUM(total_amount), 0) FROM sales
+        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1)
            AND date(created_at, 'localtime') < date(?1, '+1 day')",
         params![today],

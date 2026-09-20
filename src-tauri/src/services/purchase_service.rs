@@ -34,11 +34,21 @@ fn validate_sp_status(s: Option<&str>) -> String {
     }
 }
 
-pub fn create_purchase(
+pub struct Line {
+    pub item_type: String,
+    pub item_id: i64,
+    pub quantity: i64,
+    pub unit_cost: f64,
+    pub selling_price: Option<f64>,
+    pub warranty: Option<String>,
+    pub condition: Option<String>,
+    pub imeis: Vec<String>,
+}
+
+pub fn prepare_purchase_lines(
     conn: &Connection,
-    input: CreatePurchaseInput,
-    actor: Option<i64>,
-) -> Result<Purchase, AppError> {
+    input: &CreatePurchaseInput,
+) -> Result<(Vec<Line>, Vec<String>, f64), AppError> {
     if input.items.is_empty() {
         return Err(AppError::validation(
             "A purchase must contain at least one item",
@@ -54,21 +64,8 @@ pub fn create_purchase(
         }
     }
 
-    struct Line {
-        item_type: String,
-        item_id: i64,
-        quantity: i64,
-        unit_cost: f64,
-        selling_price: Option<f64>,
-        warranty: Option<String>,
-        condition: Option<String>,
-        imeis: Vec<String>,
-    }
-
     let mut lines: Vec<Line> = Vec::new();
     let mut subtotal = 0.0;
-    // Collect every normalized IMEI so we can validate all duplicates and
-    // usage in a single query instead of one round-trip per IMEI.
     let mut all_imeis: Vec<String> = Vec::new();
 
     for item in &input.items {
@@ -104,17 +101,17 @@ pub fn create_purchase(
             }
         }
 
-        // Validate IMEIs are unique and not already in use (Rule: unique IMEI).
-        // IMEIs only apply to phones, and every purchased phone unit needs one,
-        // so the number of IMEIs must equal the quantity.
         let mut seen: Vec<String> = Vec::new();
         if item_type == "phone" {
             for imei in item
                 .imeis
                 .iter()
-                .map(|s| s.trim().to_string())
+                .map(|s| s.trim().to_uppercase())
                 .filter(|s| !s.is_empty())
             {
+                if imei.len() < 8 {
+                    return Err(AppError::validation("IMEI must be at least 8 characters"));
+                }
                 if seen.contains(&imei) {
                     return Err(AppError::validation(format!("IMEI {imei} is duplicated")));
                 }
@@ -149,6 +146,17 @@ pub fn create_purchase(
         });
     }
 
+    Ok((lines, all_imeis, subtotal))
+}
+
+pub fn create_purchase(
+    conn: &Connection,
+    input: CreatePurchaseInput,
+    actor: Option<i64>,
+) -> Result<Purchase, AppError> {
+    let (lines, all_imeis, subtotal) = prepare_purchase_lines(conn, &input)?;
+
+
     // One query for the whole batch (duplicates across line items are handled
     // by the per-line `seen` check plus a global HashSet scan below).
     if !all_imeis.is_empty() {
@@ -173,13 +181,18 @@ pub fn create_purchase(
     }
     let paid_amount = match input.paid_amount {
         Some(p) => {
-            if p < 0.0 {
-                return Err(AppError::validation("Paid amount cannot be negative"));
+            if !p.is_finite() || p < 0.0 {
+                return Err(AppError::validation("Paid amount is invalid"));
             }
             utils::round2(p)
         }
         None => total_amount,
     };
+    if paid_amount > total_amount + 0.005 {
+        return Err(AppError::validation(
+            "Paid amount cannot be greater than the purchase total",
+        ));
+    }
     let payment_method = input
         .payment_method
         .as_deref()
@@ -242,6 +255,13 @@ pub fn create_purchase(
             line.item_id,
             line.unit_cost,
         )?;
+        purchase_repository::sync_product_prices(
+            &tx,
+            &line.item_type,
+            line.item_id,
+            line.unit_cost,
+            line.selling_price,
+        )?;
         if line.item_type == "phone" {
             purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis)?;
         }
@@ -258,9 +278,203 @@ pub fn list(conn: &Connection, search: Option<String>) -> Result<Vec<Purchase>, 
     purchase_repository::list_purchases(conn, search.as_deref())
 }
 
+pub fn list_for_period(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<Purchase>, AppError> {
+    purchase_repository::list_purchases_for_period(conn, from, to)
+}
+
 pub fn get(conn: &Connection, id: i64) -> Result<Purchase, AppError> {
     purchase_repository::get_purchase_with_items(conn, id)?
         .ok_or_else(|| AppError::validation("Purchase not found"))
+}
+
+pub fn delete_purchase(
+    conn: &Connection,
+    id: i64,
+    actor: Option<i64>,
+    reason: Option<String>,
+) -> Result<(), AppError> {
+    let existing = get(conn, id)?;
+    let tx = conn.unchecked_transaction()?;
+
+    // Revert inventory effects for existing items
+    for item in &existing.items {
+        purchase_repository::decrement_stock(&tx, &item.item_type, item.item_id, item.quantity)?;
+        if item.item_type == "phone" {
+            purchase_repository::delete_purchase_imeis(&tx, item.item_id, &item.serials)?;
+        }
+        purchase_repository::revert_last_purchase_cost(&tx, &item.item_type, item.item_id)?;
+    }
+
+    purchase_repository::delete_purchase(&tx, id)?;
+    tx.commit()?;
+
+    services::record_activity(
+        conn,
+        actor,
+        "purchase",
+        "delete",
+        Some(id),
+    )?;
+
+    if let Some(r) = reason {
+        services::record_activity(
+            conn,
+            actor,
+            "purchase",
+            "delete_reason",
+            Some(id),
+        )?;
+        conn.execute("UPDATE activity_logs SET new_value = ?1 WHERE id = (SELECT MAX(id) FROM activity_logs WHERE action = 'delete' AND module = 'purchase')", [r])?;
+    }
+
+    Ok(())
+}
+
+pub fn update_purchase(
+    conn: &Connection,
+    id: i64,
+    input: CreatePurchaseInput,
+    actor: Option<i64>,
+) -> Result<Purchase, AppError> {
+    let existing = get(conn, id)?;
+    
+    let (lines, all_imeis, subtotal) = prepare_purchase_lines(conn, &input)?;
+    
+    // Check global IMEIs
+    if !all_imeis.is_empty() {
+        let mut seen_global: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for imei in &all_imeis {
+            if !seen_global.insert(imei.clone()) {
+                return Err(AppError::validation(format!("IMEI {imei} is duplicated")));
+            }
+        }
+        // Exclude the IMEIs from the current purchase when checking if they're in use
+        let mut existing_imeis = std::collections::HashSet::new();
+        for item in &existing.items {
+            if item.item_type == "phone" {
+                for imei in &item.serials {
+                    existing_imeis.insert(imei.clone());
+                }
+            }
+        }
+        
+        let mut used = purchase_repository::imeis_in_use(conn, &all_imeis)?;
+        used.retain(|u| seen_global.contains(u) && !existing_imeis.contains(u));
+        if let Some(first) = used.into_iter().next() {
+            return Err(AppError::validation(format!(
+                "IMEI {first} is already in use"
+            )));
+        }
+    }
+    
+    let total_amount = utils::round2(subtotal - input.discount);
+    if total_amount < 0.0 {
+        return Err(AppError::validation("Discount cannot exceed subtotal"));
+    }
+    let paid_amount = match input.paid_amount {
+        Some(p) => {
+            if !p.is_finite() || p < 0.0 {
+                return Err(AppError::validation("Paid amount is invalid"));
+            }
+            utils::round2(p)
+        }
+        None => total_amount,
+    };
+    if paid_amount > total_amount + 0.005 {
+        return Err(AppError::validation(
+            "Paid amount cannot be greater than the purchase total",
+        ));
+    }
+    let payment_method = input
+        .payment_method
+        .as_deref()
+        .map(normalize_payment_method)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "cash".into());
+
+    let notes = input
+        .notes
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let purchase_date = input
+        .purchase_date
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let invoice_reference = input
+        .invoice_reference
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+
+    let tx = conn.unchecked_transaction()?;
+
+    // 1. Revert old items
+    for item in &existing.items {
+        purchase_repository::decrement_stock(&tx, &item.item_type, item.item_id, item.quantity)?;
+        if item.item_type == "phone" {
+            purchase_repository::delete_purchase_imeis(&tx, item.item_id, &item.serials)?;
+        }
+    }
+    purchase_repository::delete_purchase_items(&tx, id)?;
+
+    // 2. Update record
+    purchase_repository::update_purchase_record(
+        &tx,
+        id,
+        input.supplier_id,
+        total_amount,
+        utils::round2(input.discount),
+        paid_amount,
+        &payment_method,
+        purchase_date,
+        invoice_reference,
+        notes,
+    )?;
+
+    // 3. Insert new items and apply effects
+    for line in &lines {
+        purchase_repository::insert_purchase_item(
+            &tx,
+            id,
+            &line.item_type,
+            line.item_id,
+            line.quantity,
+            line.unit_cost,
+            line.selling_price,
+            line.warranty.as_deref(),
+            line.condition.as_deref(),
+            &line.imeis,
+        )?;
+        purchase_repository::increment_stock(&tx, &line.item_type, line.item_id, line.quantity)?;
+        purchase_repository::update_last_purchase_cost(
+            &tx,
+            &line.item_type,
+            line.item_id,
+            line.unit_cost,
+        )?;
+        purchase_repository::sync_product_prices(
+            &tx,
+            &line.item_type,
+            line.item_id,
+            line.unit_cost,
+            line.selling_price,
+        )?;
+        if line.item_type == "phone" {
+            purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis)?;
+        }
+    }
+    
+    tx.commit()?;
+
+    services::record_activity(conn, actor, "purchase", "update", Some(id))?;
+
+    get(conn, id)
 }
 
 // ----- Supplier payments -----
@@ -271,10 +485,36 @@ pub fn create_supplier_payment(
     actor: Option<i64>,
 ) -> Result<SupplierPayment, AppError> {
     let normalized = normalize_supplier_payment(conn, input)?;
+    validate_supplier_payment_balance(conn, &normalized, None)?;
     let id = purchase_repository::insert_supplier_payment(conn, &normalized, actor)?;
     services::record_activity(conn, actor, "supplier_payment", "create", Some(id))?;
     purchase_repository::get_supplier_payment(conn, id)?
         .ok_or_else(|| AppError::Internal("Created payment could not be retrieved".into()))
+}
+
+fn validate_supplier_payment_balance(
+    conn: &Connection,
+    input: &CreateSupplierPaymentInput,
+    existing: Option<&SupplierPayment>,
+) -> Result<(), AppError> {
+    let Some(supplier_id) = input.supplier_id else {
+        return Ok(());
+    };
+    if input.status.as_deref() != Some("completed") {
+        return Ok(());
+    }
+    let mut available = supplier_balance(conn, supplier_id)?.balance.max(0.0);
+    if let Some(payment) = existing {
+        if payment.supplier_id == Some(supplier_id) && payment.status == "completed" {
+            available = utils::round2(available + payment.amount);
+        }
+    }
+    if input.amount > available + 0.005 {
+        return Err(AppError::validation(format!(
+            "Payment cannot exceed the supplier balance of Rs {available:.2}"
+        )));
+    }
+    Ok(())
 }
 
 fn normalize_supplier_payment(
@@ -318,10 +558,10 @@ pub fn update_supplier_payment(
     input: CreateSupplierPaymentInput,
     actor: Option<i64>,
 ) -> Result<SupplierPayment, AppError> {
-    if purchase_repository::get_supplier_payment(conn, id)?.is_none() {
-        return Err(AppError::validation("Payment not found"));
-    }
+    let existing = purchase_repository::get_supplier_payment(conn, id)?
+        .ok_or_else(|| AppError::validation("Payment not found"))?;
     let normalized = normalize_supplier_payment(conn, input)?;
+    validate_supplier_payment_balance(conn, &normalized, Some(&existing))?;
     if !purchase_repository::update_supplier_payment(conn, id, &normalized)? {
         return Err(AppError::validation("Payment not found"));
     }
@@ -351,11 +591,14 @@ pub fn delete_supplier_payment(
 ) -> Result<(), AppError> {
     let payment = purchase_repository::get_supplier_payment(conn, id)?
         .ok_or_else(|| AppError::validation("Payment not found"))?;
-    if let Some(supplier_id) = payment.supplier_id {
-        if supplier_balance(conn, supplier_id)?.balance > 0.001 {
-            return Err(AppError::validation(
-                "This payment can only be deleted after the supplier due is fully cleared",
-            ));
+    if payment.status == "completed" {
+        if let Some(supplier_id) = payment.supplier_id {
+            let bal = supplier_balance(conn, supplier_id)?;
+            if bal.balance > 0.001 {
+                return Err(AppError::validation(
+                    "This payment can only be deleted after the supplier due is fully cleared",
+                ));
+            }
         }
     }
     let deleted = purchase_repository::soft_delete_supplier_payment(conn, id)?;
@@ -487,6 +730,64 @@ mod tests {
             )
             .unwrap();
         assert_eq!(lpc, Some(100.0));
+
+        // Cost and sale prices are synced from the purchase line to the product row.
+        let phone = phone_service::get(&conn, iid).unwrap();
+        assert_eq!(phone.cost_price, 100.0);
+        assert_eq!(phone.sale_price, 150.0);
+    }
+
+    #[test]
+    fn purchase_without_supplier_syncs_prices() {
+        let conn = in_memory_conn();
+        let iid = phone_item(&conn, None);
+
+        let mut input = purchase_input(iid, None);
+        input.supplier_id = None;
+        input.items[0].quantity = 3;
+        input.items[0].unit_cost = Some(200_000.0);
+        input.items[0].selling_price = Some(500_000.0);
+        input.items[0].imeis = vec!["333333333333333".into(), "444444444444444".into(), "555555555555555".into()];
+        input.paid_amount = Some(600_000.0);
+        let p = create_purchase(&conn, input, None).unwrap();
+        assert!(p.id > 0);
+
+        let phone = phone_service::get(&conn, iid).unwrap();
+        assert_eq!(phone.quantity, 8); // 5 initial + 3 purchased
+        assert_eq!(phone.cost_price, 200_000.0);
+        assert_eq!(phone.sale_price, 500_000.0);
+        assert_eq!(phone_service::list_imei(&conn, iid).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn rejects_purchase_overpayment_before_stock_changes() {
+        let conn = in_memory_conn();
+        let iid = phone_item(&conn, None);
+        let before = phone_service::get(&conn, iid).unwrap().quantity;
+        let mut input = purchase_input(iid, None);
+        input.paid_amount = Some(200.01);
+        assert!(matches!(
+            create_purchase(&conn, input, None),
+            Err(AppError::Validation(_))
+        ));
+        assert_eq!(phone_service::get(&conn, iid).unwrap().quantity, before);
+        assert!(list(&conn, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn imports_one_hundred_phone_imeis_atomically() {
+        let conn = in_memory_conn();
+        let iid = phone_item(&conn, None);
+        let mut input = purchase_input(iid, None);
+        input.items[0].quantity = 100;
+        input.items[0].imeis = (0..100)
+            .map(|index| format!("TESTIMEI{index:08}"))
+            .collect();
+        input.paid_amount = Some(10_000.0);
+        let purchase = create_purchase(&conn, input, None).unwrap();
+        assert_eq!(purchase.items[0].quantity, 100);
+        assert_eq!(phone_service::list_imei(&conn, iid).unwrap().len(), 100);
+        assert_eq!(phone_service::get(&conn, iid).unwrap().quantity, 105);
     }
 
     #[test]
@@ -639,6 +940,32 @@ mod tests {
         let dues = list_supplier_dues(&conn, None).unwrap();
         assert_eq!(dues.len(), 1);
         assert!((dues[0].balance - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn rejects_supplier_payment_above_outstanding_balance() {
+        let conn = in_memory_conn();
+        let sid = supplier(&conn);
+        let iid = phone_item(&conn, Some(sid));
+        let mut input = purchase_input(iid, Some(sid));
+        input.paid_amount = Some(0.0);
+        create_purchase(&conn, input, None).unwrap();
+
+        let result = create_supplier_payment(
+            &conn,
+            CreateSupplierPaymentInput {
+                supplier_id: Some(sid),
+                amount: 200.01,
+                payment_method: Some("cash".into()),
+                status: None,
+                reference: None,
+                notes: None,
+                payment_date: None,
+            },
+            None,
+        );
+        assert!(matches!(result, Err(AppError::Validation(_))));
+        assert_eq!(supplier_balance(&conn, sid).unwrap().balance, 200.0);
     }
 
     #[test]

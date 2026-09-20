@@ -405,6 +405,7 @@ function UserFormModal({
   const isEdit = userModal === "edit";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [roleId, setRoleId] = useState<string>("");
@@ -418,6 +419,7 @@ function UserFormModal({
     if (editingUser) {
       setUsername(editingUser.username);
       setPassword("");
+      setConfirmPassword("");
       setFullName(editingUser.full_name ?? "");
       setEmail(editingUser.email ?? "");
       setRoleId(String(editingUser.role_id));
@@ -425,6 +427,7 @@ function UserFormModal({
     } else {
       setUsername("");
       setPassword("");
+      setConfirmPassword("");
       setFullName("");
       setEmail("");
       setRoleId(roles[0] ? String(roles[0].id) : "");
@@ -453,6 +456,7 @@ function UserFormModal({
       } else {
         if (!username.trim()) { setError("Username is required"); return; }
         if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+        if (password !== confirmPassword) { setError("Passwords do not match"); return; }
         if (!roleId) { setError("Please select a role"); return; }
         await userService.createUser(
           {
@@ -517,6 +521,16 @@ function UserFormModal({
             placeholder="At least 6 characters"
             required
             hint="Password is hashed and never stored in plain text"
+          />
+        )}
+        {!isEdit && (
+          <Input
+            label="Confirm Password"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Re-enter password"
+            required
           />
         )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

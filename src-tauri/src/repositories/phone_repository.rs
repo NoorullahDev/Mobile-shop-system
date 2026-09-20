@@ -180,14 +180,18 @@ pub fn imei_taken(
     let exists: Option<bool> = match exclude_id {
         Some(id) => conn
             .query_row(
-                "SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND id != ?2 AND is_deleted = 0",
+                "SELECT 1 WHERE
+                   EXISTS (SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND id != ?2 AND is_deleted = 0)
+                   OR EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1)",
                 params![imei, id],
                 |_| Ok(true),
             )
             .optional()?,
         None => conn
             .query_row(
-                "SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND is_deleted = 0",
+                "SELECT 1 WHERE
+                   EXISTS (SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND is_deleted = 0)
+                   OR EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1)",
                 [imei],
                 |_| Ok(true),
             )
@@ -204,21 +208,24 @@ pub fn soft_delete(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(affected > 0)
 }
 
-pub fn add_quantity(conn: &Connection, id: i64, amount: i64) -> Result<(), AppError> {
-    conn.execute(
+pub fn add_quantity(conn: &Connection, id: i64, amount: i64) -> Result<bool, AppError> {
+    let affected = conn.execute(
         "UPDATE phones SET quantity = quantity + ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND is_deleted = 0",
         params![amount, id],
     )?;
-    Ok(())
+    Ok(affected > 0)
 }
 
 // ---- Phone IMEI ----
 
 pub fn imei_exists(conn: &Connection, imei: &str) -> Result<bool, AppError> {
     let exists: Option<bool> = conn
-        .query_row("SELECT 1 FROM phone_imeis WHERE imei = ?1", [imei], |_| {
-            Ok(true)
-        })
+        .query_row(
+            "SELECT 1 WHERE EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1)
+               OR EXISTS (SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND is_deleted = 0)",
+            [imei],
+            |_| Ok(true),
+        )
         .optional()?;
     Ok(exists.is_some())
 }

@@ -175,17 +175,34 @@ pub fn restock(
     imeis: Vec<String>,
     actor: Option<i64>,
 ) -> Result<(), AppError> {
-    if quantity < 0 {
-        return Err(AppError::validation("Restock quantity cannot be negative"));
+    if quantity <= 0 {
+        return Err(AppError::validation("Restock quantity must be greater than zero"));
+    }
+    if phone_repository::get_by_id(conn, id)?.is_none() {
+        return Err(AppError::validation("Phone not found"));
+    }
+    let mut normalized_imeis = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for imei in imeis.iter().map(|value| value.trim().to_uppercase()).filter(|value| !value.is_empty()) {
+        if imei.len() < 8 {
+            return Err(AppError::validation("IMEI must be at least 8 characters"));
+        }
+        if !seen.insert(imei.clone()) {
+            return Err(AppError::validation(format!("IMEI {imei} is duplicated")));
+        }
+        normalized_imeis.push(imei);
+    }
+    if normalized_imeis.len() > quantity as usize {
+        return Err(AppError::validation(
+            "The number of IMEIs cannot exceed the restock quantity",
+        ));
     }
     let tx = conn.unchecked_transaction()?;
-    phone_repository::add_quantity(&tx, id, quantity)?;
+    if !phone_repository::add_quantity(&tx, id, quantity)? {
+        return Err(AppError::validation("Phone not found"));
+    }
 
-    for imei in imeis
-        .iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    {
+    for imei in normalized_imeis {
         if phone_repository::imei_exists(&tx, &imei)? {
             return Err(AppError::validation(format!(
                 "IMEI {imei} is already in use"
@@ -199,8 +216,8 @@ pub fn restock(
 
 pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei, AppError> {
     let imei = input.imei.trim().to_uppercase();
-    if imei.is_empty() {
-        return Err(AppError::validation("IMEI is required"));
+    if imei.len() < 8 {
+        return Err(AppError::validation("IMEI must be at least 8 characters"));
     }
     if phone_repository::get_by_id(conn, input.phone_id)?.is_none() {
         return Err(AppError::validation("Phone not found"));
@@ -219,7 +236,9 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
             imei: imei.clone(),
         },
     )?;
-    phone_repository::add_quantity(&tx, input.phone_id, 1)?;
+    if !phone_repository::add_quantity(&tx, input.phone_id, 1)? {
+        return Err(AppError::validation("Phone not found"));
+    }
     tx.commit()?;
 
     services::record_activity(conn, None, "phone", "add_imei", Some(imei_id))?;
@@ -303,6 +322,41 @@ mod tests {
             create(&conn, b).unwrap_err(),
             AppError::Validation(_)
         ));
+    }
+
+    #[test]
+    fn imei_is_unique_across_master_and_stock_records() {
+        let conn = in_memory_conn();
+        let mut master = sample();
+        master.imei = Some("111222333444555".into());
+        create(&conn, master).unwrap();
+
+        let mut stock_phone = sample();
+        stock_phone.model = "Stock Phone".into();
+        let stock_phone = create(&conn, stock_phone).unwrap();
+        assert!(matches!(
+            add_imei(
+                &conn,
+                AddPhoneImeiInput {
+                    phone_id: stock_phone.id,
+                    imei: "111222333444555".into(),
+                },
+            ),
+            Err(AppError::Validation(_))
+        ));
+
+        add_imei(
+            &conn,
+            AddPhoneImeiInput {
+                phone_id: stock_phone.id,
+                imei: "AAAABBBBCCCCDDDD".into(),
+            },
+        )
+        .unwrap();
+        let mut duplicate_master = sample();
+        duplicate_master.model = "Duplicate Master".into();
+        duplicate_master.imei2 = Some("aaaabbbbccccdddd".into());
+        assert!(matches!(create(&conn, duplicate_master), Err(AppError::Validation(_))));
     }
 
     #[test]

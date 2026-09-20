@@ -27,7 +27,6 @@ import { Spinner } from "../components/Button";
 import { StatusBadge } from "../components/StatusBadge";
 import { RestockForm } from "./RestockForm";
 import { ManageProductCategoriesModal } from "./ManageProductCategoriesModal";
-import { useSupplierStore } from "../store/suppliers";
 import { useProductCategoryStore } from "../store/productCategories";
 import { useSessionStore } from "../store/session";
 import { formatMoneyCompact } from "../lib/format";
@@ -99,8 +98,8 @@ interface InventoryProductPageProps<T extends InventoryRow, I> {
     onSubmit: (input: I) => Promise<void>;
     onCancel: () => void;
     initial?: T | null;
-    suppliers: Supplier[];
-    categories: ProductCategory[];
+    suppliers?: Supplier[];
+    categories?: ProductCategory[];
   }>;
   typeName: string;
   itemName: string;
@@ -137,7 +136,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
   showImeiButton,
   extraAction,
 }: InventoryProductPageProps<T, I>) {
-  const { suppliers, load: loadSuppliers } = useSupplierStore();
+
   const { categories, load: loadProductCategories } = useProductCategoryStore();
   const user = useSessionStore((s) => s.user);
   const [search, setSearch] = useState("");
@@ -156,7 +155,6 @@ export function InventoryProductPage<T extends InventoryRow, I>({
 
   useEffect(() => {
     onLoad("");
-    loadSuppliers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -564,7 +562,6 @@ export function InventoryProductPage<T extends InventoryRow, I>({
           onSubmit={handleSubmit}
           onCancel={() => setModalOpen(false)}
           initial={editing}
-          suppliers={suppliers}
           categories={categories}
         />
       </Modal>

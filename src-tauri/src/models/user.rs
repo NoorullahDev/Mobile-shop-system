@@ -59,6 +59,12 @@ pub struct ResetPasswordInput {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChangePasswordInput {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Role {
     pub id: i64,
     pub name: String,

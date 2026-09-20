@@ -54,7 +54,8 @@ pub fn create(
 
     if let Some(sid) = sale_id {
         let due: f64 = conn.query_row(
-            "SELECT MAX(total_amount - paid_amount, 0) FROM sales WHERE id = ?1",
+            "SELECT MAX(s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0)
+             FROM sales s WHERE s.id = ?1",
             [sid],
             |r| r.get(0),
         )?;
@@ -75,14 +76,16 @@ pub fn create(
     tx.commit()?;
 
     services::record_activity(conn, actor, "payment", "create", Some(id))?;
-    services::notification_service::notify(
+    if let Err(error) = services::notification_service::notify(
         conn,
         actor,
         "finance",
         "normal",
         "Payment received",
         &format!("A payment of Rs {amount:.2} was recorded."),
-    )?;
+    ) {
+        log::warn!("payment was saved but its notification could not be created: {error}");
+    }
 
     payment_repository::get_by_id(conn, id)?
         .ok_or_else(|| AppError::Internal("Created payment could not be retrieved".into()))
@@ -150,7 +153,29 @@ pub fn update(
 ) -> Result<Payment, AppError> {
     let existing = get(conn, id)?;
     let normalized = normalize_input(conn, input)?;
-    if !payment_repository::update(conn, id, &normalized)? {
+    if let Some(sale_id) = normalized.sale_id {
+        let current_due: f64 = conn.query_row(
+            "SELECT MAX(s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0)
+             FROM sales s WHERE s.id = ?1",
+            [sale_id],
+            |row| row.get(0),
+        )?;
+        let reusable = if existing.sale_id == Some(sale_id) && existing.status == "completed" {
+            existing.amount
+        } else {
+            0.0
+        };
+        if normalized.status.as_deref() == Some("completed")
+            && normalized.amount > current_due + reusable + 0.005
+        {
+            return Err(AppError::validation(format!(
+                "Payment cannot exceed the invoice balance of Rs {:.2}",
+                current_due + reusable
+            )));
+        }
+    }
+    let tx = conn.unchecked_transaction()?;
+    if !payment_repository::update(&tx, id, &normalized)? {
         return Err(AppError::validation("Payment not found"));
     }
     // If the sale link changed, recalculate the old and new sale's paid_amount
@@ -158,14 +183,15 @@ pub fn update(
     let new_sale = normalized.sale_id;
     if old_sale != new_sale {
         if let Some(sid) = old_sale {
-            let _ = update_sale_paid_amount(conn, sid);
+            update_sale_paid_amount(&tx, sid)?;
         }
         if let Some(sid) = new_sale {
-            let _ = update_sale_paid_amount(conn, sid);
+            update_sale_paid_amount(&tx, sid)?;
         }
     } else if let Some(sid) = new_sale {
-        let _ = update_sale_paid_amount(conn, sid);
+        update_sale_paid_amount(&tx, sid)?;
     }
+    tx.commit()?;
     services::record_activity(conn, actor, "payment", "update", Some(id))?;
     get(conn, id)
 }
@@ -185,21 +211,53 @@ pub fn get(conn: &Connection, id: i64) -> Result<Payment, AppError> {
 
 pub fn soft_delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
     let payment = get(conn, id)?;
-    if let Some(member_id) = payment.member_id {
-        if member_balance(conn, member_id)?.balance > 0.001 {
+    if payment.status != "completed" {
+        let sale_id = payment.sale_id;
+        let tx = conn.unchecked_transaction()?;
+        let deleted = payment_repository::soft_delete(&tx, id)?;
+        if !deleted {
+            return Err(AppError::validation("Payment not found"));
+        }
+        if let Some(sid) = sale_id {
+            update_sale_paid_amount(&tx, sid)?;
+        }
+        tx.commit()?;
+        return services::record_activity(conn, actor, "payment", "delete", Some(id));
+    }
+
+    if let Some(sale_id) = payment.sale_id {
+        // Only block if deleting this payment would make the sale's balance negative.
+        let sale_due: f64 = conn.query_row(
+            "SELECT MAX(s.total_amount - s.paid_amount, 0) FROM sales s WHERE s.id = ?1",
+            [sale_id],
+            |r| r.get(0),
+        )?;
+        if sale_due < 0.001 && payment.amount > sale_due + 0.005 {
+            return Err(AppError::validation(
+                "This payment fully covers an invoice and cannot be deleted until the invoice is settled another way",
+            ));
+        }
+    } else if let Some(member_id) = payment.member_id {
+        // For unlinked payments, only block if the customer has no dues at all
+        // (meaning this payment is the sole thing keeping them solvent).
+        let bal = member_balance(conn, member_id)?;
+        if bal.balance > 0.001 {
             return Err(AppError::validation(
                 "This payment can only be deleted after the customer due is fully cleared",
             ));
         }
     }
+
     let sale_id = payment.sale_id;
-    let deleted = payment_repository::soft_delete(conn, id)?;
+    let tx = conn.unchecked_transaction()?;
+    let deleted = payment_repository::soft_delete(&tx, id)?;
     if !deleted {
         return Err(AppError::validation("Payment not found"));
     }
     if let Some(sid) = sale_id {
-        let _ = update_sale_paid_amount(conn, sid);
+        update_sale_paid_amount(&tx, sid)?;
     }
+    tx.commit()?;
     services::record_activity(conn, actor, "payment", "delete", Some(id))
 }
 
@@ -268,12 +326,12 @@ pub fn unpaid_sales_for_member(
     Ok(rows
         .into_iter()
         .map(
-            |(id, receipt_no, total_amount, paid_amount, created_at)| UnpaidSaleInfo {
+            |(id, receipt_no, total_amount, paid_amount, due_amount, created_at)| UnpaidSaleInfo {
                 id,
                 receipt_no,
                 total_amount,
                 paid_amount,
-                due_amount: utils::round2(total_amount - paid_amount),
+                due_amount: utils::round2(due_amount),
                 created_at,
             },
         )
@@ -472,6 +530,46 @@ mod tests {
         assert_eq!(member_balance(&conn, mid).unwrap().balance, 0.0);
         soft_delete(&conn, payment.id, None).unwrap();
         assert_eq!(member_balance(&conn, mid).unwrap().balance, 310.0);
+    }
+
+    #[test]
+    fn returned_invoice_due_uses_refund_and_rejects_overpayment() {
+        let conn = in_memory_conn();
+        let mid = member_id(&conn);
+        conn.execute(
+            "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method)
+             VALUES ('RET-LINKED', ?1, 500, 100, 'cash')",
+            [mid],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method) VALUES (?1, 100, 'cash')",
+            [sale_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO returns (return_no, sale_id, member_id, total_sale_price, deduction_amount, refund_amount, refund_method)
+             VALUES ('RET-LINKED-1', ?1, ?2, 100, 10, 90, 'cash')",
+            rusqlite::params![sale_id, mid],
+        )
+        .unwrap();
+
+        let invoices = list_customer_due_invoices(&conn, None).unwrap();
+        assert_eq!(invoices.len(), 1);
+        assert_eq!(invoices[0].due_amount, 310.0);
+
+        let mut too_much = sample(Some(mid));
+        too_much.sale_id = Some(sale_id);
+        too_much.amount = 310.01;
+        assert!(matches!(create(&conn, too_much, None), Err(AppError::Validation(_))));
+
+        let mut exact = sample(Some(mid));
+        exact.sale_id = Some(sale_id);
+        exact.amount = 310.0;
+        create(&conn, exact, None).unwrap();
+        assert!(list_customer_due_invoices(&conn, None).unwrap().is_empty());
+        assert!(list_customer_dues(&conn, None).unwrap().is_empty());
     }
 
     #[test]

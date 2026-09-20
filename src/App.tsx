@@ -28,22 +28,44 @@ import { Toaster } from "./components/Toaster";
 import { LicenseGate } from "./components/LicenseGate";
 import { useSessionStore } from "./store/session";
 import { useSettingsStore } from "./store/settings";
+import { can } from "./lib/permissions";
 import * as licenseService from "./services/licenseService";
 import type { LicenseStatus } from "./types/license";
+
+/** Redirects to / if the current user lacks the required permission. */
+function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
+  const permissions = useSessionStore((s) => s.user?.permissions ?? []);
+  if (!can(permissions, permission)) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
 
 export default function App() {
   const { user, checking, init } = useSessionStore();
   const businessName = useSettingsStore((s) => s.businessName);
   const [licenseLoading, setLicenseLoading] = useState(true);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [licenseError, setLicenseError] = useState<string | null>(null);
 
-  useEffect(() => {
-    init();
+  const loadLicenseStatus = () => {
+    setLicenseLoading(true);
+    setLicenseError(null);
     licenseService
       .getLicenseStatus()
       .then(setLicenseStatus)
-      .catch(() => setLicenseStatus(null))
+      .catch((error) => {
+        setLicenseStatus(null);
+        setLicenseError(String(error));
+      })
       .finally(() => setLicenseLoading(false));
+  };
+
+  useEffect(() => {
+    init();
+    loadLicenseStatus();
+    // Initial desktop startup only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [init]);
 
   useEffect(() => {
@@ -66,8 +88,26 @@ export default function App() {
     );
   }
 
+  if (licenseError || !licenseStatus) {
+    return (
+      <div className="flex min-h-screen items-center justify-center" style={{ background: "#F4F6FA" }}>
+        <div className="max-w-md rounded-lg border bg-white p-6 text-center shadow-sm">
+          <p className="text-sm font-semibold text-slate-900">License status could not be loaded.</p>
+          <p className="mt-2 text-xs text-slate-500">{licenseError ?? "Please try again."}</p>
+          <button
+            type="button"
+            onClick={loadLicenseStatus}
+            className="mt-4 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── License gate: block the ERP until the license is active ──
-  const pendingActivation = !licenseStatus?.activated;
+  const pendingActivation = !licenseStatus.activated;
 
   return (
     <Toaster>
@@ -78,7 +118,7 @@ export default function App() {
             path="/activation"
             element={
               pendingActivation ? (
-                <LicenseGate status={licenseStatus!} onActivated={setLicenseStatus} />
+                <LicenseGate status={licenseStatus} onActivated={setLicenseStatus} />
               ) : (
                 <Navigate to="/" replace />
               )
@@ -97,18 +137,18 @@ export default function App() {
               )
             }
           >
-            <Route index element={<DashboardPage />} />
-            <Route path="members" element={<MembersPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
-            <Route path="suppliers" element={<SuppliersPage />} />
-            <Route path="sales" element={<SalesPage />} />
-            <Route path="returns" element={<ReturnsPage />} />
-            <Route path="payments" element={<PaymentsPage />} />
-            <Route path="online-payments" element={<OnlinePaymentsPage />} />
-            <Route path="expenses" element={<ExpensesPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="settings/receipt" element={<ReceiptSettingsPage />} />
+            <Route index element={<RequirePermission permission="dashboard:view"><DashboardPage /></RequirePermission>} />
+            <Route path="members" element={<RequirePermission permission="members:view"><MembersPage /></RequirePermission>} />
+            <Route path="inventory" element={<RequirePermission permission="inventory:view"><InventoryPage /></RequirePermission>} />
+            <Route path="suppliers" element={<RequirePermission permission="suppliers:view"><SuppliersPage /></RequirePermission>} />
+            <Route path="sales" element={<RequirePermission permission="sales:view"><SalesPage /></RequirePermission>} />
+            <Route path="returns" element={<RequirePermission permission="returns:view"><ReturnsPage /></RequirePermission>} />
+            <Route path="payments" element={<RequirePermission permission="payments:view"><PaymentsPage /></RequirePermission>} />
+            <Route path="online-payments" element={<RequirePermission permission="payments:view"><OnlinePaymentsPage /></RequirePermission>} />
+            <Route path="expenses" element={<RequirePermission permission="expenses:view"><ExpensesPage /></RequirePermission>} />
+            <Route path="reports" element={<RequirePermission permission="reports:view"><ReportsPage /></RequirePermission>} />
+            <Route path="settings" element={<RequirePermission permission="settings:view"><SettingsPage /></RequirePermission>} />
+            <Route path="settings/receipt" element={<RequirePermission permission="settings:view"><ReceiptSettingsPage /></RequirePermission>} />
             <Route path="license" element={<LicensePage />} />
           </Route>
 
@@ -124,14 +164,14 @@ export default function App() {
               )
             }
           >
-            <Route path="sales/new" element={<POSPage />} />
-            <Route path="accessories" element={<AccessoriesPage />} />
-            <Route path="purchases" element={<PurchasesPage />} />
-            <Route path="supplier-dues" element={<SupplierDuesPage />} />
-            <Route path="users" element={<UsersPage />} />
-            <Route path="activity" element={<ActivityLogsPage />} />
+            <Route path="sales/new" element={<RequirePermission permission="sales:create"><POSPage /></RequirePermission>} />
+            <Route path="accessories" element={<RequirePermission permission="inventory:view"><AccessoriesPage /></RequirePermission>} />
+            <Route path="purchases" element={<RequirePermission permission="purchases:view"><PurchasesPage /></RequirePermission>} />
+            <Route path="supplier-dues" element={<RequirePermission permission="purchases:view"><SupplierDuesPage /></RequirePermission>} />
+            <Route path="users" element={<RequirePermission permission="users:manage"><UsersPage /></RequirePermission>} />
+            <Route path="activity" element={<RequirePermission permission="reports:view"><ActivityLogsPage /></RequirePermission>} />
             <Route path="notifications" element={<NotificationsPage />} />
-            <Route path="backups" element={<BackupManagerPage />} />
+            <Route path="backups" element={<RequirePermission permission="backup:view"><BackupManagerPage /></RequirePermission>} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

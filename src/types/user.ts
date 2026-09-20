@@ -30,6 +30,11 @@ export interface ResetPasswordInput {
   new_password: string;
 }
 
+export interface ChangePasswordInput {
+  current_password: string;
+  new_password: string;
+}
+
 export interface RoleWithPermissions {
   id: number;
   name: string;

@@ -98,6 +98,69 @@ pub fn update_last_purchase_cost(
     Ok(())
 }
 
+/// After a purchase is deleted, revert last_purchase_cost to the highest
+/// remaining unit_cost across all other purchase_items for this product,
+/// or NULL if no purchases remain.
+pub fn revert_last_purchase_cost(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+) -> Result<(), AppError> {
+    let (table, col) = if item_type == "phone" {
+        ("phones", "phone_id")
+    } else {
+        ("accessories", "accessory_id")
+    };
+    let new_lpc: Option<f64> = conn.query_row(
+        &format!(
+            "SELECT MAX(pi.unit_cost) FROM purchase_items pi \
+             JOIN purchases p ON p.id = pi.purchase_id \
+             WHERE pi.{col} = ?1 AND pi.unit_cost > 0"
+        ),
+        params![item_id],
+        |r| r.get(0),
+    )?;
+    conn.execute(
+        &format!(
+            "UPDATE {table} SET last_purchase_cost = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND is_deleted = 0"
+        ),
+        params![new_lpc, item_id],
+    )?;
+    Ok(())
+}
+
+/// Sync cost_price and sale_price from the purchase line to the product row.
+/// cost_price is always overwritten; sale_price is only overwritten when provided.
+pub fn sync_product_prices(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    cost_price: f64,
+    sale_price: Option<f64>,
+) -> Result<(), AppError> {
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
+    if let Some(sp) = sale_price {
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET cost_price = ?1, sale_price = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3 AND is_deleted = 0"
+            ),
+            params![cost_price, sp, item_id],
+        )?;
+    } else {
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET cost_price = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND is_deleted = 0"
+            ),
+            params![cost_price, item_id],
+        )?;
+    }
+    Ok(())
+}
+
 pub fn next_purchase_no(conn: &Connection) -> Result<String, AppError> {
     let max: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM purchases", [], |r| {
         r.get(0)
@@ -144,29 +207,42 @@ pub fn imeis_in_use(
     if imeis.is_empty() {
         return Ok(out);
     }
-    let placeholders = vec!["?"; imeis.len()].join(",");
-    let sql = format!("SELECT imei FROM phone_imeis WHERE imei IN ({placeholders})");
-    let mut stmt = conn.prepare(&sql)?;
-    let params = rusqlite::params_from_iter(imeis.iter().map(|s| s.as_str()));
-    let rows = stmt.query_map(params, |r| r.get::<_, String>(0))?;
-    for r in rows {
-        out.insert(r?);
+    const BATCH: usize = 400;
+    for chunk in imeis.chunks(BATCH) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!(
+            "SELECT value FROM (
+               SELECT imei AS value FROM phone_imeis
+               UNION SELECT imei AS value FROM phones WHERE imei IS NOT NULL AND is_deleted = 0
+               UNION SELECT imei2 AS value FROM phones WHERE imei2 IS NOT NULL AND is_deleted = 0
+             ) WHERE value IN ({placeholders})"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params = rusqlite::params_from_iter(chunk.iter().map(|s| s.as_str()));
+        let rows = stmt.query_map(params, |r| r.get::<_, String>(0))?;
+        for r in rows {
+            out.insert(r?);
+        }
     }
     Ok(out)
 }
 
-/// Inserts several IMEIs for one phone in a single statement.
+/// Inserts several IMEIs for one phone, batched to stay within
+/// SQLite's default 999-variable parameter limit (2 params per row).
 pub fn insert_imeis(conn: &Connection, phone_id: i64, imeis: &[String]) -> Result<(), AppError> {
     if imeis.is_empty() {
         return Ok(());
     }
-    let placeholders = vec!["(?1, ?)"; imeis.len()].join(",");
-    let sql = format!("INSERT INTO phone_imeis (phone_id, imei) VALUES {placeholders}");
-    let mut params: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::from(phone_id)];
-    for imei in imeis {
-        params.push(rusqlite::types::Value::from(imei.clone()));
+    const BATCH: usize = 400;
+    for chunk in imeis.chunks(BATCH) {
+        let placeholders = vec!["(?1, ?)"; chunk.len()].join(",");
+        let sql = format!("INSERT INTO phone_imeis (phone_id, imei) VALUES {placeholders}");
+        let mut params: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::from(phone_id)];
+        for imei in chunk {
+            params.push(rusqlite::types::Value::from(imei.clone()));
+        }
+        conn.execute(&sql, rusqlite::params_from_iter(params.iter()))?;
     }
-    conn.execute(&sql, rusqlite::params_from_iter(params.iter()))?;
     Ok(())
 }
 
@@ -340,6 +416,28 @@ pub fn list_purchases(conn: &Connection, search: Option<&str>) -> Result<Vec<Pur
     let items = list_items_for_purchases(conn, ids)?;
     for p in out.iter_mut() {
         p.items = items.get(&p.id).cloned().unwrap_or_default();
+    }
+    Ok(out)
+}
+
+/// Range-bounded purchase rows used by reports. Report tables do not consume
+/// item details, so avoiding that payload keeps large histories responsive.
+pub fn list_purchases_for_period(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<Purchase>, AppError> {
+    let sql = format!(
+        "SELECT {PURCHASE_COLS} {PURCHASE_JOIN}
+         WHERE date(COALESCE(p.purchase_date, p.created_at), 'localtime') >= date(?1)
+           AND date(COALESCE(p.purchase_date, p.created_at), 'localtime') < date(?2, '+1 day')
+         ORDER BY p.created_at DESC, p.id DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![from, to], purchase_from_row)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
     }
     Ok(out)
 }
@@ -546,6 +644,90 @@ pub fn soft_delete_supplier_payment(conn: &Connection, id: i64) -> Result<bool, 
         "UPDATE supplier_payments SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?1 AND is_deleted = 0",
         [id],
+    )?;
+    Ok(affected > 0)
+}
+
+pub fn decrement_stock(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    qty: i64,
+) -> Result<bool, AppError> {
+    super::inventory_repository::decrement_stock(conn, item_type, item_id, qty)
+}
+
+pub fn delete_purchase_imeis(
+    conn: &Connection,
+    phone_id: i64,
+    imeis: &[String],
+) -> Result<(), AppError> {
+    if imeis.is_empty() {
+        return Ok(());
+    }
+    let placeholders = vec!["?"; imeis.len()].join(",");
+    let sql = format!(
+        "DELETE FROM phone_imeis WHERE phone_id = ? AND imei IN ({placeholders}) AND status = 'in_stock'"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::from(phone_id)];
+    for imei in imeis {
+        params.push(rusqlite::types::Value::from(imei.clone()));
+    }
+    stmt.execute(rusqlite::params_from_iter(params))?;
+    Ok(())
+}
+
+pub fn delete_purchase(
+    conn: &Connection,
+    purchase_id: i64,
+) -> Result<bool, AppError> {
+    let affected = conn.execute(
+        "DELETE FROM purchases WHERE id = ?1",
+        rusqlite::params![purchase_id],
+    )?;
+    Ok(affected > 0)
+}
+
+pub fn update_purchase_record(
+    conn: &Connection,
+    purchase_id: i64,
+    supplier_id: Option<i64>,
+    total_amount: f64,
+    discount: f64,
+    paid_amount: f64,
+    payment_method: &str,
+    purchase_date: Option<&str>,
+    invoice_reference: Option<&str>,
+    notes: Option<&str>,
+) -> Result<bool, AppError> {
+    let affected = conn.execute(
+        "UPDATE purchases 
+         SET supplier_id = ?1, total_amount = ?2, discount = ?3, paid_amount = ?4, 
+             payment_method = ?5, purchase_date = ?6, invoice_reference = ?7, notes = ?8 
+         WHERE id = ?9",
+        rusqlite::params![
+            supplier_id,
+            total_amount,
+            discount,
+            paid_amount,
+            payment_method,
+            purchase_date,
+            invoice_reference,
+            notes,
+            purchase_id
+        ],
+    )?;
+    Ok(affected > 0)
+}
+
+pub fn delete_purchase_items(
+    conn: &Connection,
+    purchase_id: i64,
+) -> Result<bool, AppError> {
+    let affected = conn.execute(
+        "DELETE FROM purchase_items WHERE purchase_id = ?1",
+        rusqlite::params![purchase_id],
     )?;
     Ok(affected > 0)
 }

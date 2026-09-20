@@ -41,3 +41,25 @@ pub fn increment_stock(
     )?;
     Ok(())
 }
+
+/// Remove quantity from sellable stock.
+pub fn decrement_stock(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    qty: i64,
+) -> Result<bool, AppError> {
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
+    let affected = conn.execute(
+        &format!(
+            "UPDATE {table} SET quantity = quantity - ?1, updated_at = CURRENT_TIMESTAMP \
+             WHERE id = ?2 AND is_deleted = 0 AND quantity >= ?1"
+        ),
+        rusqlite::params![qty, item_id],
+    )?;
+    Ok(affected > 0)
+}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useSessionStore } from "../store/session";
 import { useSettingsStore } from "../store/settings";
+import { can } from "../lib/permissions";
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -29,6 +30,7 @@ interface NavItem {
   pos?: boolean;
   shortcut?: string;
   end?: boolean;
+  permission?: string;
 }
 
 interface SidebarProps {
@@ -38,25 +40,25 @@ interface SidebarProps {
 }
 
 const mainNav: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/sales/new", label: "New Sale", icon: ShoppingCart, pos: true, shortcut: "F2" },
-  { to: "/sales", label: "Sales History", icon: Receipt, end: true },
-  { to: "/returns", label: "Returns", icon: RotateCcw },
-  { to: "/inventory", label: "Mobile Phones", icon: Smartphone },
-  { to: "/accessories", label: "Accessories", icon: Headphones },
-  { to: "/purchases", label: "Purchases", icon: PackagePlus },
-  { to: "/members", label: "Customers", icon: Users },
-  { to: "/payments", label: "Customer Dues", icon: CreditCard },
-  { to: "/online-payments", label: "Online Payments", icon: Banknote },
-  { to: "/suppliers", label: "Suppliers", icon: Building2 },
-  { to: "/supplier-dues", label: "Supplier Dues", icon: CreditCard },
-  { to: "/expenses", label: "Expenses", icon: TrendingDown },
-  { to: "/reports", label: "Reports", icon: FileText, end: true },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "dashboard:view" },
+  { to: "/sales/new", label: "New Sale", icon: ShoppingCart, pos: true, shortcut: "F2", permission: "sales:create" },
+  { to: "/sales", label: "Sales History", icon: Receipt, end: true, permission: "sales:view" },
+  { to: "/returns", label: "Returns", icon: RotateCcw, permission: "returns:view" },
+  { to: "/inventory", label: "Mobile Phones", icon: Smartphone, permission: "inventory:view" },
+  { to: "/accessories", label: "Accessories", icon: Headphones, permission: "inventory:view" },
+  { to: "/purchases", label: "Purchases", icon: PackagePlus, permission: "purchases:view" },
+  { to: "/members", label: "Customers", icon: Users, permission: "members:view" },
+  { to: "/payments", label: "Customer Dues", icon: CreditCard, permission: "payments:view" },
+  { to: "/online-payments", label: "Online Payments", icon: Banknote, permission: "payments:view" },
+  { to: "/suppliers", label: "Suppliers", icon: Building2, permission: "suppliers:view" },
+  { to: "/supplier-dues", label: "Supplier Dues", icon: CreditCard, permission: "purchases:view" },
+  { to: "/expenses", label: "Expenses", icon: TrendingDown, permission: "expenses:view" },
+  { to: "/reports", label: "Reports", icon: FileText, end: true, permission: "reports:view" },
 ];
 
 /* System modules are managed from Settings (Settings → Administration). */
 const settingsNav: NavItem[] = [
-  { to: "/settings", label: "Settings", icon: Settings, end: true },
+  { to: "/settings", label: "Settings", icon: Settings, end: true, permission: "settings:view" },
 ];
 
 function getInitials(name: string) {
@@ -78,6 +80,14 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
   const displayName = ownerName.trim() || username || user?.username || "User";
   const shopName = useSettingsStore((s) => s.businessName);
   const shopLogo = useSettingsStore((s) => s.logo);
+  const permissions = user?.permissions ?? [];
+
+  const visibleMainNav = mainNav.filter(
+    (item) => !item.permission || can(permissions, item.permission),
+  );
+  const visibleSettingsNav = settingsNav.filter(
+    (item) => !item.permission || can(permissions, item.permission),
+  );
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -167,13 +177,13 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
 
       {/* Main navigation (scrolls independently) */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <ul className="space-y-0.5">{mainNav.map(renderItem)}</ul>
+        <ul className="space-y-0.5">{visibleMainNav.map(renderItem)}</ul>
       </nav>
 
       {/* Settings (fixed at the bottom) + user profile */}
       <div className="shrink-0" style={{ borderTop: "1px solid #1E2E4F" }}>
         <div className="px-3 pb-2 pt-3">
-          <ul className="space-y-0.5">{settingsNav.map(renderItem)}</ul>
+          <ul className="space-y-0.5">{visibleSettingsNav.map(renderItem)}</ul>
         </div>
         <div className="px-5 py-3" style={{ borderTop: "1px solid #1E2E4F" }}>
           <div className="flex items-center gap-3">

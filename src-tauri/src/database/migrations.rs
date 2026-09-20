@@ -1180,6 +1180,69 @@ const MIGRATIONS: &[(&str, &str)] = &[
         ALTER TABLE payments ADD COLUMN account_details TEXT;
         "#,
     ),
+    (
+        "0027_payment_query_indexes",
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_payments_sale_status_active
+            ON payments(sale_id, status, is_deleted);
+        CREATE INDEX IF NOT EXISTS idx_sale_payments_created_method
+            ON sale_payments(created_at, payment_method);
+        CREATE INDEX IF NOT EXISTS idx_supplier_payments_supplier_status_active
+            ON supplier_payments(supplier_id, status, is_deleted);
+        "#,
+    ),
+    (
+        "0028_sale_item_warranty",
+        r#"
+        ALTER TABLE sale_items ADD COLUMN warranty TEXT;
+        ALTER TABLE sale_items ADD COLUMN warranty_expiry TEXT;
+        "#,
+    ),
+    (
+        "0029_enhanced_permissions",
+        r#"
+        INSERT OR IGNORE INTO permissions (name) VALUES
+            ('sales:delete'),
+            ('returns:view'),
+            ('returns:create'),
+            ('returns:delete'),
+            ('expenses:update'),
+            ('expenses:delete'),
+            ('purchases:view'),
+            ('purchases:create'),
+            ('purchases:delete'),
+            ('staff:view'),
+            ('staff:create'),
+            ('staff:update'),
+            ('staff:delete'),
+            ('backup:view'),
+            ('backup:manage');
+
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM roles r
+        CROSS JOIN permissions p
+        WHERE r.name = 'Admin';
+        "#,
+    ),
+    (
+        "0030_return_type",
+        r#"
+        ALTER TABLE returns ADD COLUMN return_type TEXT NOT NULL DEFAULT 'return';
+        "#,
+    ),
+    (
+        "0031_exchange_sale_link",
+        r#"
+        ALTER TABLE returns ADD COLUMN exchange_sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL;
+        "#,
+    ),
+    (
+        "0032_return_reference",
+        r#"
+        ALTER TABLE returns ADD COLUMN reference TEXT;
+        "#,
+    ),
 ];
 
 pub fn run(conn: &Connection) -> Result<(), AppError> {
@@ -1199,11 +1262,13 @@ pub fn run(conn: &Connection) -> Result<(), AppError> {
         if applied.contains(&version.to_string()) {
             continue;
         }
-        conn.execute_batch(sql)?;
-        conn.execute(
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(sql)?;
+        tx.execute(
             "INSERT INTO schema_migrations (version) VALUES (?1)",
             [version],
         )?;
+        tx.commit()?;
         log::info!("Applied migration: {}", version);
     }
 

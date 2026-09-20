@@ -45,6 +45,7 @@ fn series(months: i64, rows: Vec<(String, f64)>) -> Vec<MonthlyPoint> {
 pub fn dashboard(conn: &Connection, _months: i64, today: &str) -> Result<DashboardSummary, AppError> {
     let (
         revenue,
+        cogs,
         expenses,
         members_total,
         members_active,
@@ -57,7 +58,7 @@ pub fn dashboard(conn: &Connection, _months: i64, today: &str) -> Result<Dashboa
     Ok(DashboardSummary {
         revenue,
         expenses,
-        profit: revenue - expenses,
+        profit: revenue - cogs - expenses,
         today_revenue,
         today_sales_count,
         members_total,
@@ -83,18 +84,19 @@ pub fn recent_activity(conn: &Connection, limit: i64) -> Result<Vec<ActivityLog>
 }
 
 pub fn period_summary(conn: &Connection, from: &str, to: &str) -> Result<PeriodSummary, AppError> {
-    let (revenue, expenses, sales_count, received, discount) =
+    let (revenue, expenses, sales_count, received, discount, outstanding) =
         report_repository::period_summary(conn, from, to)?;
+    let (_, cogs, _, _) = report_repository::profit_loss_summary(conn, from, to)?;
     Ok(PeriodSummary {
         from: from.to_string(),
         to: to.to_string(),
         revenue,
         expenses,
-        profit: revenue - expenses,
+        profit: revenue - cogs - expenses,
         sales_count,
         received,
         discount,
-        outstanding: (revenue - received).max(0.0),
+        outstanding,
     })
 }
 
@@ -178,10 +180,6 @@ mod tests {
             .to_string()
     }
 
-    fn seed_sale(conn: &Connection, total: f64, member_id: Option<i64>) -> i64 {
-        seed_sale_on(conn, total, member_id, None)
-    }
-
     fn seed_sale_on(
         conn: &Connection,
         total: f64,
@@ -195,10 +193,6 @@ mod tests {
         )
         .unwrap();
         conn.last_insert_rowid()
-    }
-
-    fn seed_expense(conn: &Connection, amount: f64, category_id: i64) {
-        seed_expense_on(conn, amount, category_id, None)
     }
 
     fn seed_expense_on(conn: &Connection, amount: f64, category_id: i64, on: Option<&str>) {
@@ -358,6 +352,62 @@ mod tests {
             .find(|b| b.payment_method == "cash")
             .unwrap();
         assert_eq!(cash.total, 650.0);
+    }
+
+    #[test]
+    fn report_histories_are_not_truncated_at_interactive_list_limit() {
+        let conn = in_memory_conn();
+        let tx = conn.unchecked_transaction().unwrap();
+        for index in 0..600 {
+            tx.execute(
+                "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method, created_at)
+                 VALUES (?1, 10, 10, 'cash', '2026-01-15 12:00:00')",
+                [format!("REPORT-SALE-{index:04}")],
+            )
+            .unwrap();
+            let sale_id = tx.last_insert_rowid();
+            tx.execute(
+                "INSERT INTO returns (return_no, sale_id, total_sale_price, refund_amount, refund_method, return_date)
+                 VALUES (?1, ?2, 1, 1, 'cash', '2026-01-15 13:00:00')",
+                rusqlite::params![format!("REPORT-RETURN-{index:04}"), sale_id],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO purchases (purchase_no, total_amount, paid_amount, payment_method, purchase_date, created_at)
+                 VALUES (?1, 10, 10, 'cash', '2026-01-15', '2026-01-15 11:00:00')",
+                [format!("REPORT-PURCHASE-{index:04}")],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+
+        assert_eq!(crate::services::sale_service::list(&conn, None).unwrap().len(), 500);
+        assert_eq!(
+            crate::services::sale_service::list_for_period(&conn, "2026-01-01", "2026-01-31")
+                .unwrap()
+                .len(),
+            600
+        );
+        assert_eq!(
+            crate::services::product_return_service::list_for_period(
+                &conn,
+                "2026-01-01",
+                "2026-01-31",
+            )
+            .unwrap()
+            .len(),
+            600
+        );
+        assert_eq!(
+            crate::services::purchase_service::list_for_period(
+                &conn,
+                "2026-01-01",
+                "2026-01-31",
+            )
+            .unwrap()
+            .len(),
+            600
+        );
     }
 
     #[test]

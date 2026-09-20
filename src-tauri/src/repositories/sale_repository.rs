@@ -46,10 +46,13 @@ const SALE_AGG_COLS: &str = "COALESCE(rt.returned_amount, 0) AS returned_amount,
      COALESCE(rt.returned_qty, 0) AS returned_qty, \
      COALESCE(siq.sold_qty, 0) AS sold_qty";
 
-const SALE_AGG_JOIN: &str = "LEFT JOIN (SELECT rt2.sale_id, SUM(rt2.refund_amount) AS returned_amount, \
-     COUNT(rt2.id) AS return_count, SUM(ri.quantity) AS returned_qty \
-     FROM returns rt2 LEFT JOIN return_items ri ON ri.return_id = rt2.id \
-     GROUP BY rt2.sale_id) rt ON rt.sale_id = s.id \
+const SALE_AGG_JOIN: &str = "LEFT JOIN (SELECT rh.sale_id, rh.returned_amount, rh.return_count, \
+     COALESCE(ri.returned_qty, 0) AS returned_qty \
+     FROM (SELECT sale_id, SUM(refund_amount) AS returned_amount, COUNT(*) AS return_count \
+           FROM returns GROUP BY sale_id) rh \
+     LEFT JOIN (SELECT r.sale_id, SUM(i.quantity) AS returned_qty \
+                FROM returns r JOIN return_items i ON i.return_id = r.id GROUP BY r.sale_id) ri \
+       ON ri.sale_id = rh.sale_id) rt ON rt.sale_id = s.id \
      LEFT JOIN (SELECT sale_id, SUM(quantity) AS sold_qty FROM sale_items GROUP BY sale_id) siq \
      ON siq.sale_id = s.id";
 
@@ -89,6 +92,8 @@ pub fn insert_sale_item(
     imei_id: Option<i64>,
     quantity: i64,
     unit_price: f64,
+    warranty: Option<&str>,
+    warranty_expiry: Option<&str>,
 ) -> Result<(), AppError> {
     let (col, val) = if item_type == "phone" {
         ("phone_id", rusqlite::types::Value::from(item_id))
@@ -97,10 +102,10 @@ pub fn insert_sale_item(
     };
     conn.execute(
         &format!(
-            "INSERT INTO sale_items (sale_id, {col}, imei_id, quantity, unit_price)
-             VALUES (?1, ?2, ?3, ?4, ?5)"
+            "INSERT INTO sale_items (sale_id, {col}, imei_id, quantity, unit_price, warranty, warranty_expiry)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
         ),
-        rusqlite::params![sale_id, val, imei_id, quantity, unit_price],
+        rusqlite::params![sale_id, val, imei_id, quantity, unit_price, warranty, warranty_expiry],
     )?;
     Ok(())
 }
@@ -214,6 +219,8 @@ pub fn update_sale_item(
     imei_id: Option<i64>,
     quantity: i64,
     unit_price: f64,
+    warranty: Option<&str>,
+    warranty_expiry: Option<&str>,
 ) -> Result<(), AppError> {
     let (phone_id, accessory_id) = if item_type == "phone" {
         (Some(item_id), None)
@@ -221,8 +228,8 @@ pub fn update_sale_item(
         (None, Some(item_id))
     };
     conn.execute(
-        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6 WHERE id = ?1",
-        params![id, phone_id, accessory_id, imei_id, quantity, unit_price],
+        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6, warranty = ?7, warranty_expiry = ?8 WHERE id = ?1",
+        params![id, phone_id, accessory_id, imei_id, quantity, unit_price, warranty, warranty_expiry],
     )?;
     Ok(())
 }
@@ -280,7 +287,8 @@ fn list_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItem>, AppError
                 COALESCE(p.brand || ' ' || p.model, a.brand || ' ' || a.product_name) AS product_name,
                 im.imei AS imei,
                 CASE WHEN si.phone_id IS NOT NULL THEN p.variant END AS variant,
-                COALESCE(p.serial_number, a.serial_number) AS serial_no
+                COALESCE(p.serial_number, a.serial_number) AS serial_no,
+                si.warranty, si.warranty_expiry
          FROM sale_items si
          LEFT JOIN phones p ON p.id = si.phone_id
          LEFT JOIN accessories a ON a.id = si.accessory_id
@@ -300,6 +308,8 @@ fn list_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItem>, AppError
             imei: r.get("imei")?,
             variant: r.get("variant")?,
             serial_no: r.get("serial_no")?,
+            warranty: r.get("warranty")?,
+            warranty_expiry: r.get("warranty_expiry")?,
         })
     })?;
     let mut out = Vec::new();
@@ -329,6 +339,28 @@ pub fn list_sales(conn: &Connection, search: Option<&str>) -> Result<Vec<Sale>, 
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
+    }
+    Ok(out)
+}
+
+/// Complete sales history for reports. Unlike the interactive history list,
+/// this is range-bounded instead of being truncated to the latest 500 rows.
+pub fn list_sales_for_period(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<Sale>, AppError> {
+    let sql = format!(
+        "SELECT {SALE_COLS}, {SALE_AGG_COLS} {SALE_JOIN} {SALE_AGG_JOIN}
+         WHERE date(s.created_at, 'localtime') >= date(?1)
+           AND date(s.created_at, 'localtime') < date(?2, '+1 day')
+         ORDER BY s.created_at DESC, s.id DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![from, to], sale_from_row)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
     }
     Ok(out)
 }

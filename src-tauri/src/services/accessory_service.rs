@@ -120,10 +120,12 @@ pub fn restock(
     quantity: i64,
     actor: Option<i64>,
 ) -> Result<(), AppError> {
-    if quantity < 0 {
-        return Err(AppError::validation("Restock quantity cannot be negative"));
+    if quantity <= 0 {
+        return Err(AppError::validation("Restock quantity must be greater than zero"));
     }
-    accessory_repository::add_quantity(conn, id, quantity)?;
+    if !accessory_repository::add_quantity(conn, id, quantity)? {
+        return Err(AppError::validation("Accessory not found"));
+    }
     services::record_activity(conn, actor, "accessory", "restock", Some(id))
 }
 

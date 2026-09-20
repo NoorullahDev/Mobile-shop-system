@@ -8,6 +8,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import * as saleService from "../services/saleService";
 import * as paymentService from "../services/paymentService";
 import { formatMoneyCompact, formatDateTime } from "../lib/format";
+import { isWarrantyActive } from "../lib/warranty";
 import type { Sale } from "../types/sale";
 import type { ReturnItem } from "../types/return";
 import type { Payment } from "../types/payment";
@@ -71,7 +72,9 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
     return qty;
   };
 
-  const remainingDue = sale ? Math.max(0, sale.total_amount - sale.paid_amount) : 0;
+  const remainingDue = sale
+    ? Math.max(0, sale.total_amount - sale.paid_amount - (sale.returned_amount ?? 0))
+    : 0;
   const paymentStatus = !sale
     ? "unpaid"
     : remainingDue <= 0.005
@@ -239,6 +242,7 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                   <th>Item</th>
                   <th className="text-center">Qty</th>
                   <th className="text-right">Unit Price</th>
+                  <th className="text-center">Warranty</th>
                   <th className="text-center">Returned</th>
                 </tr>
               </thead>
@@ -260,6 +264,29 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                       </td>
                       <td className="text-center" style={{ fontSize: "13px" }}>{it.quantity}</td>
                       <td className="text-right text-[13px]">{formatMoneyCompact(it.unit_price)}</td>
+                      <td className="text-center">
+                        {it.warranty ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                            style={
+                              it.warranty_expiry
+                                ? isWarrantyActive(it.warranty_expiry)
+                                  ? { background: "#DCFCE7", color: "#15803D" }
+                                  : { background: "#FEF2F2", color: "#B91C1C" }
+                                : { background: "#EFF6FF", color: "#1D4ED8" }
+                            }
+                          >
+                            {it.warranty}
+                            {it.warranty_expiry && (
+                              <span className="ml-0.5 font-normal">
+                                {isWarrantyActive(it.warranty_expiry) ? `till ${it.warranty_expiry}` : "expired"}
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-[11px]" style={{ color: "#94A3B8" }}>—</span>
+                        )}
+                      </td>
                       <td className="text-center">
                         {returnedQty > 0 ? (
                           <span

@@ -144,10 +144,10 @@ pub fn soft_delete(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(affected > 0)
 }
 
-pub fn add_quantity(conn: &Connection, id: i64, amount: i64) -> Result<(), AppError> {
-    conn.execute(
+pub fn add_quantity(conn: &Connection, id: i64, amount: i64) -> Result<bool, AppError> {
+    let affected = conn.execute(
         "UPDATE accessories SET quantity = quantity + ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2 AND is_deleted = 0",
         params![amount, id],
     )?;
-    Ok(())
+    Ok(affected > 0)
 }

@@ -16,6 +16,7 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
           ${it.variant ? `<br><span style="font-size:11px;color:#6B7280">Variant: ${esc(it.variant)}</span>` : ""}
           ${it.serial ? `<br><span style="font-size:11px;color:#6B7280">Serial: ${esc(it.serial)}</span>` : ""}
           ${it.imei ? `<br><span style="font-size:11px;color:#6B7280">IMEI: ${esc(it.imei)}</span>` : ""}
+          ${it.warranty ? `<br><span style="font-size:11px;color:#1D4ED8;font-weight:500">Warranty: ${esc(it.warranty)}${it.warranty_expiry ? ` (till ${esc(it.warranty_expiry)})` : ""}</span>` : ""}
         </td>
         <td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-size:13px;color:#1F2937;text-align:center">${it.qty}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-size:13px;color:#1F2937;text-align:right">${money(it.price)}</td>
@@ -172,6 +173,10 @@ export function buildA4InvoicePrintHtml(data: ReceiptData): string {
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; background: #fff; }
   body { padding: 12mm; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr, img { break-inside: avoid; page-break-inside: avoid; }
+  img { max-width: 100%; }
 </style>
 </head><body>${inner}</body></html>`;
 }

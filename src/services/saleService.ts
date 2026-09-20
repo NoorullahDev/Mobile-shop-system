@@ -9,6 +9,10 @@ export async function listSales(search?: string): Promise<Sale[]> {
   return invoke<Sale[]>("list_sales", { search: search ?? null });
 }
 
+export async function listSalesForPeriod(from: string, to: string): Promise<Sale[]> {
+  return invoke<Sale[]>("list_sales_for_period", { from, to });
+}
+
 export async function getSale(id: number): Promise<Sale> {
   return invoke<Sale>("get_sale", { id });
 }

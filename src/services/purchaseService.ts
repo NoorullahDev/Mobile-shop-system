@@ -18,8 +18,23 @@ export async function listPurchases(search?: string): Promise<Purchase[]> {
   return invoke<Purchase[]>("list_purchases", { search: search ?? null });
 }
 
+export async function listPurchasesForPeriod(from: string, to: string): Promise<Purchase[]> {
+  return invoke<Purchase[]>("list_purchases_for_period", { from, to });
+}
+
 export async function getPurchase(id: number): Promise<Purchase> {
   return invoke<Purchase>("get_purchase", { id });
+}
+
+export async function updatePurchase(
+  id: number,
+  input: CreatePurchaseInput,
+): Promise<Purchase> {
+  return invoke<Purchase>("update_purchase", { id, input });
+}
+
+export async function deletePurchase(id: number, reason?: string): Promise<void> {
+  return invoke<void>("delete_purchase", { id, reason: reason ?? null });
 }
 
 export async function createSupplierPayment(

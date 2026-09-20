@@ -15,6 +15,8 @@ struct Line {
     quantity: i64,
     imei_id: Option<i64>,
     unit_price: f64,
+    warranty: Option<String>,
+    warranty_expiry: Option<String>,
 }
 
 struct PreparedSale {
@@ -119,6 +121,8 @@ fn prepare(
 
         let line_total = utils::round2(unit_price * item.quantity as f64);
         subtotal += line_total;
+        let warranty = item.warranty.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        let warranty_expiry = item.warranty_expiry.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
         lines.push(Line {
             sale_item_id: item.sale_item_id,
             item_type,
@@ -126,6 +130,8 @@ fn prepare(
             quantity: item.quantity,
             imei_id: line_imei,
             unit_price: utils::round2(unit_price),
+            warranty,
+            warranty_expiry,
         });
     }
 
@@ -135,8 +141,8 @@ fn prepare(
     }
     let paid_amount = match input.paid_amount {
         Some(p) => {
-            if p < 0.0 {
-                return Err(AppError::validation("Paid amount cannot be negative"));
+            if !p.is_finite() || p < 0.0 {
+                return Err(AppError::validation("Paid amount is invalid"));
             }
             utils::round2(p)
         }
@@ -157,7 +163,7 @@ fn prepare(
         let mut total_paid = 0.0;
         let mut validated = Vec::new();
         for p in &input.payments {
-            if p.amount <= 0.0 {
+            if !p.amount.is_finite() || p.amount <= 0.0 {
                 return Err(AppError::validation("Each payment amount must be greater than zero"));
             }
             let method = p.payment_method.trim().to_lowercase();
@@ -172,8 +178,7 @@ fn prepare(
                 notes: p.notes.clone(),
             });
         }
-        // Recalculate paid_amount from split payments
-        let computed_paid = utils::round2(total_paid.min(total_amount));
+        let computed_paid = utils::round2(total_paid);
         Ok::<_, AppError>((validated, computed_paid))
     } else {
         Ok((vec![], paid_amount))
@@ -181,6 +186,11 @@ fn prepare(
 
     let (validated_payments, computed_paid) = payments;
     let final_paid_amount = if !validated_payments.is_empty() { computed_paid } else { paid_amount };
+    if final_paid_amount > total_amount + 0.005 {
+        return Err(AppError::validation(
+            "Paid amount cannot be greater than the invoice total",
+        ));
+    }
 
     Ok(PreparedSale { lines, total_amount, paid_amount: final_paid_amount, payment_method, payments: validated_payments })
 }
@@ -190,19 +200,34 @@ pub fn create(
     input: CreateSaleInput,
     actor: Option<i64>,
 ) -> Result<Sale, AppError> {
-    let prepared = prepare(conn, &input, &HashSet::new())?;
+    let tx = conn.unchecked_transaction()?;
+    let sale_id = create_tx(&tx, input, actor)?;
 
-    let receipt_no = sale_repository::next_receipt_no(conn)?;
+    tx.commit()?;
+
+    services::record_activity(conn, actor, "sale", "create", Some(sale_id))?;
+
+    sale_repository::get_sale_with_items(conn, sale_id)?
+        .ok_or_else(|| AppError::Internal("Created sale could not be retrieved".into()))
+}
+
+pub fn create_tx(
+    tx: &rusqlite::Transaction,
+    input: CreateSaleInput,
+    actor: Option<i64>,
+) -> Result<i64, AppError> {
+    // we need to pass a conn for prepare, but Transaction Derefs to Connection.
+    let prepared = prepare(tx, &input, &HashSet::new())?;
+
+    let receipt_no = sale_repository::next_receipt_no(tx)?;
     let notes = input
         .notes
         .as_deref()
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
 
-    // ----- Apply in a single transaction (Rule 6) -----
-    let tx = conn.unchecked_transaction()?;
     let sale_id = sale_repository::insert_sale(
-        &tx,
+        tx,
         &receipt_no,
         input.member_id,
         prepared.total_amount,
@@ -213,12 +238,11 @@ pub fn create(
         actor,
     )?;
 
-    // Insert split payments or create a single payment entry from legacy fields
     if !prepared.payments.is_empty() {
-        sale_payment_repository::insert_payments(&tx, sale_id, &prepared.payments)?;
+        sale_payment_repository::insert_payments(tx, sale_id, &prepared.payments)?;
     } else if prepared.paid_amount > 0.0 {
         sale_payment_repository::insert_sale_payment(
-            &tx,
+            tx,
             sale_id,
             prepared.paid_amount,
             &prepared.payment_method,
@@ -229,34 +253,30 @@ pub fn create(
 
     for line in &prepared.lines {
         sale_repository::insert_sale_item(
-            &tx,
+            tx,
             sale_id,
             &line.item_type,
             line.item_id,
             line.imei_id,
             line.quantity,
             line.unit_price,
+            line.warranty.as_deref(),
+            line.warranty_expiry.as_deref(),
         )?;
 
-        // Rule 2: reduce inventory
-        if !sale_repository::decrement_stock(&tx, &line.item_type, line.item_id, line.quantity)? {
+        if !sale_repository::decrement_stock(tx, &line.item_type, line.item_id, line.quantity)? {
             return Err(AppError::validation("Not enough stock for this item"));
         }
-        // Rule 3: mark IMEI sold (phones only)
         if line.item_type == "phone" {
             if let Some(imei_id) = line.imei_id {
-                if !sale_repository::mark_imei_sold(&tx, imei_id, line.item_id)? {
+                if !sale_repository::mark_imei_sold(tx, imei_id, line.item_id)? {
                     return Err(AppError::validation("IMEI is not available for this item"));
                 }
             }
         }
     }
-    tx.commit()?;
 
-    services::record_activity(conn, actor, "sale", "create", Some(sale_id))?;
-
-    sale_repository::get_sale_with_items(conn, sale_id)?
-        .ok_or_else(|| AppError::Internal("Created sale could not be retrieved".into()))
+    Ok(sale_id)
 }
 
 pub fn update(
@@ -321,6 +341,23 @@ pub fn update(
     }
 
     let prepared = prepare(&tx, &input, &imei_exempt)?;
+    let linked_due_payments: f64 = tx.query_row(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments
+         WHERE sale_id = ?1 AND is_deleted = 0 AND status = 'completed'",
+        [id],
+        |row| row.get(0),
+    )?;
+    if old.member_id != input.member_id && linked_due_payments > 0.0 {
+        return Err(AppError::validation(
+            "The customer cannot be changed after a due payment has been recorded",
+        ));
+    }
+    let combined_paid = utils::round2(prepared.paid_amount + linked_due_payments);
+    if combined_paid > prepared.total_amount + 0.005 {
+        return Err(AppError::validation(
+            "The corrected invoice total cannot be lower than its recorded payments",
+        ));
+    }
     let notes = input.notes.as_deref().map(str::trim).filter(|s| !s.is_empty());
     sale_repository::update_sale(
         &tx,
@@ -328,7 +365,7 @@ pub fn update(
         input.member_id,
         prepared.total_amount,
         utils::round2(input.discount),
-        prepared.paid_amount,
+        combined_paid,
         &prepared.payment_method,
         notes,
     )?;
@@ -343,10 +380,12 @@ pub fn update(
         if let Some(line_id) = line.sale_item_id {
             sale_repository::update_sale_item(
                 &tx, line_id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price,
+                line.warranty.as_deref(), line.warranty_expiry.as_deref(),
             )?;
         } else {
             sale_repository::insert_sale_item(
                 &tx, id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price,
+                line.warranty.as_deref(), line.warranty_expiry.as_deref(),
             )?;
         }
         if !sale_repository::decrement_stock(&tx, &line.item_type, line.item_id, line.quantity)? {
@@ -385,33 +424,42 @@ pub fn update(
 }
 
 pub fn delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
-    let sale = get(conn, id)?;
+    get(conn, id)?;
     let tx = conn.unchecked_transaction()?;
-    let sale_item_ids: Vec<i64> = sale.items.iter().map(|item| item.id).collect();
-    let restocked = product_return_repository::restocked_qty_by_sale_items(&tx, &sale_item_ids)?;
-    product_return_repository::delete_for_sale(&tx, id)?;
-    // Delete sale_payments
-    sale_payment_repository::delete_payments_for_sale(&tx, id)?;
-    for item in &sale.items {
-        let net_restore = item.quantity - restocked.get(&item.id).copied().unwrap_or(0);
-        if net_restore > 0 {
-            sale_repository::increment_stock(&tx, &item.item_type, item.item_id, net_restore)?;
-        }
-        if item.item_type == "phone" {
-            if let Some(imei_id) = item.imei_id {
-                if !sale_repository::imei_used_by_other_sale(&tx, imei_id, id)? {
-                    sale_repository::release_imei(&tx, imei_id, item.item_id)?;
-                }
-            }
-        }
-    }
-    sale_repository::delete_sale(&tx, id)?;
+    delete_tx(&tx, id)?;
     tx.commit()?;
     services::record_activity(conn, actor, "sale", "delete", Some(id))
 }
 
+pub fn delete_tx(tx: &rusqlite::Transaction, id: i64) -> Result<(), AppError> {
+    let sale = get(tx, id)?;
+    let sale_item_ids: Vec<i64> = sale.items.iter().map(|item| item.id).collect();
+    let restocked = product_return_repository::restocked_qty_by_sale_items(tx, &sale_item_ids)?;
+    product_return_repository::delete_for_sale(tx, id)?;
+    sale_payment_repository::delete_payments_for_sale(tx, id)?;
+    for item in &sale.items {
+        let net_restore = item.quantity - restocked.get(&item.id).copied().unwrap_or(0);
+        if net_restore > 0 {
+            sale_repository::increment_stock(tx, &item.item_type, item.item_id, net_restore)?;
+        }
+        if item.item_type == "phone" {
+            if let Some(imei_id) = item.imei_id {
+                if !sale_repository::imei_used_by_other_sale(tx, imei_id, id)? {
+                    sale_repository::release_imei(tx, imei_id, item.item_id)?;
+                }
+            }
+        }
+    }
+    sale_repository::delete_sale(tx, id)?;
+    Ok(())
+}
+
 pub fn list(conn: &Connection, search: Option<String>) -> Result<Vec<Sale>, AppError> {
     sale_repository::list_sales(conn, search.as_deref())
+}
+
+pub fn list_for_period(conn: &Connection, from: &str, to: &str) -> Result<Vec<Sale>, AppError> {
+    sale_repository::list_sales_for_period(conn, from, to)
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Sale, AppError> {
@@ -464,6 +512,8 @@ mod tests {
                 quantity: qty,
                 imei_id: None,
                 unit_price: None,
+                warranty: None,
+                warranty_expiry: None,
             }],
         }
     }
@@ -517,6 +567,72 @@ mod tests {
         input.discount = 500.0;
         let err = create(&conn, input, None).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn rejects_single_and_split_overpayments_without_writing_sale() {
+        let conn = in_memory_conn();
+        let id = phone(&conn, 5, 100.0);
+        let mut single = sale_input(id, 1);
+        single.paid_amount = Some(100.01);
+        assert!(matches!(create(&conn, single, None), Err(AppError::Validation(_))));
+
+        let mut split = sale_input(id, 1);
+        split.paid_amount = None;
+        split.payments = vec![
+            crate::models::sale_payment::SalePaymentInput {
+                amount: 60.0,
+                payment_method: "cash".into(),
+                reference: None,
+                notes: None,
+            },
+            crate::models::sale_payment::SalePaymentInput {
+                amount: 50.0,
+                payment_method: "card".into(),
+                reference: None,
+                notes: None,
+            },
+        ];
+        assert!(matches!(create(&conn, split, None), Err(AppError::Validation(_))));
+        assert!(list(&conn, None).unwrap().is_empty());
+        assert_eq!(phone_service::get(&conn, id).unwrap().quantity, 5);
+    }
+
+    #[test]
+    fn editing_invoice_preserves_linked_due_payments() {
+        use crate::models::payment::CreatePaymentInput;
+
+        let conn = in_memory_conn();
+        conn.execute("INSERT INTO members (name) VALUES ('Due Customer')", [])
+            .unwrap();
+        let member_id = conn.last_insert_rowid();
+        let id = phone(&conn, 5, 100.0);
+        let mut original = sale_input(id, 1);
+        original.member_id = Some(member_id);
+        original.paid_amount = Some(40.0);
+        let sale = create(&conn, original, None).unwrap();
+
+        crate::services::payment_service::create(
+            &conn,
+            CreatePaymentInput {
+                member_id: Some(member_id),
+                sale_id: Some(sale.id),
+                amount: 20.0,
+                payment_method: "cash".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        let mut correction = sale_input(id, 1);
+        correction.items[0].sale_item_id = Some(sale.items[0].id);
+        correction.member_id = Some(member_id);
+        correction.paid_amount = Some(40.0);
+        let corrected = update(&conn, sale.id, correction, None).unwrap();
+        assert_eq!(corrected.paid_amount, 60.0);
+        assert_eq!(corrected.sale_payments.len(), 1);
+        assert_eq!(corrected.sale_payments[0].amount, 40.0);
     }
 
     #[test]
@@ -613,6 +729,8 @@ mod tests {
                     quantity: 2,
                     imei_id: None,
                     unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
                 }],
             },
             None,
@@ -657,10 +775,12 @@ mod tests {
             &conn,
             CreateReturnInput {
                 sale_id: sale.id,
+                return_type: "return".into(),
                 return_charge_percent: 10.0,
                 fixed_deduction: None,
                 refund_method: Some("cash".into()),
                 return_date: None,
+                reference: None,
                 notes: None,
                 items: vec![ReturnItemInput {
                     sale_item_id: sale.items[0].id,
@@ -669,6 +789,7 @@ mod tests {
                     reason: None,
                     condition: "sellable".into(),
                 }],
+                exchange_item: None,
             },
             None,
         )
@@ -691,6 +812,8 @@ mod tests {
                     quantity: 3,
                     imei_id: None,
                     unit_price: Some(150.0),
+                    warranty: None,
+                    warranty_expiry: None,
                 }],
             },
             None,
@@ -717,10 +840,12 @@ mod tests {
             &conn,
             CreateReturnInput {
                 sale_id: sale.id,
+                return_type: "return".into(),
                 return_charge_percent: 0.0,
                 fixed_deduction: None,
                 refund_method: Some("cash".into()),
                 return_date: None,
+                reference: None,
                 notes: None,
                 items: vec![ReturnItemInput {
                     sale_item_id: sale.items[0].id,
@@ -729,6 +854,7 @@ mod tests {
                     reason: None,
                     condition: "sellable".into(),
                 }],
+                exchange_item: None,
             },
             None,
         )

@@ -13,8 +13,8 @@ interface PhoneFormProps {
   onSubmit: (input: CreatePhoneInput) => Promise<void>;
   onCancel: () => void;
   initial?: Phone | null;
-  suppliers: Supplier[];
-  categories: ProductCategory[];
+  suppliers?: Supplier[];
+  categories?: ProductCategory[];
 }
 
 function mapOptions(options: PhoneOption[], placeholder: string) {
@@ -49,7 +49,7 @@ function Section({
   );
 }
 
-export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormProps) {
+export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
   const { load: loadOptions, getOptionsByType } = usePhoneOptionStore();
   const [optionsModalOpen, setOptionsModalOpen] = useState(false);
 
@@ -86,16 +86,12 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
     chipset: initial?.chipset ?? "",
     network_type: initial?.network_type ?? "",
     battery_capacity: initial?.battery_capacity ?? "",
-    imei: initial?.imei ?? "",
-    imei2: initial?.imei2 ?? "",
-    serial_number: initial?.serial_number ?? "",
     image_paths: initial?.image_paths ?? [],
     quantity: initial?.quantity ?? 0,
     low_stock_threshold: initial?.low_stock_threshold ?? 0,
     sku: initial?.sku ?? "",
     cost_price: initial?.cost_price ?? 0,
     sale_price: initial?.sale_price ?? 0,
-    supplier_id: initial?.supplier_id ?? null,
     condition_rating: initial?.condition_rating ?? "",
     body_condition: initial?.body_condition ?? "",
     screen_condition: initial?.screen_condition ?? "",
@@ -112,17 +108,11 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
 
   const [brandError, setBrandError] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [imeiError, setImeiError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const set = (key: keyof CreatePhoneInput, value: string | number | null) =>
     setForm((f) => ({ ...f, [key]: value }));
-
-  const supplierOptions = [
-    { value: "", label: "— No supplier —" },
-    ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
-  ];
 
   const showConditionDetails = !!form.condition && form.condition.trim() !== "New";
   const isAppleBrand = (form.brand ?? "").trim().toLowerCase() === "apple";
@@ -137,23 +127,8 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
       setModelError("Model is required");
       return;
     }
-    const imei = (form.imei ?? "").trim();
-    const imei2 = (form.imei2 ?? "").trim();
-    if (imei && imei.length < 8) {
-      setImeiError("IMEI 1 must be at least 8 characters");
-      return;
-    }
-    if (imei2 && imei2.length < 8) {
-      setImeiError("IMEI 2 must be at least 8 characters");
-      return;
-    }
-    if (imei && imei2 && imei === imei2) {
-      setImeiError("IMEI 1 and IMEI 2 cannot be the same");
-      return;
-    }
     setBrandError(null);
     setModelError(null);
-    setImeiError(null);
     setSaving(true);
     setError(null);
     try {
@@ -169,16 +144,12 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
         chipset: form.chipset ? form.chipset.trim() : "",
         network_type: form.network_type ? form.network_type.trim() : "",
         battery_capacity: form.battery_capacity ? form.battery_capacity.trim() : "",
-        imei: imei || "",
-        imei2: imei2 || "",
-        serial_number: form.serial_number?.trim() || "",
         image_paths: form.image_paths ?? [],
-        quantity: Number(form.quantity) || 0,
+        quantity: 0,
         low_stock_threshold: Number(form.low_stock_threshold) || 0,
         sku: form.sku ? form.sku.trim() : "",
         cost_price: Number(form.cost_price) || 0,
         sale_price: Number(form.sale_price) || 0,
-        supplier_id: form.supplier_id ? Number(form.supplier_id) : null,
         condition_rating: form.condition_rating ? form.condition_rating.trim() : "",
         body_condition: form.body_condition ? form.body_condition.trim() : "",
         screen_condition: form.screen_condition ? form.screen_condition.trim() : "",
@@ -476,7 +447,7 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
           )}
         </Section>
 
-        <Section index="4" title="Inventory & IMEI">
+        <Section index="4" title="Product Code & Stock Alert">
           <Input
             name="sku"
             label="SKU / Product Code"
@@ -484,43 +455,6 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
             value={form.sku ?? ""}
             onChange={(e) => set("sku", e.target.value)}
             disabled={saving}
-          />
-          <Input
-            name="imei"
-            label="IMEI 1"
-            placeholder="15-digit IMEI"
-            hint="Optional — used for warranty & tracking"
-            value={form.imei ?? ""}
-            onChange={(e) => {
-              set("imei", e.target.value);
-              setImeiError(null);
-            }}
-            disabled={saving}
-            error={imeiError ?? undefined}
-          />
-          <Input
-            name="imei2"
-            label="IMEI 2 (Dual SIM)"
-            placeholder="15-digit IMEI"
-            hint="Optional"
-            value={form.imei2 ?? ""}
-            onChange={(e) => {
-              set("imei2", e.target.value);
-              setImeiError(null);
-            }}
-            disabled={saving}
-          />
-          <Input name="serial_number" label="Serial Number" placeholder="Manufacturer serial number" hint="Optional, but must be unique" value={form.serial_number ?? ""} onChange={(e)=>set("serial_number",e.target.value)} disabled={saving}/>
-          <Input
-            name="quantity"
-            label="Quantity / Stock"
-            type="number"
-            min="0"
-            required
-            value={form.quantity}
-            onChange={(e) => set("quantity", parseInt(e.target.value) || 0)}
-            disabled={saving || initial != null}
-            hint={initial ? "Use the Restock button to add more units" : undefined}
           />
           <Input
             name="low_stock_threshold"
@@ -557,15 +491,6 @@ export function PhoneForm({ onSubmit, onCancel, initial, suppliers }: PhoneFormP
             prefix="Rs."
             value={form.sale_price}
             onChange={(e) => set("sale_price", parseFloat(e.target.value) || 0)}
-            disabled={saving}
-          />
-          <Select
-            name="supplier_id"
-            label="Supplier"
-            placeholder="— No supplier —"
-            options={supplierOptions}
-            value={form.supplier_id ? String(form.supplier_id) : ""}
-            onChange={(e) => set("supplier_id", e.target.value ? Number(e.target.value) : null)}
             disabled={saving}
           />
         </Section>

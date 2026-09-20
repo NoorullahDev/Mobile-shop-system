@@ -41,13 +41,15 @@ export function buildReceiptData(
     qty: it.quantity,
     price: roundMoney(it.unit_price),
     total: roundMoney(it.unit_price * it.quantity),
+    warranty: it.warranty ?? null,
+    warranty_expiry: it.warranty_expiry ?? null,
   }));
 
   const subtotal = roundMoney(items.reduce((s, i) => s + i.total, 0));
   const discount = roundMoney(sale.discount || 0);
   const total = roundMoney(sale.total_amount);
   const paid = roundMoney(sale.paid_amount || 0);
-  const balance = roundMoney(Math.max(0, total - paid));
+  const balance = roundMoney(Math.max(0, total - paid - (sale.returned_amount || 0)));
   const status = balance <= 0.005 ? "paid" : paid > 0 ? "partial" : "unpaid";
 
   // The initial payment is stored with the sale; later due collections are

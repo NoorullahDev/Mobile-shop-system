@@ -15,11 +15,12 @@ import type {
   CreatePhoneInput,
   CreateAccessoryInput,
 } from "../types/inventory";
-import type { CreatePurchaseInput, PurchaseItemInput } from "../types/purchase";
+import type { CreatePurchaseInput, PurchaseItemInput, Purchase } from "../types/purchase";
 import { PURCHASE_PAYMENT_METHODS } from "../types/purchase";
 import { methodLabels, roundMoney } from "../lib/format";
 
 interface PurchaseFormProps {
+  initial?: Purchase;
   onSubmit: (input: CreatePurchaseInput) => Promise<void>;
   onCancel: () => void;
   suppliers: Supplier[];
@@ -84,6 +85,7 @@ function accessoryDisplay(a: Accessory) {
 }
 
 export function PurchaseForm({
+  initial,
   onSubmit,
   onCancel,
   suppliers,
@@ -92,15 +94,46 @@ export function PurchaseForm({
   addPhone,
   addAccessory,
 }: PurchaseFormProps) {
-  const [supplierId, setSupplierId] = useState("");
-  const [phoneLines, setPhoneLines] = useState<PhoneDraftLine[]>([]);
-  const [accessoryLines, setAccessoryLines] = useState<AccessoryDraftLine[]>([]);
-  const [discountStr, setDiscountStr] = useState("0");
-  const [paidStr, setPaidStr] = useState("");
-  const [method, setMethod] = useState("cash");
-  const [purchaseDate, setPurchaseDate] = useState("");
-  const [invoiceRef, setInvoiceRef] = useState("");
-  const [notes, setNotes] = useState("");
+  const [supplierId, setSupplierId] = useState(initial?.supplier_id ? String(initial.supplier_id) : "");
+  
+  const initialPhones = useMemo(() => {
+    if (!initial) return [];
+    return initial.items
+      .filter((i) => i.item_type === "phone")
+      .map((i) => ({
+        key: nextKey++,
+        productId: String(i.item_id),
+        quantity: String(i.quantity),
+        unitCost: String(i.unit_cost || 0),
+        sellingPrice: i.selling_price ? String(i.selling_price) : "",
+        warranty: i.warranty || "",
+        condition: i.condition || "",
+        imeis: i.serials || [],
+      }));
+  }, [initial]);
+
+  const initialAccessories = useMemo(() => {
+    if (!initial) return [];
+    return initial.items
+      .filter((i) => i.item_type === "accessory")
+      .map((i) => ({
+        key: nextKey++,
+        productId: String(i.item_id),
+        quantity: String(i.quantity),
+        unitCost: String(i.unit_cost || 0),
+        sellingPrice: i.selling_price ? String(i.selling_price) : "",
+        warranty: i.warranty || "",
+      }));
+  }, [initial]);
+
+  const [phoneLines, setPhoneLines] = useState<PhoneDraftLine[]>(initialPhones);
+  const [accessoryLines, setAccessoryLines] = useState<AccessoryDraftLine[]>(initialAccessories);
+  const [discountStr, setDiscountStr] = useState(initial ? String(initial.discount) : "0");
+  const [paidStr, setPaidStr] = useState(initial ? String(initial.paid_amount) : "");
+  const [method, setMethod] = useState(initial?.payment_method || "cash");
+  const [purchaseDate, setPurchaseDate] = useState(initial?.purchase_date ? initial.purchase_date.substring(0, 10) : "");
+  const [invoiceRef, setInvoiceRef] = useState(initial?.invoice_reference || "");
+  const [notes, setNotes] = useState(initial?.notes || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -177,6 +210,18 @@ export function PurchaseForm({
     );
   };
 
+  const setPhoneBulkImeis = (key: number, text: string) => {
+    const lines = text.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
+    setPhoneLines((ls) =>
+      ls.map((l) => {
+        if (l.key !== key) return l;
+        const qty = Number(l.quantity) || 0;
+        const imeis = Array.from({ length: qty }, (_, i) => lines[i] ?? l.imeis[i] ?? "");
+        return { ...l, imeis };
+      }),
+    );
+  };
+
   const addPhoneById = (id: number) => {
     const line = newPhoneLine();
     line.productId = String(id);
@@ -229,6 +274,14 @@ export function PurchaseForm({
     e.preventDefault();
     const items: PurchaseItemInput[] = [];
     const errs: string[] = [];
+
+    if (!purchaseDate) {
+      errs.push("Purchase Date is required.");
+    }
+
+    if (phoneLines.length === 0 && accessoryLines.length === 0) {
+      errs.push("Add at least one mobile phone or accessory before recording the purchase.");
+    }
 
     for (const l of phoneLines) {
       if (!l.productId) {
@@ -513,24 +566,45 @@ export function PurchaseForm({
                         (required — exactly {Number(l.quantity) || 0})
                       </span>
                     </div>
-                    <div
-                      className={`grid gap-2 ${
-                        l.imeis.length > 1
-                          ? "grid-cols-2"
-                          : "grid-cols-1"
-                      }`}
-                    >
-                      {l.imeis.map((imei, i) => (
-                        <Input
-                          key={i}
-                          placeholder={`IMEI ${i + 1}`}
-                          value={imei}
+                    {(Number(l.quantity) || 0) > 10 ? (
+                      <div>
+                        <p className="mb-1 text-[11px] text-slate-400">
+                          One IMEI per line or separated by comma/semicolon.
+                        </p>
+                        <textarea
+                          className="w-full rounded border border-[#CBD5E1] bg-white px-3 py-2 font-mono text-[13px] outline-none transition-all"
+                          rows={Math.min(8, Number(l.quantity) || 1)}
+                          value={l.imeis.filter(Boolean).join("\n")}
                           disabled={saving}
-                          mono
-                          onChange={(e) => setPhoneImei(l.key, i, e.target.value)}
+                          placeholder={`Paste ${l.quantity} IMEIs here...`}
+                          onChange={(e) => setPhoneBulkImeis(l.key, e.target.value)}
                         />
-                      ))}
-                    </div>
+                        <div className="mt-1 flex items-center gap-2 text-[11px]">
+                          <span className={l.imeis.filter((s) => s.trim()).length === Number(l.quantity) ? "text-emerald-600 font-semibold" : "text-amber-600"}>
+                            {l.imeis.filter((s) => s.trim()).length} / {l.quantity} entered
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className={`grid gap-2 ${
+                          l.imeis.length > 1
+                            ? "grid-cols-2"
+                            : "grid-cols-1"
+                        }`}
+                      >
+                        {l.imeis.map((imei, i) => (
+                          <Input
+                            key={i}
+                            placeholder={`IMEI ${i + 1}`}
+                            value={imei}
+                            disabled={saving}
+                            mono
+                            onChange={(e) => setPhoneImei(l.key, i, e.target.value)}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -801,7 +875,6 @@ export function PurchaseForm({
             <PhoneForm
               onSubmit={handleAddPhone}
               onCancel={() => setShowAddPhone(false)}
-              suppliers={suppliers}
               categories={[]}
             />
           </div>

@@ -28,6 +28,9 @@ fn summary_from_row(r: &Row) -> rusqlite::Result<ReturnSummary> {
         created_by_name: r.get("created_by_name")?,
         created_at: r.get("created_at")?,
         item_count: r.get("item_count")?,
+        return_type: r.get::<_, Option<String>>("return_type")?.unwrap_or_else(|| "return".to_string()),
+        exchange_sale_id: r.get("exchange_sale_id")?,
+        reference: r.get("reference")?,
     })
 }
 
@@ -35,7 +38,8 @@ const RETURN_COLS: &str = "r.id, r.return_no, r.sale_id, r.receipt_no, r.member_
      r.customer_name, r.customer_phone, r.total_sale_price, r.deduction_amount, r.refund_amount, \
      r.return_charge_percent, r.refund_method, r.return_date, r.condition, r.status, r.reason, \
      r.notes, r.created_by, u.full_name AS created_by_name, r.created_at, \
-     (SELECT COUNT(*) FROM return_items ri WHERE ri.return_id = r.id) AS item_count";
+     (SELECT COUNT(*) FROM return_items ri WHERE ri.return_id = r.id) AS item_count, \
+     r.return_type, r.exchange_sale_id, r.reference";
 
 const RETURN_JOIN: &str =
     "FROM returns r LEFT JOIN users u ON u.id = r.created_by";
@@ -64,12 +68,15 @@ pub fn insert_return(
     condition: &str,
     notes: Option<&str>,
     created_by: Option<i64>,
+    return_type: &str,
+    exchange_sale_id: Option<i64>,
+    reference: Option<&str>,
 ) -> Result<i64, AppError> {
     conn.execute(
         "INSERT INTO returns (return_no, sale_id, member_id, customer_name, customer_phone, \
              receipt_no, total_sale_price, deduction_amount, refund_amount, return_charge_percent, \
-             refund_method, return_date, reason, condition, notes, created_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             refund_method, return_date, reason, condition, notes, created_by, return_type, exchange_sale_id, reference)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             return_no,
             sale_id,
@@ -86,7 +93,10 @@ pub fn insert_return(
             reason,
             condition,
             notes,
-            created_by
+            created_by,
+            return_type,
+            exchange_sale_id,
+            reference
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -315,10 +325,11 @@ pub fn update_return(
     reason: Option<&str>,
     condition: &str,
     notes: Option<&str>,
+    exchange_sale_id: Option<i64>,
 ) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE returns SET total_sale_price = ?2, deduction_amount = ?3, refund_amount = ?4, return_charge_percent = ?5, refund_method = ?6, return_date = ?7, reason = ?8, condition = ?9, notes = ?10 WHERE id = ?1",
-        params![id, total_sale_price, deduction_amount, refund_amount, return_charge_percent, refund_method, return_date, reason, condition, notes],
+        "UPDATE returns SET total_sale_price = ?2, deduction_amount = ?3, refund_amount = ?4, return_charge_percent = ?5, refund_method = ?6, return_date = ?7, reason = ?8, condition = ?9, notes = ?10, exchange_sale_id = ?11 WHERE id = ?1",
+        params![id, total_sale_price, deduction_amount, refund_amount, return_charge_percent, refund_method, return_date, reason, condition, notes, exchange_sale_id],
     )?;
     Ok(())
 }
@@ -436,6 +447,9 @@ fn to_product_return(s: &ReturnSummary, items: Vec<ReturnItem>) -> ProductReturn
         created_by_name: s.created_by_name.clone(),
         created_at: s.created_at.clone(),
         items,
+        return_type: s.return_type.clone(),
+        exchange_sale_id: s.exchange_sale_id,
+        reference: s.reference.clone(),
     }
 }
 
@@ -497,6 +511,26 @@ pub fn list_returns(conn: &Connection, search: Option<&str>) -> Result<Vec<Retur
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
+    }
+    Ok(out)
+}
+
+pub fn list_returns_for_period(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<Vec<ReturnSummary>, AppError> {
+    let sql = format!(
+        "SELECT {RETURN_COLS} {RETURN_JOIN}
+         WHERE date(COALESCE(r.return_date, r.created_at), 'localtime') >= date(?1)
+           AND date(COALESCE(r.return_date, r.created_at), 'localtime') < date(?2, '+1 day')
+         ORDER BY r.created_at DESC, r.id DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![from, to], summary_from_row)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
     }
     Ok(out)
 }

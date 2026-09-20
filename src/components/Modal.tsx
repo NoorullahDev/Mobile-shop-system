@@ -93,7 +93,7 @@ export function Modal({
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto px-5 py-4" style={{ maxHeight: "70vh" }}>
+        <div className="overflow-y-auto px-5 py-4" style={{ maxHeight: "85vh" }}>
           {children}
         </div>
 
