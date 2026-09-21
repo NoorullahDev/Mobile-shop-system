@@ -37,9 +37,12 @@ export interface SaleItem {
   imei_id?: number | null;
   quantity: number;
   unit_price: number;
+  /** Cost price at the time of sale — used for historical profit/loss. */
+  cost_price: number;
   product_name?: string | null;
   imei?: string | null;
   variant?: string | null;
+  color?: string | null;
   serial_no?: string | null;
   warranty?: string | null;
   warranty_expiry?: string | null;
@@ -53,6 +56,10 @@ export interface SalePayment {
   reference?: string | null;
   notes?: string | null;
   created_at: string;
+  is_voided?: boolean;
+  void_reason?: string | null;
+  voided_at?: string | null;
+  account_details?: string | null;
 }
 
 export interface Sale {
@@ -90,5 +97,6 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   easypaisa: "EasyPaisa",
   card: "Card",
   cheque: "Cheque",
+  exchange_credit: "Exchange Credit",
   other: "Other",
 };

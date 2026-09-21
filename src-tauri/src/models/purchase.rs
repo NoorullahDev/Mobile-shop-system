@@ -16,6 +16,10 @@ pub struct PurchaseItemInput {
     pub condition: Option<String>,
     #[serde(default)]
     pub imeis: Vec<String>,
+    /// Per-unit colour aligned positionally with `imeis` (same filtering as
+    /// the IMEIs themselves). Left empty when the units have no colours.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_colors: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -56,6 +60,9 @@ pub struct PurchaseItem {
     pub line_total: f64,
     #[serde(default)]
     pub serials: Vec<String>,
+    /// Unit colours aligned positionally with `serials` (phone item type only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_colors: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

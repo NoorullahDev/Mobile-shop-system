@@ -38,7 +38,11 @@ CREATE TABLE payments (
     payment_type TEXT, status TEXT NOT NULL DEFAULT 'completed',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sale_id INTEGER
+    sale_id INTEGER,
+    is_voided INTEGER NOT NULL DEFAULT 0,
+    void_reason TEXT,
+    voided_by INTEGER,
+    voided_at DATETIME
 );
 CREATE TABLE categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, type TEXT NOT NULL DEFAULT 'expense'
@@ -146,6 +150,7 @@ CREATE TABLE accessories (
 CREATE TABLE phone_imeis (
     id INTEGER PRIMARY KEY AUTOINCREMENT, phone_id INTEGER NOT NULL,
     imei TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'in_stock', sold_at DATETIME,
+    color TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE sales (
@@ -158,7 +163,8 @@ CREATE TABLE sale_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL,
     phone_id INTEGER, accessory_id INTEGER,
     imei_id INTEGER, quantity INTEGER NOT NULL DEFAULT 1, unit_price REAL NOT NULL DEFAULT 0,
-    warranty TEXT, warranty_expiry TEXT
+    cost_price REAL NOT NULL DEFAULT 0,
+    warranty TEXT, warranty_expiry TEXT, color TEXT
 );
 CREATE TABLE purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_no TEXT NOT NULL UNIQUE, supplier_id INTEGER,
@@ -209,6 +215,7 @@ CREATE TABLE return_items (
     line_total REAL NOT NULL DEFAULT 0, deduction_amount REAL NOT NULL DEFAULT 0,
     refund_amount REAL NOT NULL DEFAULT 0, reason TEXT,
     condition TEXT NOT NULL DEFAULT 'sellable', restocked INTEGER NOT NULL DEFAULT 0,
+    color TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE backups (
@@ -221,7 +228,10 @@ CREATE TABLE sale_payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL,
     amount REAL NOT NULL DEFAULT 0, payment_method TEXT NOT NULL DEFAULT 'cash',
     reference TEXT, notes TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_voided INTEGER NOT NULL DEFAULT 0, void_reason TEXT,
+    voided_by INTEGER, voided_at DATETIME,
+    account_details TEXT
 );
 CREATE UNIQUE INDEX idx_members_phone_active
     ON members(phone) WHERE phone IS NOT NULL AND is_deleted = 0;

@@ -45,9 +45,16 @@ export async function restockPhone(
   id: number,
   quantity: number,
   imeis: string[],
+  imeiColors?: string[],
   actor?: number | null,
 ): Promise<void> {
-  return invoke<void>("restock_phone", { id, quantity, imeis, actor: actor ?? null });
+  return invoke<void>("restock_phone", {
+    id,
+    quantity,
+    imeis,
+    imei_colors: imeiColors ?? [],
+    actor: actor ?? null,
+  });
 }
 
 export async function addPhoneImei(input: AddPhoneImeiInput): Promise<PhoneImei> {

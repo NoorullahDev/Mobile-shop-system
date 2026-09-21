@@ -84,7 +84,11 @@ export function toLocalDate(d: Date): string {
 export const methodLabels: Record<string, string> = {
   cash: "Cash",
   bank_transfer: "Bank Transfer",
+  jazzcash: "JazzCash",
+  easypaisa: "EasyPaisa",
   card: "Card",
+  cheque: "Cheque",
   credit: "Credit",
+  exchange_credit: "Exchange Credit",
   other: "Other",
 };

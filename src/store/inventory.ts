@@ -20,7 +20,7 @@ interface InventoryState {
   addPhone: (input: CreatePhoneInput) => Promise<void>;
   updatePhone: (id: number, input: CreatePhoneInput) => Promise<void>;
   removePhone: (id: number) => Promise<void>;
-  restockPhone: (id: number, quantity: number, imeis: string[]) => Promise<void>;
+  restockPhone: (id: number, quantity: number, imeis: string[], imeiColors?: string[]) => Promise<void>;
   addAccessory: (input: CreateAccessoryInput) => Promise<void>;
   updateAccessory: (id: number, input: CreateAccessoryInput) => Promise<void>;
   removeAccessory: (id: number) => Promise<void>;
@@ -142,10 +142,10 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     }
   },
 
-  restockPhone: async (id, quantity, imeis) => {
+  restockPhone: async (id, quantity, imeis, imeiColors) => {
     set({ error: null });
     try {
-      await inventoryService.restockPhone(id, quantity, imeis);
+      await inventoryService.restockPhone(id, quantity, imeis, imeiColors);
       await get().loadPhones();
     } catch (e) {
       set({ error: String(e) });

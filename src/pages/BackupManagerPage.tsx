@@ -28,6 +28,7 @@ import { Select } from "../components/Select";
 import { Input } from "../components/Input";
 import * as backupService from "../services/backupService";
 import { useSessionStore } from "../store/session";
+import { can } from "../lib/permissions";
 import {
   parseBackupTime,
   formatBytes,
@@ -36,6 +37,7 @@ import type { Backup, BackupInspection, BackupModule, BackupStatusInfo } from ".
 
 export function BackupManagerPage() {
   const actor = useSessionStore((s) => s.user?.id ?? null);
+  const canManage = can(useSessionStore((s) => s.user?.permissions), "backup:manage");
 
   const [backups, setBackups] = useState<Backup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -287,6 +289,7 @@ export function BackupManagerPage() {
               variant="secondary"
               onClick={handlePickRestore}
               loading={picking}
+              disabled={!canManage}
               icon={<FolderInput className="h-3.5 w-3.5" />}
             >
               Restore Backup
@@ -295,6 +298,7 @@ export function BackupManagerPage() {
               size="sm"
               onClick={handleCreate}
               loading={creating}
+              disabled={!canManage}
               icon={<Plus className="h-3.5 w-3.5" />}
             >
               {creating ? "Creating..." : "Create Backup Now"}
@@ -400,6 +404,7 @@ export function BackupManagerPage() {
                 variant="secondary"
                 onClick={handleChooseFolder}
                 loading={savingConfig}
+                disabled={!canManage}
                 icon={<FolderOpen className="h-3.5 w-3.5" />}
               >
                 Browse
@@ -408,6 +413,7 @@ export function BackupManagerPage() {
                 size="sm"
                 onClick={handleSaveConfig}
                 loading={savingConfig}
+                disabled={!canManage}
                 icon={savingConfig ? <RefreshCcw className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
               >
                 Save Settings
@@ -458,7 +464,7 @@ export function BackupManagerPage() {
                 title="No backups yet"
                 description="Create your first backup to protect your data."
                 action={
-                  <Button size="sm" onClick={handleCreate} loading={creating} icon={<Plus className="h-3.5 w-3.5" />}>
+                  <Button size="sm" onClick={handleCreate} loading={creating} disabled={!canManage} icon={<Plus className="h-3.5 w-3.5" />}>
                     Create Backup
                   </Button>
                 }
@@ -514,7 +520,7 @@ export function BackupManagerPage() {
                           size="xs"
                           variant="ghost"
                           onClick={() => prepareRestore(b)}
-                          disabled={busyId === b.id}
+                          disabled={busyId === b.id || !canManage}
                           icon={<UploadCloud className="h-3.5 w-3.5" />}
                         >
                           Restore
@@ -523,7 +529,7 @@ export function BackupManagerPage() {
                           size="xs"
                           variant="ghost"
                           onClick={() => setDeleteTarget(b)}
-                          disabled={busyId === b.id}
+                          disabled={busyId === b.id || !canManage}
                           icon={<Trash2 className="h-3.5 w-3.5" />}
                         >
                           Delete

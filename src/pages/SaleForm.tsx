@@ -57,7 +57,7 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
   })) ?? []);
   const [imeiByItem, setImeiByItem] = useState<Record<number, PhoneImei[]>>({});
   const [discount, setDiscount] = useState(String(initialSale?.discount ?? 0));
-  const initialInvoicePayments = initialSale?.sale_payments ?? [];
+  const initialInvoicePayments = (initialSale?.sale_payments ?? []).filter((sp) => !sp.is_voided);
   const [paidAmount, setPaidAmount] = useState(initialSale
     ? String(roundMoney(initialInvoicePayments.length > 0
       ? initialInvoicePayments.reduce((sum, payment) => sum + payment.amount, 0)
@@ -70,8 +70,8 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
   const [error, setError] = useState<string | null>(null);
   const [useSplitPayments, setUseSplitPayments] = useState(initialInvoicePayments.length > 0);
   const [paymentLines, setPaymentLines] = useState<PaymentLine[]>(() => {
-    if (initialSale?.sale_payments && initialSale.sale_payments.length > 0) {
-      return initialSale.sale_payments.map((sp) => ({
+    if (initialInvoicePayments.length > 0) {
+      return initialInvoicePayments.map((sp) => ({
         key: ++paymentKey,
         amount: String(sp.amount),
         payment_method: sp.payment_method,

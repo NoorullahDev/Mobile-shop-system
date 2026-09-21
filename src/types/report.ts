@@ -67,6 +67,9 @@ export interface OnlinePaymentRecord {
   account_details: string | null;
   notes: string | null;
   created_at: string;
+  is_voided: boolean;
+  void_reason: string | null;
+  voided_at: string | null;
 }
 
 export interface MonthlyProfitPoint {

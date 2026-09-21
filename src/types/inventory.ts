@@ -119,6 +119,7 @@ export interface PhoneImei {
   phone_id: number;
   imei: string;
   status: string;
+  color?: string | null;
   sold_at?: string | null;
   created_at: string;
 }
@@ -126,6 +127,7 @@ export interface PhoneImei {
 export interface AddPhoneImeiInput {
   phone_id: number;
   imei: string;
+  color?: string;
 }
 
 // ===========================================================================

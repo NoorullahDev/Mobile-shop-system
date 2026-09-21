@@ -46,6 +46,8 @@ pub struct SaleItem {
     pub imei_id: Option<i64>,
     pub quantity: i64,
     pub unit_price: f64,
+    /// Cost price at the time of sale — used for historical profit/loss.
+    pub cost_price: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub product_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,6 +64,9 @@ pub struct SaleItem {
     /// Warranty expiry ISO date (YYYY-MM-DD).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warranty_expiry: Option<String>,
+    /// Colour of the sold unit, snapshot at sale time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

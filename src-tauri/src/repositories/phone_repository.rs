@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::errors::AppError;
-use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
+use crate::models::phone::{AddPhoneImeiInput, ColorCount, CreatePhoneInput, Phone, PhoneImei};
 
 fn phone_from_row(r: &rusqlite::Row) -> rusqlite::Result<Phone> {
     Ok(Phone {
@@ -45,6 +45,7 @@ fn phone_from_row(r: &rusqlite::Row) -> rusqlite::Result<Phone> {
         is_deleted: r.get::<_, i64>("is_deleted")? != 0,
         created_at: r.get("created_at")?,
         updated_at: r.get("updated_at")?,
+        stock_by_color: Vec::new(),
     })
 }
 
@@ -54,6 +55,7 @@ fn imei_from_row(r: &rusqlite::Row) -> rusqlite::Result<PhoneImei> {
         phone_id: r.get("phone_id")?,
         imei: r.get("imei")?,
         status: r.get("status")?,
+        color: r.get("color")?,
         sold_at: r.get("sold_at")?,
         created_at: r.get("created_at")?,
     })
@@ -91,7 +93,11 @@ pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<Phone>, AppError> 
          WHERE p.id = ?1 AND p.is_deleted = 0"
     );
     let row = conn.query_row(&sql, [id], phone_from_row).optional()?;
-    Ok(row)
+    if let Some(mut phone) = row {
+        phone.stock_by_color = stock_by_color(conn, id)?;
+        return Ok(Some(phone));
+    }
+    Ok(None)
 }
 
 pub fn list(conn: &Connection, search: Option<&str>) -> Result<Vec<Phone>, AppError> {
@@ -128,6 +134,12 @@ pub fn list(conn: &Connection, search: Option<&str>) -> Result<Vec<Phone>, AppEr
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
+    }
+    let colors = stock_by_color_map(conn, &out.iter().map(|p| p.id).collect::<Vec<_>>())?;
+    for phone in out.iter_mut() {
+        if let Some(cc) = colors.get(&phone.id) {
+            phone.stock_by_color = cc.clone();
+        }
     }
     Ok(out)
 }
@@ -232,15 +244,15 @@ pub fn imei_exists(conn: &Connection, imei: &str) -> Result<bool, AppError> {
 
 pub fn insert_imei(conn: &Connection, input: &AddPhoneImeiInput) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO phone_imeis (phone_id, imei) VALUES (?1, ?2)",
-        params![input.phone_id, input.imei],
+        "INSERT INTO phone_imeis (phone_id, imei, color) VALUES (?1, ?2, ?3)",
+        params![input.phone_id, input.imei, input.color],
     )?;
     Ok(conn.last_insert_rowid())
 }
 
 pub fn list_imei(conn: &Connection, phone_id: i64) -> Result<Vec<PhoneImei>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, phone_id, imei, status, sold_at, created_at
+        "SELECT id, phone_id, imei, status, color, sold_at, created_at
          FROM phone_imeis WHERE phone_id = ?1 ORDER BY id",
     )?;
     let rows = stmt.query_map([phone_id], imei_from_row)?;
@@ -249,4 +261,64 @@ pub fn list_imei(conn: &Connection, phone_id: i64) -> Result<Vec<PhoneImei>, App
         out.push(r?);
     }
     Ok(out)
+}
+
+/// In-stock units grouped by colour for a single phone.
+pub fn stock_by_color(
+    conn: &Connection,
+    phone_id: i64,
+) -> Result<Vec<ColorCount>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT color, COUNT(*) AS count FROM phone_imeis
+         WHERE phone_id = ?1 AND status = 'in_stock'
+         GROUP BY color ORDER BY color",
+    )?;
+    let rows = stmt.query_map([phone_id], |r| {
+        Ok(ColorCount {
+            color: r.get("color")?,
+            count: r.get("count")?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/// In-stock units grouped by colour for many phones at once, to avoid the
+/// N+1 pattern when loading a phone list. The map only contains phones that
+/// actually have in-stock IMEI units.
+pub fn stock_by_color_map(
+    conn: &Connection,
+    phone_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, Vec<ColorCount>>, AppError> {
+    let mut map: std::collections::HashMap<i64, Vec<ColorCount>> = std::collections::HashMap::new();
+    if phone_ids.is_empty() {
+        return Ok(map);
+    }
+    const BATCH: usize = 400;
+    for ids in phone_ids.chunks(BATCH) {
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT phone_id, color, COUNT(*) AS count FROM phone_imeis
+             WHERE phone_id IN ({placeholders}) AND status = 'in_stock'
+             GROUP BY phone_id, color ORDER BY color"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+            Ok((
+                r.get::<_, i64>("phone_id")?,
+                ColorCount {
+                    color: r.get("color")?,
+                    count: r.get("count")?,
+                },
+            ))
+        })?;
+        for r in rows {
+            let (phone_id, cc) = r?;
+            map.entry(phone_id).or_default().push(cc);
+        }
+    }
+    Ok(map)
 }

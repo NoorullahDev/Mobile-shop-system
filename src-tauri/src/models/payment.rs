@@ -25,6 +25,13 @@ pub struct Payment {
     pub is_deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sale_id: Option<i64>,
+    pub is_voided: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub void_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voided_by: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voided_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -39,6 +46,17 @@ pub struct CreatePaymentInput {
     pub notes: Option<String>,
     pub payment_date: Option<String>,
     pub sale_id: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VoidPaymentInput {
+    pub reason: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct EditPaymentDetailsInput {
+    pub account_details: Option<String>,
+    pub reference: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

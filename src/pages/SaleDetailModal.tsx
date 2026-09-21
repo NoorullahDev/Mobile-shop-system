@@ -409,6 +409,7 @@ function ReturnItemMeta({ it }: { it: ReturnItem }) {
   return (
     <div className="text-[11px]" style={{ color: "#64748B" }}>
       {it.imei && <span className="font-mono">IMEI: {it.imei}</span>}
+      {it.color && <span> Colour: {it.color}</span>}
       {it.serial_no && <span className="font-mono"> SN: {it.serial_no}</span>}
       <span className="capitalize"> · {it.condition}</span>
       {it.reason && (

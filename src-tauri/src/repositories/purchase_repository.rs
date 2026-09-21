@@ -228,18 +228,32 @@ pub fn imeis_in_use(
 }
 
 /// Inserts several IMEIs for one phone, batched to stay within
-/// SQLite's default 999-variable parameter limit (2 params per row).
-pub fn insert_imeis(conn: &Connection, phone_id: i64, imeis: &[String]) -> Result<(), AppError> {
+/// SQLite's default 999-variable parameter limit (3 params per row).
+/// `colors` is aligned positionally with `imeis`; when shorter, missing
+/// entries are stored without a colour.
+pub fn insert_imeis(
+    conn: &Connection,
+    phone_id: i64,
+    imeis: &[String],
+    colors: &[Option<String>],
+) -> Result<(), AppError> {
     if imeis.is_empty() {
         return Ok(());
     }
-    const BATCH: usize = 400;
-    for chunk in imeis.chunks(BATCH) {
-        let placeholders = vec!["(?1, ?)"; chunk.len()].join(",");
-        let sql = format!("INSERT INTO phone_imeis (phone_id, imei) VALUES {placeholders}");
+    debug_assert!(imeis.len() >= colors.len());
+    const BATCH: usize = 330;
+    for (ci, chunk) in imeis.chunks(BATCH).enumerate() {
+        let placeholders = vec!["(?1, ?, ?)"; chunk.len()].join(",");
+        let sql = format!("INSERT INTO phone_imeis (phone_id, imei, color) VALUES {placeholders}");
         let mut params: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::from(phone_id)];
-        for imei in chunk {
+        let offset = ci * BATCH;
+        for (j, imei) in chunk.iter().enumerate() {
             params.push(rusqlite::types::Value::from(imei.clone()));
+            let color = colors.get(offset + j).and_then(|c| c.clone());
+            params.push(match color {
+                Some(c) => rusqlite::types::Value::from(c),
+                None => rusqlite::types::Value::Null,
+            });
         }
         conn.execute(&sql, rusqlite::params_from_iter(params.iter()))?;
     }
@@ -317,13 +331,47 @@ fn list_items(conn: &Connection, purchase_id: i64) -> Result<Vec<PurchaseItem>, 
             product_name: r.get("product_name")?,
             line_total: (unit_cost * quantity as f64 * 100.0).round() / 100.0,
             serials: parse_serials(r.get("serials")?),
+            imei_colors: Vec::new(),
         })
     })?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
     }
+    // Enrich phone lines with the current unit colours (from phone_imeis) so
+    // an edited purchase preserves each unit's colour identity.
+    if !out.is_empty() {
+        attach_imei_colors(conn, &mut out)?;
+    }
     Ok(out)
+}
+
+/// Fills `imei_colors` on phone lines from the registered IMEI units.
+fn attach_imei_colors(conn: &Connection, items: &mut Vec<PurchaseItem>) -> Result<(), AppError> {
+    for it in items.iter_mut() {
+        if it.item_type != "phone" || it.serials.is_empty() {
+            continue;
+        }
+        let mut colors: Vec<String> = vec![String::new(); it.serials.len()];
+        const BATCH: usize = 400;
+        for chunk in it.serials.chunks(BATCH) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!("SELECT imei, color FROM phone_imeis WHERE imei IN ({placeholders})");
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                rusqlite::params_from_iter(chunk.iter().map(|s| s.as_str())),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+            )?;
+            for r in rows {
+                let (imei, color) = r?;
+                if let Some(idx) = it.serials.iter().position(|s| *s == imei) {
+                    colors[idx] = color.unwrap_or_default();
+                }
+            }
+        }
+        it.imei_colors = colors;
+    }
+    Ok(())
 }
 
 pub fn get_purchase_with_items(conn: &Connection, id: i64) -> Result<Option<Purchase>, AppError> {
@@ -354,6 +402,7 @@ fn item_from_r(r: &rusqlite::Row) -> rusqlite::Result<PurchaseItem> {
         product_name: r.get("product_name")?,
         line_total: (unit_cost * quantity as f64 * 100.0).round() / 100.0,
         serials: parse_serials(r.get("serials")?),
+        imei_colors: Vec::new(),
     })
 }
 

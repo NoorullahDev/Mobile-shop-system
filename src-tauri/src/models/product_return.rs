@@ -69,6 +69,8 @@ pub struct ReturnItem {
     pub reason: Option<String>,
     pub condition: String,
     pub restocked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     pub created_at: String,
 }
 

@@ -12,6 +12,7 @@ pub mod product_category_service;
 pub mod product_return_service;
 pub mod purchase_service;
 pub mod report_service;
+pub mod sale_payment_service;
 pub mod sale_service;
 pub mod settings_service;
 pub mod staff_service;

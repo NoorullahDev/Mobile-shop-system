@@ -84,6 +84,7 @@ pub fn insert_sale(
     Ok(conn.last_insert_rowid())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn insert_sale_item(
     conn: &Connection,
     sale_id: i64,
@@ -92,8 +93,10 @@ pub fn insert_sale_item(
     imei_id: Option<i64>,
     quantity: i64,
     unit_price: f64,
+    cost_price: f64,
     warranty: Option<&str>,
     warranty_expiry: Option<&str>,
+    color: Option<&str>,
 ) -> Result<(), AppError> {
     let (col, val) = if item_type == "phone" {
         ("phone_id", rusqlite::types::Value::from(item_id))
@@ -102,10 +105,20 @@ pub fn insert_sale_item(
     };
     conn.execute(
         &format!(
-            "INSERT INTO sale_items (sale_id, {col}, imei_id, quantity, unit_price, warranty, warranty_expiry)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+            "INSERT INTO sale_items (sale_id, {col}, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
         ),
-        rusqlite::params![sale_id, val, imei_id, quantity, unit_price, warranty, warranty_expiry],
+        rusqlite::params![
+            sale_id,
+            val,
+            imei_id,
+            quantity,
+            unit_price,
+            cost_price,
+            warranty,
+            warranty_expiry,
+            color
+        ],
     )?;
     Ok(())
 }
@@ -130,6 +143,23 @@ pub fn item_price(conn: &Connection, item_type: &str, id: i64) -> Result<Option<
         )
         .optional()?;
     Ok(p)
+}
+
+/// Returns Some(cost_price) if the phone/accessory item exists.
+pub fn item_cost(conn: &Connection, item_type: &str, id: i64) -> Result<Option<f64>, AppError> {
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
+    let c: Option<f64> = conn
+        .query_row(
+            &format!("SELECT cost_price FROM {table} WHERE id = ?1 AND is_deleted = 0"),
+            [id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(c)
 }
 
 pub fn decrement_stock(
@@ -219,8 +249,10 @@ pub fn update_sale_item(
     imei_id: Option<i64>,
     quantity: i64,
     unit_price: f64,
+    cost_price: f64,
     warranty: Option<&str>,
     warranty_expiry: Option<&str>,
+    color: Option<&str>,
 ) -> Result<(), AppError> {
     let (phone_id, accessory_id) = if item_type == "phone" {
         (Some(item_id), None)
@@ -228,8 +260,8 @@ pub fn update_sale_item(
         (None, Some(item_id))
     };
     conn.execute(
-        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6, warranty = ?7, warranty_expiry = ?8 WHERE id = ?1",
-        params![id, phone_id, accessory_id, imei_id, quantity, unit_price, warranty, warranty_expiry],
+        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6, cost_price = ?7, warranty = ?8, warranty_expiry = ?9, color = ?10 WHERE id = ?1",
+        params![id, phone_id, accessory_id, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color],
     )?;
     Ok(())
 }
@@ -260,6 +292,36 @@ pub fn imei_available(conn: &Connection, imei_id: i64, phone_id: i64) -> Result<
     Ok(ok.is_some())
 }
 
+/// Current colour of a physical unit (IMEI), if one was recorded.
+pub fn imei_color(conn: &Connection, imei_id: i64) -> Result<Option<String>, AppError> {
+    let color: Option<Option<String>> = conn
+        .query_row(
+            "SELECT color FROM phone_imeis WHERE id = ?1",
+            [imei_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    Ok(color.flatten())
+}
+
+/// Nominal product colour (phone catalog field). Used as a fallback snapshot
+/// when a phone was sold without selecting an IMEI unit.
+pub fn product_color(conn: &Connection, item_type: &str, id: i64) -> Result<Option<String>, AppError> {
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
+    let color: Option<Option<String>> = conn
+        .query_row(
+            &format!("SELECT color FROM {table} WHERE id = ?1 AND is_deleted = 0"),
+            [id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    Ok(color.flatten())
+}
+
 pub fn next_receipt_no(conn: &Connection) -> Result<String, AppError> {
     let max: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM sales", [], |r| r.get(0))?;
     Ok(format!("INV-{:06}", max + 1))
@@ -283,7 +345,7 @@ fn list_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItem>, AppError
         "SELECT si.id, si.sale_id,
                 CASE WHEN si.phone_id IS NOT NULL THEN 'phone' ELSE 'accessory' END AS item_type,
                 COALESCE(si.phone_id, si.accessory_id) AS item_id,
-                si.imei_id, si.quantity, si.unit_price,
+                si.imei_id, si.quantity, si.unit_price, si.cost_price, si.color,
                 COALESCE(p.brand || ' ' || p.model, a.brand || ' ' || a.product_name) AS product_name,
                 im.imei AS imei,
                 CASE WHEN si.phone_id IS NOT NULL THEN p.variant END AS variant,
@@ -304,12 +366,14 @@ fn list_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItem>, AppError
             imei_id: r.get("imei_id")?,
             quantity: r.get("quantity")?,
             unit_price: r.get("unit_price")?,
+            cost_price: r.get("cost_price")?,
             product_name: r.get("product_name")?,
             imei: r.get("imei")?,
             variant: r.get("variant")?,
             serial_no: r.get("serial_no")?,
             warranty: r.get("warranty")?,
             warranty_expiry: r.get("warranty_expiry")?,
+            color: r.get("color")?,
         })
     })?;
     let mut out = Vec::new();

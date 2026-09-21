@@ -43,6 +43,8 @@ pub struct Line {
     pub warranty: Option<String>,
     pub condition: Option<String>,
     pub imeis: Vec<String>,
+    /// Unit colours aligned positionally with `imeis` (phone lines only).
+    pub imei_colors: Vec<Option<String>>,
 }
 
 pub fn prepare_purchase_lines(
@@ -102,13 +104,16 @@ pub fn prepare_purchase_lines(
         }
 
         let mut seen: Vec<String> = Vec::new();
+        let mut imei_colors: Vec<Option<String>> = Vec::new();
         if item_type == "phone" {
-            for imei in item
-                .imeis
-                .iter()
-                .map(|s| s.trim().to_uppercase())
-                .filter(|s| !s.is_empty())
-            {
+            // Colours are indexed by the same position as the original IMEI input,
+            // so blank (skipped) entries do not shift colour alignment.
+            let colors = &item.imei_colors;
+            for (i, value) in item.imeis.iter().enumerate() {
+                let imei = value.trim().to_uppercase();
+                if imei.is_empty() {
+                    continue;
+                }
                 if imei.len() < 8 {
                     return Err(AppError::validation("IMEI must be at least 8 characters"));
                 }
@@ -116,7 +121,13 @@ pub fn prepare_purchase_lines(
                     return Err(AppError::validation(format!("IMEI {imei} is duplicated")));
                 }
                 seen.push(imei.clone());
-                all_imeis.push(imei);
+                imei_colors.push(
+                    colors
+                        .get(i)
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty()),
+                );
+                all_imeis.push(imei.clone());
             }
             if seen.len() != item.quantity as usize {
                 return Err(AppError::validation(format!(
@@ -143,6 +154,7 @@ pub fn prepare_purchase_lines(
             warranty: trim(&item.warranty),
             condition: trim(&item.condition),
             imeis: seen,
+            imei_colors,
         });
     }
 
@@ -263,7 +275,7 @@ pub fn create_purchase(
             line.selling_price,
         )?;
         if line.item_type == "phone" {
-            purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis)?;
+            purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis, &line.imei_colors)?;
         }
     }
     tx.commit()?;
@@ -466,7 +478,7 @@ pub fn update_purchase(
             line.selling_price,
         )?;
         if line.item_type == "phone" {
-            purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis)?;
+            purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis, &line.imei_colors)?;
         }
     }
     
@@ -634,6 +646,7 @@ mod tests {
     use crate::models::inventory::CreateSupplierInput;
     use crate::models::phone::CreatePhoneInput;
     use crate::models::purchase::PurchaseItemInput;
+    use crate::repositories::phone_repository;
     use crate::services::{phone_service, supplier_service, test_utils::in_memory_conn};
     use rusqlite::params;
 
@@ -689,6 +702,7 @@ mod tests {
                 warranty: Some("12 months".into()),
                 condition: Some("new".into()),
                 imeis: vec!["111111111111111".into(), "222222222222222".into()],
+                imei_colors: vec!["Green".into(), "Blue".into()],
             }],
         }
     }
@@ -735,6 +749,29 @@ mod tests {
         let phone = phone_service::get(&conn, iid).unwrap();
         assert_eq!(phone.cost_price, 100.0);
         assert_eq!(phone.sale_price, 150.0);
+    }
+
+    #[test]
+    fn purchase_registers_units_inventory_with_their_colours() {
+        let conn = in_memory_conn();
+        let iid = phone_item(&conn, None);
+        create_purchase(&conn, purchase_input(iid, None), None).unwrap();
+
+        // Each physical IMEI unit keeps the colour entered on its purchase line.
+        let imeis = phone_service::list_imei(&conn, iid).unwrap();
+        assert_eq!(imeis.len(), 2);
+        assert_eq!(imeis[0].color.as_deref(), Some("Green"));
+        assert_eq!(imeis[1].color.as_deref(), Some("Blue"));
+
+        // In-stock units are counted per colour.
+        let by_color = phone_repository::stock_by_color(&conn, iid).unwrap();
+        assert_eq!(by_color.len(), 2);
+        assert!(by_color
+            .iter()
+            .any(|c| c.color.as_deref() == Some("Green") && c.count == 1));
+        assert!(by_color
+            .iter()
+            .any(|c| c.color.as_deref() == Some("Blue") && c.count == 1));
     }
 
     #[test]
@@ -814,6 +851,7 @@ mod tests {
                 warranty: None,
                 condition: None,
                 imeis: vec!["111111111111111".into()],
+                imei_colors: Vec::new(),
             }],
         };
         let p = create_purchase(&conn, input, None).unwrap();

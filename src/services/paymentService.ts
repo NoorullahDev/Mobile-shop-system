@@ -55,3 +55,45 @@ export async function unpaidSalesForMember(memberId: number): Promise<UnpaidSale
 export async function listPaymentsForSale(saleId: number): Promise<Payment[]> {
   return invoke<Payment[]>("list_payments_for_sale", { saleId });
 }
+
+export async function voidPayment(
+  id: number,
+  reason: string,
+  actor?: number | null,
+): Promise<Payment> {
+  return invoke<Payment>("void_payment", { id, input: { reason }, actor: actor ?? null });
+}
+
+export async function editPaymentDetails(
+  id: number,
+  accountDetails: string | null,
+  reference: string | null,
+  actor?: number | null,
+): Promise<Payment> {
+  return invoke<Payment>("edit_payment_details", {
+    id,
+    input: { account_details: accountDetails, reference },
+    actor: actor ?? null,
+  });
+}
+
+export async function voidSalePayment(
+  id: number,
+  reason: string,
+  actor?: number | null,
+): Promise<unknown> {
+  return invoke("void_sale_payment", { id, input: { reason }, actor: actor ?? null });
+}
+
+export async function editSalePaymentDetails(
+  id: number,
+  accountDetails: string | null,
+  reference: string | null,
+  actor?: number | null,
+): Promise<unknown> {
+  return invoke("edit_sale_payment_details", {
+    id,
+    input: { account_details: accountDetails, reference },
+    actor: actor ?? null,
+  });
+}

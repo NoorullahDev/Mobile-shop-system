@@ -91,7 +91,7 @@ interface InventoryProductPageProps<T extends InventoryRow, I> {
   add: (input: I) => Promise<void>;
   update: (id: number, input: I) => Promise<void>;
   remove: (id: number) => Promise<void>;
-  restock: (id: number, quantity: number, imeis: string[]) => Promise<void>;
+  restock: (id: number, quantity: number, imeis: string[], imeiColors: string[]) => Promise<void>;
   listImei?: (item: T) => Promise<PhoneImei[]>;
   showImei?: boolean;
   FormComponent: React.ComponentType<{
@@ -587,8 +587,8 @@ export function InventoryProductPage<T extends InventoryRow, I>({
             }}
             onCancel={() => setRestockItem(null)}
             hasImeiTracking={showImei}
-            onSubmit={async (qty, imeis) => {
-              await restock(restockItem.id, qty, imeis);
+            onSubmit={async (qty, imeis, imeiColors) => {
+              await restock(restockItem.id, qty, imeis, imeiColors);
               setRestockItem(null);
             }}
           />
@@ -619,15 +619,25 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                 key={i.id}
                 className="flex items-center justify-between rounded-lg px-3 py-2"
                 style={{
-                  background: i.status === "sold" ? "#F8FAFC" : "#F0FDF4",
+                  background: i.status === "sold" ? "#F8FAFC" : i.status === "defective" ? "#FEF2F2" : "#F0FDF4",
                   border: "1px solid",
-                  borderColor: i.status === "sold" ? "#E2E8F0" : "#DCFCE7",
+                  borderColor: i.status === "sold" ? "#E2E8F0" : i.status === "defective" ? "#FECACA" : "#DCFCE7",
                 }}
               >
                 <span className="imei-box" style={{ background: "transparent", border: "none", padding: 0 }}>
                   {i.imei}
                 </span>
-                <StatusBadge status={i.status === "sold" ? "returned" : "in stock"} />
+                <div className="flex items-center gap-2">
+                  {i.color && (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      style={{ background: "#F1F5F9", color: "#475569" }}
+                    >
+                      {i.color}
+                    </span>
+                  )}
+                  <StatusBadge status={i.status === "in_stock" ? "in stock" : i.status} />
+                </div>
               </div>
             ))}
           </div>

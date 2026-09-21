@@ -81,6 +81,7 @@ export function buildReceiptInner(data: ReceiptData, settings: ReceiptSettings):
   for (const it of data.items) {
     const detail: string[] = [];
     if (settings.showVariant && it.variant) detail.push(`Variant: ${esc(it.variant)}`);
+    if (settings.showColor && it.color) detail.push(`Colour: ${esc(it.color)}`);
     if (settings.showSerial && it.serial) detail.push(`Serial: ${esc(it.serial)}`);
     if (settings.showImei && it.imei) detail.push(`IMEI: ${esc(it.imei)}`);
     if (it.warranty) detail.push(`Warranty: ${esc(it.warranty)}${it.warranty_expiry ? ` (till ${esc(it.warranty_expiry)})` : ""}`);

@@ -121,6 +121,7 @@ pub fn insert_return_item(
     reason: Option<&str>,
     condition: &str,
     restocked: bool,
+    color: Option<&str>,
 ) -> Result<(), AppError> {
     let (col, val) = if item_type == "phone" {
         ("phone_id", rusqlite::types::Value::from(item_id))
@@ -131,8 +132,8 @@ pub fn insert_return_item(
         &format!(
             "INSERT INTO return_items (return_id, sale_item_id, item_type, {col}, imei_id, \
                  product_name, imei, serial_no, quantity, unit_price, line_total, deduction_amount, \
-                 refund_amount, reason, condition, restocked)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+                 refund_amount, reason, condition, restocked, color)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
         ),
         params![
             return_id,
@@ -150,7 +151,8 @@ pub fn insert_return_item(
             refund_amount,
             reason,
             condition,
-            restocked
+            restocked,
+            color
         ],
     )?;
     Ok(())
@@ -402,6 +404,7 @@ fn item_from_row(r: &Row) -> rusqlite::Result<ReturnItem> {
         refund_amount: r.get("refund_amount")?,
         reason: r.get("reason")?,
         condition: r.get("condition")?,
+        color: r.get("color")?,
         restocked: r.get("restocked")?,
         created_at: r.get("created_at")?,
     })
@@ -413,7 +416,7 @@ fn list_items(conn: &Connection, return_id: i64) -> Result<Vec<ReturnItem>, AppE
                 COALESCE(ri.phone_id, ri.accessory_id) AS item_id, ri.imei_id, \
                 ri.product_name, ri.imei, ri.serial_no, ri.quantity, ri.unit_price, \
                 ri.line_total, ri.deduction_amount, ri.refund_amount, ri.reason, \
-                ri.condition, ri.restocked, ri.created_at
+                ri.condition, ri.color, ri.restocked, ri.created_at
          FROM return_items ri WHERE ri.return_id = ?1 ORDER BY ri.id",
     )?;
     let rows = stmt.query_map([return_id], item_from_row)?;

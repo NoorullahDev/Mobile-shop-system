@@ -43,6 +43,7 @@ const PREVIEW_SALE: Sale = {
       imei_id: 1,
       quantity: 1,
       unit_price: 150000,
+      cost_price: 120000,
       product_name: "iPhone 13 Pro Max",
       variant: "512GB · Sierra Blue",
       serial_no: "DX3XK1ABC123",
@@ -56,6 +57,7 @@ const PREVIEW_SALE: Sale = {
       imei_id: null,
       quantity: 2,
       unit_price: 3500,
+      cost_price: 2000,
       product_name: "Tempered Glass",
       variant: null,
       serial_no: null,
@@ -289,6 +291,7 @@ export function ReceiptSettingsPage() {
             </div>
             <div className="mb-3 grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2">
               <Switch label="Variant / Specs" checked={rs.showVariant} onChange={(v) => set({ showVariant: v })} />
+              <Switch label="Colour" checked={rs.showColor} onChange={(v) => set({ showColor: v })} />
               <Switch label="Serial Number" checked={rs.showSerial} onChange={(v) => set({ showSerial: v })} />
               <Switch label="IMEI" checked={rs.showImei} onChange={(v) => set({ showImei: v })} />
             </div>

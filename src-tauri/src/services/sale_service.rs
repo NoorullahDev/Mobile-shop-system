@@ -15,8 +15,10 @@ struct Line {
     quantity: i64,
     imei_id: Option<i64>,
     unit_price: f64,
+    cost_price: f64,
     warranty: Option<String>,
     warranty_expiry: Option<String>,
+    color: Option<String>,
 }
 
 struct PreparedSale {
@@ -101,6 +103,9 @@ fn prepare(
             }
         };
 
+        let cost_price = sale_repository::item_cost(conn, &item_type, item.item_id)?
+            .unwrap_or(0.0);
+
         if item_type == "phone" {
             if let Some(imei_id) = item.imei_id {
                 let exempt = item
@@ -123,6 +128,17 @@ fn prepare(
         subtotal += line_total;
         let warranty = item.warranty.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
         let warranty_expiry = item.warranty_expiry.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        // Colour snapshot: the unit's colour when an IMEI was selected,
+        // otherwise the product's nominal colour. Stored on the sale line so
+        // old invoices are stable even if product/unit details change later.
+        let color = if item_type == "phone" {
+            match line_imei {
+                Some(imei_id) => sale_repository::imei_color(conn, imei_id)?,
+                None => sale_repository::product_color(conn, &item_type, item.item_id)?,
+            }
+        } else {
+            None
+        };
         lines.push(Line {
             sale_item_id: item.sale_item_id,
             item_type,
@@ -130,8 +146,10 @@ fn prepare(
             quantity: item.quantity,
             imei_id: line_imei,
             unit_price: utils::round2(unit_price),
+            cost_price: utils::round2(cost_price),
             warranty,
             warranty_expiry,
+            color,
         });
     }
 
@@ -260,8 +278,10 @@ pub fn create_tx(
             line.imei_id,
             line.quantity,
             line.unit_price,
+            line.cost_price,
             line.warranty.as_deref(),
             line.warranty_expiry.as_deref(),
+            line.color.as_deref(),
         )?;
 
         if !sale_repository::decrement_stock(tx, &line.item_type, line.item_id, line.quantity)? {
@@ -343,7 +363,7 @@ pub fn update(
     let prepared = prepare(&tx, &input, &imei_exempt)?;
     let linked_due_payments: f64 = tx.query_row(
         "SELECT COALESCE(SUM(amount), 0) FROM payments
-         WHERE sale_id = ?1 AND is_deleted = 0 AND status = 'completed'",
+         WHERE sale_id = ?1 AND is_deleted = 0 AND is_voided = 0 AND status = 'completed'",
         [id],
         |row| row.get(0),
     )?;
@@ -379,13 +399,13 @@ pub fn update(
     for line in &prepared.lines {
         if let Some(line_id) = line.sale_item_id {
             sale_repository::update_sale_item(
-                &tx, line_id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price,
-                line.warranty.as_deref(), line.warranty_expiry.as_deref(),
+                &tx, line_id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price, line.cost_price,
+                line.warranty.as_deref(), line.warranty_expiry.as_deref(), line.color.as_deref(),
             )?;
         } else {
             sale_repository::insert_sale_item(
-                &tx, id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price,
-                line.warranty.as_deref(), line.warranty_expiry.as_deref(),
+                &tx, id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price, line.cost_price,
+                line.warranty.as_deref(), line.warranty_expiry.as_deref(), line.color.as_deref(),
             )?;
         }
         if !sale_repository::decrement_stock(&tx, &line.item_type, line.item_id, line.quantity)? {
@@ -403,8 +423,8 @@ pub fn update(
     product_return_repository::sync_sale_snapshot(&tx, id, input.member_id)?;
     product_return_repository::recalculate_for_sale(&tx, id)?;
 
-    // Update split payments: delete old, insert new
-    sale_payment_repository::delete_payments_for_sale(&tx, id)?;
+    // Update split payments: keep voided rows (audit trail), replace the rest
+    sale_payment_repository::delete_active_payments_for_sale(&tx, id)?;
     if !prepared.payments.is_empty() {
         sale_payment_repository::insert_payments(&tx, id, &prepared.payments)?;
     } else if prepared.paid_amount > 0.0 {
@@ -636,6 +656,72 @@ mod tests {
     }
 
     #[test]
+    fn editing_sale_preserves_voided_split_payment_and_paid_amount() {
+        use crate::models::sale_payment::SalePaymentInput;
+
+        let conn = in_memory_conn();
+        let id = phone(&conn, 5, 100.0);
+
+        let mut original = sale_input(id, 1);
+        original.paid_amount = None;
+        original.payments = vec![
+            SalePaymentInput {
+                amount: 40.0,
+                payment_method: "cash".into(),
+                reference: None,
+                notes: None,
+            },
+            SalePaymentInput {
+                amount: 60.0,
+                payment_method: "card".into(),
+                reference: None,
+                notes: None,
+            },
+        ];
+        let sale = create(&conn, original, None).unwrap();
+        let created = get(&conn, sale.id).unwrap();
+        assert_eq!(created.sale_payments.len(), 2);
+        assert_eq!(created.paid_amount, 100.0);
+
+        let card_sp = created
+            .sale_payments
+            .iter()
+            .find(|sp| sp.payment_method == "card")
+            .unwrap()
+            .clone();
+        crate::services::sale_payment_service::void_sale_payment(&conn, card_sp.id, "customer paid twice", None)
+            .unwrap();
+        assert!((get(&conn, sale.id).unwrap().paid_amount - 40.0).abs() < 0.01);
+
+        let mut correction = sale_input(id, 1);
+        correction.items[0].sale_item_id = Some(sale.items[0].id);
+        correction.paid_amount = None;
+        correction.payments = vec![SalePaymentInput {
+            amount: 40.0,
+            payment_method: "cash".into(),
+            reference: None,
+            notes: None,
+        }];
+        let corrected = update(&conn, sale.id, correction, None).unwrap();
+
+        // The voided audit row must survive an edit (not re-inserted as active).
+        assert_eq!(corrected.sale_payments.len(), 2);
+        let voided = corrected
+            .sale_payments
+            .iter()
+            .find(|sp| sp.id == card_sp.id)
+            .unwrap();
+        assert!(voided.is_voided);
+        assert_eq!(voided.amount, 60.0);
+        assert_eq!(voided.void_reason.as_deref(), Some("customer paid twice"));
+
+        let active: Vec<_> = corrected.sale_payments.iter().filter(|sp| !sp.is_voided).collect();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].amount, 40.0);
+        assert!((corrected.paid_amount - 40.0).abs() < 0.01);
+    }
+
+    #[test]
     fn marks_imei_sold_on_imei_sale() {
         use crate::models::phone::AddPhoneImeiInput;
         let conn = in_memory_conn();
@@ -645,6 +731,7 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: id,
                 imei: "111111111111111".into(),
+                color: None,
             },
         )
         .unwrap();
@@ -658,6 +745,79 @@ mod tests {
     }
 
     #[test]
+    fn selling_a_unit_tracks_colour_by_imei_identity() {
+        use crate::models::phone::AddPhoneImeiInput;
+        use std::collections::HashMap;
+
+        let conn = in_memory_conn();
+        // 10 physical units: 3 Green + 3 Blue + 4 Natural Titanium. The
+        // colour belongs to each IMEI unit, not to a duplicated product.
+        let id = phone(&conn, 0, 100.0);
+        let mut unit_ids: Vec<i64> = Vec::new();
+        let mut colours: Vec<String> = Vec::new();
+        for (ci, (colour, count)) in
+            [("Green", 3usize), ("Blue", 3), ("Natural Titanium", 4)].iter().enumerate()
+        {
+            for k in 0..*count {
+                unit_ids.push(
+                    phone_service::add_imei(
+                        &conn,
+                        AddPhoneImeiInput {
+                            phone_id: id,
+                            imei: format!("1000000{:04}{ci}{k}", k),
+                            color: Some(colour.to_string()),
+                        },
+                    )
+                    .unwrap()
+                    .id,
+                );
+                colours.push(colour.to_string());
+            }
+        }
+        assert_eq!(unit_ids.len(), 10);
+        assert_eq!(colours.iter().filter(|c| *c == "Green").count(), 3);
+
+        let breakdown = |conn: &Connection| -> HashMap<String, i64> {
+            phone_service::get(conn, id)
+                .map(|p| {
+                    p.stock_by_color
+                        .iter()
+                        .map(|c| {
+                            (
+                                c.color.clone().unwrap_or_else(|| "(no colour)".into()),
+                                c.count,
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap()
+        };
+        let before = breakdown(&conn);
+        assert_eq!(before.get("Green"), Some(&3));
+        assert_eq!(before.get("Blue"), Some(&3));
+        assert_eq!(before.get("Natural Titanium"), Some(&4));
+
+        // Sell exactly one Green unit.
+        let mut input = sale_input(id, 1);
+        input.items[0].imei_id = Some(unit_ids[0]);
+        let sale = create(&conn, input, None).unwrap();
+        assert_eq!(sale.items[0].color.as_deref(), Some("Green"));
+
+        // Only the Green count drops; Blue and Natural Titanium are untouched.
+        let after = breakdown(&conn);
+        assert_eq!(after.get("Green"), Some(&2));
+        assert_eq!(after.get("Blue"), Some(&3));
+        assert_eq!(after.get("Natural Titanium"), Some(&4));
+
+        // The sold unit is still the same physical unit (identity preserved).
+        let units = phone_service::list_imei(&conn, id).unwrap();
+        let sold: Vec<_> = units.iter().filter(|i| i.status == "sold").collect();
+        assert_eq!(sold.len(), 1);
+        assert_eq!(sold[0].id, unit_ids[0]);
+        assert_eq!(sold[0].color.as_deref(), Some("Green"));
+    }
+
+    #[test]
     fn cannot_sell_an_in_stock_imei_twice() {
         use crate::models::phone::AddPhoneImeiInput;
         let conn = in_memory_conn();
@@ -667,6 +827,7 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: id,
                 imei: "999999999999999".into(),
+                color: None,
             },
         )
         .unwrap();

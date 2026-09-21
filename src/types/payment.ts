@@ -14,6 +14,10 @@ export interface Payment {
   created_at: string;
   is_deleted: boolean;
   sale_id?: number | null;
+  is_voided: boolean;
+  void_reason?: string | null;
+  voided_by?: number | null;
+  voided_at?: string | null;
 }
 
 export interface CreatePaymentInput {

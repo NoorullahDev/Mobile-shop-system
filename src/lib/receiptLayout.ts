@@ -15,6 +15,7 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   easypaisa: "EasyPaisa",
   card: "Card",
   cheque: "Cheque",
+  exchange_credit: "Exchange Credit",
   other: "Other",
 };
 
@@ -36,6 +37,7 @@ export function buildReceiptData(
   const items: ReceiptItemData[] = sale.items.map((it) => ({
     name: it.product_name ?? "Item",
     variant: it.variant ?? null,
+    color: it.color ?? null,
     serial: it.serial_no ?? null,
     imei: it.imei ?? null,
     qty: it.quantity,
@@ -55,13 +57,15 @@ export function buildReceiptData(
   // The initial payment is stored with the sale; later due collections are
   // separate payment records linked back to the same invoice.
   const splitPayments: ReceiptSplitPayment[] = [
-    ...(sale.sale_payments ?? []).map((sp) => ({
-      method: sp.payment_method,
-      amount: roundMoney(sp.amount),
-      datetime: sp.created_at,
-      reference: sp.reference ?? null,
-      notes: sp.notes ?? null,
-    })),
+    ...(sale.sale_payments ?? [])
+      .filter((sp) => !sp.is_voided)
+      .map((sp) => ({
+        method: sp.payment_method,
+        amount: roundMoney(sp.amount),
+        datetime: sp.created_at,
+        reference: sp.reference ?? null,
+        notes: sp.notes ?? null,
+      })),
     ...linkedPayments.map((payment) => ({
       method: payment.payment_method,
       amount: roundMoney(payment.amount),

@@ -7,7 +7,7 @@ pub fn dashboard_summary(
     conn: &Connection,
 ) -> Result<(f64, f64, f64, i64, i64, i64, i64, f64), AppError> {
     let revenue = conn.query_row(
-        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales",
+        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)), 0) FROM sales",
         [],
         |r| r.get::<_, f64>(0),
     )?;
@@ -20,10 +20,8 @@ pub fn dashboard_summary(
         |r| r.get::<_, f64>(0),
     )?;
     let cogs = conn.query_row(
-        "SELECT COALESCE(SUM(si.quantity * COALESCE(p.cost_price, a.cost_price, 0)), 0)
-         FROM sale_items si
-         LEFT JOIN phones p ON p.id = si.phone_id
-         LEFT JOIN accessories a ON a.id = si.accessory_id",
+        "SELECT COALESCE(SUM(si.quantity * si.cost_price), 0)
+         FROM sale_items si",
         [],
         |r| r.get::<_, f64>(0),
     )?;
@@ -50,7 +48,7 @@ pub fn dashboard_summary(
         |r| r.get::<_, i64>(0),
     )?;
     let pending_payments = conn.query_row(
-        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE is_deleted = 0 AND status = 'pending'",
+        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE is_deleted = 0 AND is_voided = 0 AND status = 'pending'",
         [],
         |r| r.get::<_, f64>(0),
     )?;
@@ -69,7 +67,7 @@ pub fn dashboard_summary(
 /// Monthly revenue (by sale `created_at`) for the last `months` months.
 pub fn monthly_revenue(conn: &Connection, months: i64) -> Result<Vec<(String, f64)>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT strftime('%Y-%m', created_at) AS m, SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)) AS total
+        "SELECT strftime('%Y-%m', created_at) AS m, SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)) AS total
          FROM sales
          WHERE created_at >= datetime('now', ?1)
          GROUP BY m ORDER BY m",
@@ -143,7 +141,7 @@ pub fn period_summary(
     to: &str,
 ) -> Result<(f64, f64, i64, f64, f64, f64), AppError> {
     let revenue = conn.query_row(
-        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales
+        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
@@ -164,7 +162,7 @@ pub fn period_summary(
         |r| r.get::<_, i64>(0),
     )?;
     let received = conn.query_row(
-        "SELECT COALESCE(SUM(paid_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales
+        "SELECT COALESCE(SUM(paid_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
@@ -193,7 +191,7 @@ pub fn sales_series(
     to: &str,
 ) -> Result<Vec<(String, f64)>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT date(created_at, 'localtime') AS day, SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)) AS total
+        "SELECT date(created_at, 'localtime') AS day, SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)) AS total
          FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')
          GROUP BY day ORDER BY day",
@@ -267,11 +265,13 @@ pub fn payment_breakdown(
          FROM (
              SELECT sp.payment_method, sp.amount, sp.created_at AS received_at
              FROM sale_payments sp
+             JOIN sales s ON s.id = sp.sale_id
+             WHERE sp.is_voided = 0
              UNION ALL
              SELECT p.payment_method, p.amount, COALESCE(p.payment_date, p.created_at) AS received_at
              FROM payments p
-             WHERE p.sale_id IS NOT NULL AND p.sale_id != 0
-               AND p.is_deleted = 0 AND p.status = 'completed'
+             JOIN sales s ON s.id = p.sale_id
+             WHERE p.is_deleted = 0 AND p.is_voided = 0 AND p.status = 'completed'
          ) received
          WHERE date(received.received_at, 'localtime') >= date(?1)
            AND date(received.received_at, 'localtime') < date(?2, '+1 day')
@@ -300,20 +300,25 @@ pub fn online_payment_records(
     let mut stmt = conn.prepare(
         "SELECT online.id, online.sale_id, online.receipt_no, online.customer_name,
                 online.payment_method, online.amount, online.reference,
-                online.account_details, online.notes, online.created_at
+                online.account_details, online.notes, online.created_at,
+                online.is_voided, online.void_reason, online.voided_at
          FROM (
              SELECT sp.id * 2 AS id, sp.sale_id, s.receipt_no, m.name AS customer_name,
                     sp.payment_method, sp.amount, sp.reference,
-                    sp.notes AS account_details, NULL AS notes, sp.created_at
+                    sp.account_details, sp.notes,
+                    sp.created_at,
+                    sp.is_voided, sp.void_reason, sp.voided_at
              FROM sale_payments sp
              JOIN sales s ON s.id = sp.sale_id
              LEFT JOIN members m ON m.id = s.member_id
              WHERE LOWER(sp.payment_method) != 'cash'
+               AND LOWER(sp.payment_method) != 'exchange_credit'
              UNION ALL
              SELECT p.id * 2 + 1 AS id, p.sale_id, s.receipt_no, m.name AS customer_name,
                     p.payment_method, p.amount, p.reference,
                     p.account_details, p.notes,
-                    COALESCE(p.payment_date, p.created_at) AS created_at
+                    COALESCE(p.payment_date, p.created_at) AS created_at,
+                    p.is_voided, p.void_reason, p.voided_at
              FROM payments p
              JOIN sales s ON s.id = p.sale_id
              LEFT JOIN members m ON m.id = s.member_id
@@ -324,7 +329,8 @@ pub fn online_payment_records(
              UNION ALL
              SELECT -(r.id) AS id, r.sale_id, s.receipt_no, m.name AS customer_name,
                     r.refund_method AS payment_method, -r.refund_amount AS amount, r.reference,
-                    r.notes AS account_details, NULL AS notes, r.created_at
+                    r.notes AS account_details, NULL AS notes, r.created_at,
+                    0 AS is_voided, NULL AS void_reason, NULL AS voided_at
              FROM returns r
              JOIN sales s ON s.id = r.sale_id
              LEFT JOIN members m ON m.id = s.member_id
@@ -347,6 +353,9 @@ pub fn online_payment_records(
             account_details: r.get("account_details")?,
             notes: r.get("notes")?,
             created_at: r.get("created_at")?,
+            is_voided: r.get::<_, i64>("is_voided")? != 0,
+            void_reason: r.get("void_reason")?,
+            voided_at: r.get("voided_at")?,
         })
     })?;
     let mut out = Vec::new();
@@ -359,7 +368,7 @@ pub fn online_payment_records(
 /// Profit & Loss for an inclusive date range.
 ///
 /// Returns (revenue, cogs, expenses, sales_count) where `cogs` is the cost of
-/// goods sold (current cost_price of the phone/accessory x quantity sold) and
+/// goods sold (cost_price captured on sale_items at the time of sale x quantity sold) and
 /// `expenses` is the sum of operating expenses in the range.
 pub fn profit_loss_summary(
     conn: &Connection,
@@ -367,24 +376,22 @@ pub fn profit_loss_summary(
     to: &str,
 ) -> Result<(f64, f64, f64, i64), AppError> {
     let revenue = conn.query_row(
-        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales
+        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')",
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
     let cogs = conn.query_row(
         "SELECT COALESCE(SUM(t.qty * t.cost), 0) FROM (
-             SELECT si.quantity AS qty, p.cost_price AS cost
+             SELECT si.quantity AS qty, si.cost_price AS cost
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
-             JOIN phones p ON p.id = si.phone_id
              WHERE date(s.created_at, 'localtime') >= date(?1) AND date(s.created_at, 'localtime') < date(?2, '+1 day')
                  AND si.phone_id IS NOT NULL
              UNION ALL
-             SELECT si.quantity AS qty, a.cost_price AS cost
+             SELECT si.quantity AS qty, si.cost_price AS cost
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
-             JOIN accessories a ON a.id = si.accessory_id
              WHERE date(s.created_at, 'localtime') >= date(?1) AND date(s.created_at, 'localtime') < date(?2, '+1 day')
                  AND si.accessory_id IS NOT NULL
          ) t",
@@ -419,7 +426,7 @@ pub fn monthly_profit_loss(
     let mut stmt = conn.prepare(
         "SELECT m, SUM(revenue) AS revenue, SUM(cogs) AS cogs, SUM(expenses) AS expenses FROM (
             SELECT strftime('%Y-%m', created_at) AS m,
-                   SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)) AS revenue,
+                   SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)) AS revenue,
                    0.0 AS cogs,
                    0.0 AS expenses
             FROM sales
@@ -431,12 +438,12 @@ pub fn monthly_profit_loss(
                    SUM(t.qty * t.cost) AS cogs,
                    0.0 AS expenses
             FROM (
-                SELECT si.sale_id AS sid, si.quantity AS qty, p.cost_price AS cost
-                FROM sale_items si JOIN phones p ON p.id = si.phone_id
+                SELECT si.sale_id AS sid, si.quantity AS qty, si.cost_price AS cost
+                FROM sale_items si
                 WHERE si.phone_id IS NOT NULL
                 UNION ALL
-                SELECT si.sale_id AS sid, si.quantity AS qty, a.cost_price AS cost
-                FROM sale_items si JOIN accessories a ON a.id = si.accessory_id
+                SELECT si.sale_id AS sid, si.quantity AS qty, si.cost_price AS cost
+                FROM sale_items si
                 WHERE si.accessory_id IS NOT NULL
             ) t JOIN sales s ON s.id = t.sid
             WHERE date(s.created_at, 'localtime') >= date(?1) AND date(s.created_at, 'localtime') < date(?2, '+1 day')
@@ -481,7 +488,7 @@ pub fn monthly_profit_loss(
 /// accurate day boundary matching.
 pub fn today_summary(conn: &Connection, today: &str) -> Result<(f64, i64), AppError> {
     let revenue = conn.query_row(
-        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit'), 0)), 0) FROM sales
+        "SELECT COALESCE(SUM(total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1)
            AND date(created_at, 'localtime') < date(?1, '+1 day')",
         params![today],

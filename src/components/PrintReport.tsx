@@ -208,14 +208,15 @@ export const PrintReport = memo(function PrintReport({
       </>}
 
       {reportType === "online-payments" && (() => {
-        const totalOnline = onlinePayments.reduce((s, r) => s + r.amount, 0);
+        const activeOnline = onlinePayments.filter((r) => !r.is_voided);
+        const totalOnline = activeOnline.reduce((s, r) => s + r.amount, 0);
         const byMethod: Record<string, number> = {};
-        for (const r of onlinePayments) byMethod[r.payment_method] = (byMethod[r.payment_method] ?? 0) + r.amount;
+        for (const r of activeOnline) byMethod[r.payment_method] = (byMethod[r.payment_method] ?? 0) + r.amount;
         const methodEntries = Object.entries(byMethod).sort((a, b) => b[1] - a[1]);
         return <>
           <Metrics items={[
             { label: "Total Online Received", value: formatMoney(totalOnline) },
-            { label: "Transactions", value: onlinePayments.length },
+            { label: "Transactions", value: activeOnline.length },
             { label: "Payment Methods", value: methodEntries.length },
           ]} />
           <Section title="Totals by Payment Method">
@@ -244,7 +245,7 @@ export const PrintReport = memo(function PrintReport({
               </colgroup>
               <thead><tr><th>Date</th><th>Invoice</th><th>Customer</th><th>Method</th><th className="num">Amount</th><th>Bank / Account</th><th>Reference / TX ID</th></tr></thead>
               <tbody>
-                {onlinePayments.length === 0 ? <EmptyRow columns={7}>No online payment records in this period.</EmptyRow> : onlinePayments.map((r) => (
+                {activeOnline.length === 0 ? <EmptyRow columns={7}>No active online payment records in this period.</EmptyRow> : activeOnline.map((r) => (
                   <tr key={r.id}>
                     <td>{formatDateTime(r.created_at)}</td>
                     <td>{r.receipt_no}</td>
@@ -260,7 +261,7 @@ export const PrintReport = memo(function PrintReport({
           </Section>
           <div className="report-print-totals">
             <div><span>TOTAL ONLINE RECEIVED</span><strong>{formatMoney(totalOnline)}</strong></div>
-            <div><span>TRANSACTIONS</span><strong>{onlinePayments.length}</strong></div>
+            <div><span>TRANSACTIONS</span><strong>{activeOnline.length}</strong></div>
           </div>
         </>;
       })()}

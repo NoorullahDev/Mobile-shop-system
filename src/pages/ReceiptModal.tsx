@@ -34,6 +34,7 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
   const business = useSettingsStore();
   const [error, setError] = useState<string | null>(null);
   const [fullSale, setFullSale] = useState<Sale | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [linkedPayments, setLinkedPayments] = useState<Payment[]>([]);
   const [printType, setPrintType] = useState<PrintType>(initialPrintType ?? "a4");
 
@@ -46,14 +47,16 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
     }
     setError(null);
     setFullSale(null);
+    setLoadFailed(false);
     setLinkedPayments([]);
 
     Promise.all([
-      saleService.getSale(sale.id).catch(() => sale),
+      saleService.getSale(sale.id).catch(() => null),
       paymentService.listPaymentsForSale(sale.id).catch(() => []),
     ]).then(([loadedSale, payments]) => {
       if (cancelled) return;
       setFullSale(loadedSale);
+      setLoadFailed(loadedSale === null);
       setLinkedPayments(payments);
     });
 
@@ -68,7 +71,10 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
 
   if (!sale) return null;
 
-  const current = fullSale ?? sale;
+  // Only trust full details that belong to the currently open sale, so switching
+  // between receipts never shows or prints a previously opened sale's details.
+  const loadedSale = fullSale && fullSale.id === sale.id ? fullSale : null;
+  const current = loadedSale ?? sale;
 
   const data = buildReceiptData(
     current,
@@ -85,6 +91,10 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
   );
 
   const handlePrint = async () => {
+    if (!loadedSale || loadedSale.items.length === 0) {
+      setError("Sale details are still loading. Please try again in a moment.");
+      return;
+    }
     setError(null);
     try {
       if (printType === "a4") {
@@ -117,6 +127,7 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
           <Button
             variant="primary"
             onClick={handlePrint}
+            disabled={!loadedSale}
             icon={<Printer className="h-3.5 w-3.5" />}
           >
             Print Invoice
@@ -153,7 +164,13 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
       </div>
 
       <div className="py-3" style={{ background: "#F7F8FA", borderRadius: 8 }}>
-        {printType === "a4" ? (
+        {!loadedSale ? (
+          <div className="px-4 py-10 text-center text-[13px]" style={{ color: "#64748B" }}>
+            {loadFailed
+              ? "Could not load sale details for this receipt. Close and open the receipt again."
+              : "Loading sale details..."}
+          </div>
+        ) : printType === "a4" ? (
           <A4InvoiceView data={data} />
         ) : (
           <ReceiptView data={data} settings={rs} scale={0.85} />

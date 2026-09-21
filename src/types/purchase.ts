@@ -7,6 +7,7 @@ export interface PurchaseItemInput {
   warranty?: string | null;
   condition?: string | null;
   imeis: string[];
+  imei_colors?: string[];
 }
 
 export interface CreatePurchaseInput {
@@ -33,6 +34,7 @@ export interface PurchaseItem {
   product_name?: string | null;
   line_total: number;
   serials?: string[];
+  imei_colors?: string[];
 }
 
 export interface Purchase {

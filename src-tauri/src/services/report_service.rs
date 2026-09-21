@@ -309,9 +309,9 @@ mod tests {
         )
         .unwrap();
         conn.execute_batch(
-            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price) VALUES
-               (1, 1, 1, 650),
-               (2, 1, 2, 650);",
+            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price, cost_price) VALUES
+               (1, 1, 1, 650, 500),
+               (2, 1, 2, 650, 500);",
         )
         .unwrap();
         // Insert sale_payments so payment_breakdown query works
@@ -352,6 +352,92 @@ mod tests {
             .find(|b| b.payment_method == "cash")
             .unwrap();
         assert_eq!(cash.total, 650.0);
+    }
+
+    #[test]
+    fn payment_breakdown_ignores_voided_split_payments() {
+        let conn = in_memory_conn();
+        let today = local_today();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method, created_at)
+             VALUES ('VB1', 2000.0, 2000.0, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        // A split payment that was later voided must not count toward receipts.
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method, is_voided) VALUES (?, 1200, 'bank_transfer', 1)",
+            [sale_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method, is_voided) VALUES (?, 800, 'cash', 0)",
+            [sale_id],
+        )
+        .unwrap();
+
+        let breakdown = payment_breakdown(&conn, &today, &today).unwrap();
+        let cash = breakdown.iter().find(|b| b.payment_method == "cash").unwrap();
+        assert!((cash.total - 800.0).abs() < 0.001);
+        assert_eq!(cash.count, 1);
+        assert!(
+            !breakdown.iter().any(|b| b.payment_method == "bank_transfer"),
+            "voided split payment must be excluded from payment breakdown"
+        );
+    }
+
+    #[test]
+    fn online_payment_records_excludes_internal_exchange_credit() {
+        let conn = in_memory_conn();
+        let today = local_today();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method, created_at)
+             VALUES ('XC1', 25000.0, 25000.0, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        // Exchange of a Rs 15000 return toward a Rs 25000 phone: internal credit
+        // plus a real Rs 10000 online payment. Only the real payment is shown.
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method) VALUES (?, 15000, 'exchange_credit')",
+            [sale_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method) VALUES (?, 10000, 'bank_transfer')",
+            [sale_id],
+        )
+        .unwrap();
+
+        let records = online_payment_records(&conn, &today, &today).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].payment_method, "bank_transfer");
+        assert!((records[0].amount - 10000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn revenue_ignores_voided_exchange_credit() {
+        let conn = in_memory_conn();
+        let today = local_today();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method, created_at)
+             VALUES ('XC2', 10000.0, 10000.0, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
+        // A voided exchange-credit entry no longer offsets revenue, matching the
+        // (already reduced) paid_amount on the sale.
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method, is_voided)
+             VALUES (?1, 4000, 'exchange_credit', 1)",
+            [conn.last_insert_rowid()],
+        )
+        .unwrap();
+
+        let s = dashboard(&conn, 12, &today).unwrap();
+        assert_eq!(s.revenue, 10000.0);
     }
 
     #[test]
@@ -432,8 +518,8 @@ mod tests {
         )
         .unwrap();
         conn.execute_batch(
-            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price) VALUES
-               (1, 1, 2, 650);",
+            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price, cost_price) VALUES
+               (1, 1, 2, 650, 500);",
         )
         .unwrap();
         conn.execute(
@@ -459,5 +545,96 @@ mod tests {
         let first = &pl.monthly[pl.monthly.len() - 1];
         assert_eq!(first.revenue, 1300.0);
         assert_eq!(first.cogs, 1000.0);
+    }
+
+    #[test]
+    fn profit_loss_uses_historical_cost_price_not_later_pricing_edits() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO phones (brand, model, quantity, cost_price, sale_price) VALUES ('Samsung','Galaxy',10,500,650)",
+            [],
+        )
+        .unwrap();
+        let today = local_today();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method, created_at) VALUES
+               ('P1', 600, 50, 600, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
+        // Sale recorded when cost was 500 -> sale_items snapshots it.
+        conn.execute_batch(
+            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price, cost_price) VALUES
+               (1, 1, 1, 650, 500);",
+        )
+        .unwrap();
+
+        let from = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-01")
+            .to_string();
+        let to = today;
+
+        let before = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(before.total_revenue, 600.0);
+        assert_eq!(before.total_cogs, 500.0);
+        assert_eq!(before.gross_profit, 100.0);
+
+        // Owner later raises the product price; historical P/L must be unchanged.
+        conn.execute(
+            "UPDATE phones SET cost_price = 900, sale_price = 1100 WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        let after = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(after.total_cogs, 500.0);
+        assert_eq!(after.gross_profit, 100.0);
+        assert_eq!(after.total_expenses, 0.0);
+        assert_eq!(after.net_profit, 100.0);
+    }
+
+    #[test]
+    fn profit_loss_discount_to_cost_is_zero_gross_and_below_cost_shows_only_loss() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO phones (brand, model, quantity, cost_price, sale_price) VALUES ('Samsung','Galaxy',10,500,650)",
+            [],
+        )
+        .unwrap();
+        let today = local_today();
+        // Discount exactly down to cost -> gross 0, net 0.
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method, created_at) VALUES
+               ('P1', 500, 150, 500, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
+        // Sold at a loss below cost -> only that loss shows.
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method, created_at) VALUES
+               ('P2', 450, 200, 450, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price, cost_price) VALUES
+               (1, 1, 1, 650, 500),
+               (2, 1, 1, 650, 500);",
+        )
+        .unwrap();
+
+        let from = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-01")
+            .to_string();
+        let to = today;
+
+        let pl = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(pl.total_revenue, 950.0); // 500 + 450
+        assert_eq!(pl.total_cogs, 1000.0); // 500 x 2
+        assert_eq!(pl.gross_profit, -50.0);
+        assert_eq!(pl.net_profit, -50.0);
+        assert_eq!(pl.total_expenses, 0.0);
+        assert_eq!(pl.sales_count, 2);
     }
 }

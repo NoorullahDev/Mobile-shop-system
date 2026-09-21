@@ -15,6 +15,7 @@ export interface ReceiptVisibility {
   showCustomer: boolean;
   showCustomerPhone: boolean;
   showVariant: boolean;
+  showColor: boolean;
   showSerial: boolean;
   showImei: boolean;
   showPaymentDetails: boolean;
@@ -50,6 +51,7 @@ export const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
   showCustomer: true,
   showCustomerPhone: true,
   showVariant: true,
+  showColor: true,
   showSerial: true,
   showImei: true,
   showPaymentDetails: true,
@@ -60,6 +62,7 @@ export const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
 export interface ReceiptItemData {
   name: string;
   variant?: string | null;
+  color?: string | null;
   serial?: string | null;
   imei?: string | null;
   qty: number;

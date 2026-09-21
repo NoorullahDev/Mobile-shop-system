@@ -51,6 +51,7 @@ struct Line {
     restock: bool,
     deduction: f64,
     refund: f64,
+    color: Option<String>,
 }
 
 struct PreparedReturn {
@@ -181,6 +182,7 @@ fn prepare(
             restock,
             deduction: 0.0,
             refund: 0.0,
+            color: si.color.clone(),
         });
     }
 
@@ -272,7 +274,7 @@ fn insert_lines(conn: &Connection, return_id: i64, lines: &[Line]) -> Result<(),
             conn, return_id, line.sale_item_id, &line.item_type, line.item_id, line.imei_id,
             line.product_name.as_deref(), line.imei.as_deref(), line.serial_no.as_deref(),
             line.quantity, line.unit_price, line.line_total, line.deduction, line.refund,
-            line.reason.as_deref(), &line.condition, line.restock,
+            line.reason.as_deref(), &line.condition, line.restock, line.color.as_deref(),
         )?;
     }
     Ok(())
@@ -384,12 +386,13 @@ pub fn create(
             line.reason.as_deref(),
             &line.condition,
             line.restock,
+            line.color.as_deref(),
         )?;
 
         // ----- Inventory restoration -----
         // Phones and accessories share the same quantity-based flow. An
         // IMEI, when recorded, additionally tracks the exact device but is
-        // booked only once per returned unit and is best-effort — it never
+        // booked only once per returned line and is best-effort — it never
         // blocks or fails a return the owner chose to process.
         if line.restock {
             product_return_repository::increment_stock(
@@ -399,7 +402,7 @@ pub fn create(
                 line.quantity,
             )?;
         }
-        if line.item_type == "phone" && line.quantity == 1 {
+        if line.item_type == "phone" {
             if let Some(imei_id) = line.imei_id {
                 if product_return_repository::imei_status(&tx, imei_id)? == Some("sold".to_string())
                 {
@@ -605,6 +608,7 @@ mod tests {
     use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput};
     use crate::models::product_return::ReturnItemInput;
     use crate::models::sale::{CreateSaleInput, SaleItemInput};
+    use crate::repositories::phone_repository;
     use crate::services::{
         accessory_service, phone_service, sale_service, test_utils::{in_memory_conn, seed_product_categories},
     };
@@ -666,6 +670,7 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id,
                 imei: imei.into(),
+                color: None,
             },
         )
         .unwrap()
@@ -813,6 +818,118 @@ mod tests {
         assert_eq!(ret.items[0].imei, None);
         // started 3, -2 sold = 1, +2 restocked = 3
         assert_eq!(phone_service::get(&conn, pid).unwrap().quantity, 3);
+    }
+
+    #[test]
+    fn returning_quantity_with_imei_restores_the_tracked_unit() {
+        let conn = in_memory_conn();
+        let pid = phone(&conn, 3, 100.0);
+        let iid = add_imei_to(&conn, pid, "222222222222222");
+        // Sell 2 units of the phone while tracking the single physical unit.
+        let sale_id = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                member_id: None,
+                discount: 0.0,
+                paid_amount: None,
+                payment_method: Some("cash".into()),
+                notes: None,
+                payments: vec![],
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: pid,
+                    quantity: 2,
+                    imei_id: Some(iid),
+                    unit_price: Some(100.0),
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+            },
+            None,
+        )
+        .unwrap()
+        .id;
+        assert_eq!(imei_status_of(&conn, iid), "sold");
+        let sid = sale_item_id(&conn, sale_id);
+        let mut input = return_input(sale_id, sid, 2, "sellable");
+        input.items[0].imei_id = Some(iid);
+
+        create(&conn, input, None).unwrap();
+
+        // The exact unit must be restored so it can be resold and counted by
+        // colour again, even though the return was processed by quantity.
+        assert_eq!(imei_status_of(&conn, iid), "in_stock");
+    }
+
+    #[test]
+    fn restock_sell_return_keeps_unit_colour_throughout() {
+        let conn = in_memory_conn();
+        let pid = phone(&conn, 3, 100.0);
+        // Restock two physical units, each with its own colour.
+        phone_service::restock(
+            &conn,
+            pid,
+            2,
+            vec!["333333333333331".into(), "333333333333332".into()],
+            vec!["Green".into(), "Blue".into()],
+            None,
+        )
+        .unwrap();
+
+        let imeis = phone_service::list_imei(&conn, pid).unwrap();
+        assert_eq!(imeis.len(), 2);
+        assert_eq!(imeis[0].color.as_deref(), Some("Green"));
+        assert_eq!(imeis[1].color.as_deref(), Some("Blue"));
+        let green_id = imeis[0].id;
+
+        // Sell the green unit — the invoice line snapshots its colour.
+        let sale_id = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                member_id: None,
+                discount: 0.0,
+                paid_amount: None,
+                payment_method: Some("cash".into()),
+                notes: None,
+                payments: vec![],
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: pid,
+                    quantity: 1,
+                    imei_id: Some(green_id),
+                    unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+            },
+            None,
+        )
+        .unwrap()
+        .id;
+        let sale = sale_repository::get_sale_with_items(&conn, sale_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(sale.items[0].color.as_deref(), Some("Green"));
+        assert_eq!(imei_status_of(&conn, green_id), "sold");
+
+        // Only Blue remains counted as in-stock per colour.
+        let by_color = phone_repository::stock_by_color(&conn, pid).unwrap();
+        assert_eq!(by_color.len(), 1);
+        assert_eq!(by_color[0].color.as_deref(), Some("Blue"));
+        assert_eq!(by_color[0].count, 1);
+
+        // Return the green unit — the exact unit comes back with its colour.
+        let sid = sale_item_id(&conn, sale_id);
+        let mut input = return_input(sale_id, sid, 1, "sellable");
+        input.items[0].imei_id = Some(green_id);
+        create(&conn, input, None).unwrap();
+
+        assert_eq!(imei_status_of(&conn, green_id), "in_stock");
+        let imeis_after = phone_service::list_imei(&conn, pid).unwrap();
+        let green = imeis_after.iter().find(|i| i.id == green_id).unwrap();
+        assert_eq!(green.color.as_deref(), Some("Green"));
     }
 
     #[test]

@@ -209,8 +209,13 @@ pub fn get(conn: &Connection, id: i64) -> Result<Payment, AppError> {
         .ok_or_else(|| AppError::validation("Payment not found"))
 }
 
+fn get_any(conn: &Connection, id: i64) -> Result<Payment, AppError> {
+    payment_repository::get_by_id_any(conn, id)?
+        .ok_or_else(|| AppError::validation("Payment not found"))
+}
+
 pub fn soft_delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
-    let payment = get(conn, id)?;
+    let payment = get_any(conn, id)?;
     if payment.status != "completed" {
         let sale_id = payment.sale_id;
         let tx = conn.unchecked_transaction()?;
@@ -261,6 +266,55 @@ pub fn soft_delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(),
     services::record_activity(conn, actor, "payment", "delete", Some(id))
 }
 
+pub fn void_payment(
+    conn: &Connection,
+    id: i64,
+    reason: &str,
+    actor: Option<i64>,
+) -> Result<Payment, AppError> {
+    let payment = get_any(conn, id)?;
+    if payment.is_voided {
+        return Err(AppError::validation("Payment is already voided"));
+    }
+    if payment.is_deleted {
+        return Err(AppError::validation("Payment not found"));
+    }
+    let sale_id = payment.sale_id;
+    let tx = conn.unchecked_transaction()?;
+    let voided_by = actor.unwrap_or(0);
+    if !payment_repository::void_payment(&tx, id, reason, voided_by)? {
+        return Err(AppError::validation("Payment not found"));
+    }
+    if let Some(sid) = sale_id {
+        update_sale_paid_amount(&tx, sid)?;
+    }
+    tx.commit()?;
+    services::record_activity(conn, actor, "payment", "void", Some(id))?;
+    get_any(conn, id)
+}
+
+pub fn edit_payment_details(
+    conn: &Connection,
+    id: i64,
+    account_details: Option<&str>,
+    reference: Option<&str>,
+    actor: Option<i64>,
+) -> Result<Payment, AppError> {
+    let existing = get_any(conn, id)?;
+    if existing.is_voided {
+        return Err(AppError::validation("Cannot edit a voided payment"));
+    }
+    let trimmed_account = account_details.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let trimmed_ref = reference.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let tx = conn.unchecked_transaction()?;
+    if !payment_repository::edit_payment_details(&tx, id, trimmed_account.as_deref(), trimmed_ref.as_deref())? {
+        return Err(AppError::validation("Payment not found"));
+    }
+    tx.commit()?;
+    services::record_activity(conn, actor, "payment", "update", Some(id))?;
+    get_any(conn, id)
+}
+
 pub fn member_balance(conn: &Connection, member_id: i64) -> Result<MemberBalance, AppError> {
     payment_repository::member_balance(conn, member_id)
 }
@@ -288,16 +342,16 @@ pub fn list_customer_due_invoices(
 
 /// Recalculate a sale's paid_amount from all completed payments linked to it,
 /// then update the sale row so Sales History reflects the true payment status.
-fn update_sale_paid_amount(conn: &Connection, sale_id: i64) -> Result<(), AppError> {
+pub fn update_sale_paid_amount(conn: &Connection, sale_id: i64) -> Result<(), AppError> {
     let total_from_payments: f64 = conn.query_row(
         "SELECT COALESCE(SUM(amount), 0) FROM payments
-             WHERE sale_id = ?1 AND is_deleted = 0 AND status = 'completed'",
+             WHERE sale_id = ?1 AND is_deleted = 0 AND is_voided = 0 AND status = 'completed'",
         [sale_id],
         |r| r.get(0),
     )?;
 
     let total_from_split: f64 = conn.query_row(
-        "SELECT COALESCE(SUM(amount), 0) FROM sale_payments WHERE sale_id = ?1",
+        "SELECT COALESCE(SUM(amount), 0) FROM sale_payments WHERE sale_id = ?1 AND is_voided = 0",
         [sale_id],
         |r| r.get(0),
     )?;
@@ -746,5 +800,130 @@ mod tests {
         assert_eq!(sale_count, 1);
         assert!((revenue - 38000.0).abs() < 0.01);
         assert_eq!(stock_after, stock_before);
+    }
+
+    #[test]
+    fn void_payment_excludes_from_balance_and_reports() {
+        let conn = in_memory_conn();
+        let mid = member_id(&conn);
+        let mut input = sample(Some(mid));
+        input.amount = 5000.0;
+        input.payment_method = "bank_transfer".into();
+        let p = create(&conn, input, None).unwrap();
+        assert!(!p.is_voided);
+
+        let bal = member_balance(&conn, mid).unwrap();
+        assert!((bal.total_paid - 5000.0).abs() < 0.01);
+        assert_eq!(bal.payment_count, 1);
+
+        void_payment(&conn, p.id, "Duplicate entry", Some(1)).unwrap();
+
+        let bal_after = member_balance(&conn, mid).unwrap();
+        assert!((bal_after.total_paid).abs() < 0.01);
+        assert_eq!(bal_after.payment_count, 0);
+
+        let fetched = payment_repository::get_by_id_any(&conn, p.id).unwrap().unwrap();
+        assert!(fetched.is_voided);
+        assert_eq!(fetched.void_reason.as_deref(), Some("Duplicate entry"));
+    }
+
+    #[test]
+    fn void_payment_excluded_from_sale_linked_report() {
+        let conn = in_memory_conn();
+        let mid = member_id(&conn);
+        // Create a sale so payment_breakdown can JOIN on it.
+        conn.execute(
+            "INSERT INTO sales (receipt_no, member_id, total_amount, paid_amount, payment_method)
+             VALUES ('VR01', ?1, 10000.0, 0.0, 'cash')",
+            [mid],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+
+        let mut input = sample(Some(mid));
+        input.amount = 5000.0;
+        input.payment_method = "bank_transfer".into();
+        input.sale_id = Some(sale_id);
+        let p = create(&conn, input, None).unwrap();
+
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let breakdown =
+            crate::services::report_service::payment_breakdown(&conn, &today, &today).unwrap();
+        let bank = breakdown.iter().find(|b| b.payment_method == "bank_transfer");
+        assert!(bank.is_some());
+        assert!((bank.unwrap().total - 5000.0).abs() < 0.01);
+
+        void_payment(&conn, p.id, "Test void", Some(1)).unwrap();
+
+        let breakdown2 =
+            crate::services::report_service::payment_breakdown(&conn, &today, &today).unwrap();
+        let bank2 = breakdown2.iter().find(|b| b.payment_method == "bank_transfer");
+        assert!(bank2.is_none());
+    }
+
+    #[test]
+    fn void_already_voided_is_rejected() {
+        let conn = in_memory_conn();
+        let p = create(&conn, sample(None), None).unwrap();
+        void_payment(&conn, p.id, "reason", None).unwrap();
+        let err = void_payment(&conn, p.id, "again", None).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn void_exchange_credit_sale_payment_is_rejected() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method)
+             VALUES ('XC-VOID', 10000.0, 10000.0, 'cash')",
+            [],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method)
+             VALUES (?1, 4000, 'exchange_credit')",
+            [sale_id],
+        )
+        .unwrap();
+        let sp_id = conn.last_insert_rowid();
+
+        let err =
+            crate::services::sale_payment_service::void_sale_payment(&conn, sp_id, "x", None)
+                .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+
+        let is_voided: i64 = conn
+            .query_row("SELECT is_voided FROM sale_payments WHERE id = ?1", [sp_id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(is_voided, 0);
+        let paid: f64 = conn
+            .query_row("SELECT paid_amount FROM sales WHERE id = ?1", [sale_id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(paid, 10000.0);
+    }
+
+    #[test]
+    fn edit_payment_details_updates_fields() {
+        let conn = in_memory_conn();
+        let mut input = sample(None);
+        input.account_details = Some("Old Bank".into());
+        input.reference = Some("OLD-REF".into());
+        let p = create(&conn, input, None).unwrap();
+
+        let updated =
+            edit_payment_details(&conn, p.id, Some("New Bank"), Some("NEW-REF"), None).unwrap();
+        assert_eq!(updated.account_details.as_deref(), Some("New Bank"));
+        assert_eq!(updated.reference.as_deref(), Some("NEW-REF"));
+    }
+
+    #[test]
+    fn edit_voided_payment_is_rejected() {
+        let conn = in_memory_conn();
+        let p = create(&conn, sample(None), None).unwrap();
+        void_payment(&conn, p.id, "reason", None).unwrap();
+        let err =
+            edit_payment_details(&conn, p.id, Some("x"), Some("y"), None).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
     }
 }

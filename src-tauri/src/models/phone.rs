@@ -70,6 +70,16 @@ pub struct Phone {
     pub is_deleted: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// In-stock units grouped by physical unit (IMEI) colour.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stock_by_color: Vec<ColorCount>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ColorCount {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    pub count: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -119,6 +129,8 @@ pub struct PhoneImei {
     pub imei: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sold_at: Option<String>,
     pub created_at: String,
 }
@@ -127,6 +139,8 @@ pub struct PhoneImei {
 pub struct AddPhoneImeiInput {
     pub phone_id: i64,
     pub imei: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 // ---- Phone Options (dynamic dropdown values) ----

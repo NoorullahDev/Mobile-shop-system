@@ -39,6 +39,7 @@ export interface ReturnItem {
   product_name?: string | null;
   imei?: string | null;
   serial_no?: string | null;
+  color?: string | null;
   quantity: number;
   unit_price: number;
   line_total: number;

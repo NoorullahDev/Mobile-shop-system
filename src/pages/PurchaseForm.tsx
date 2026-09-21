@@ -39,6 +39,7 @@ interface PhoneDraftLine {
   warranty: string;
   condition: string;
   imeis: string[];
+  imeiColors: string[];
 }
 
 interface AccessoryDraftLine {
@@ -62,6 +63,7 @@ function newPhoneLine(quantity = 1): PhoneDraftLine {
     warranty: "",
     condition: "",
     imeis: Array.from({ length: quantity }, () => ""),
+    imeiColors: Array.from({ length: quantity }, () => ""),
   };
 }
 
@@ -109,6 +111,10 @@ export function PurchaseForm({
         warranty: i.warranty || "",
         condition: i.condition || "",
         imeis: i.serials || [],
+        imeiColors: Array.from(
+          { length: i.serials?.length ?? 0 },
+          (_, k) => i.imei_colors?.[k] ?? "",
+        ),
       }));
   }, [initial]);
 
@@ -195,7 +201,8 @@ export function PurchaseForm({
         if (l.key !== key) return l;
         const n = Math.max(1, quantity);
         const imeis = Array.from({ length: n }, (_, i) => l.imeis[i] ?? "");
-        return { ...l, quantity: String(n), imeis };
+        const imeiColors = Array.from({ length: n }, (_, i) => l.imeiColors[i] ?? "");
+        return { ...l, quantity: String(n), imeis, imeiColors };
       }),
     );
   };
@@ -210,6 +217,16 @@ export function PurchaseForm({
     );
   };
 
+  const setPhoneColor = (key: number, index: number, value: string) => {
+    setPhoneLines((ls) =>
+      ls.map((l) =>
+        l.key === key
+          ? { ...l, imeiColors: l.imeiColors.map((v, i) => (i === index ? value : v)) }
+          : l,
+      ),
+    );
+  };
+
   const setPhoneBulkImeis = (key: number, text: string) => {
     const lines = text.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
     setPhoneLines((ls) =>
@@ -217,7 +234,23 @@ export function PurchaseForm({
         if (l.key !== key) return l;
         const qty = Number(l.quantity) || 0;
         const imeis = Array.from({ length: qty }, (_, i) => lines[i] ?? l.imeis[i] ?? "");
-        return { ...l, imeis };
+        const imeiColors = Array.from({ length: qty }, (_, i) => l.imeiColors[i] ?? "");
+        return { ...l, imeis, imeiColors };
+      }),
+    );
+  };
+
+  const setPhoneBulkColors = (key: number, text: string) => {
+    const lines = text.split(/\r?\n/).map((s) => s.trim());
+    setPhoneLines((ls) =>
+      ls.map((l) => {
+        if (l.key !== key) return l;
+        const qty = l.imeis.length;
+        const imeiColors = Array.from({ length: qty }, (_, i) => {
+          const v = lines[i] ?? "";
+          return v !== "" ? v : l.imeiColors[i] ?? "";
+        });
+        return { ...l, imeiColors };
       }),
     );
   };
@@ -298,7 +331,10 @@ export function PurchaseForm({
         errs.push("Phone cost cannot be negative.");
         continue;
       }
-        const imeis = l.imeis.map((s) => s.trim()).filter((s) => s.length > 0);
+        const units = l.imeis
+        .map((s, i) => ({ imei: s.trim(), color: (l.imeiColors[i] ?? "").trim() }))
+        .filter((u) => u.imei.length > 0);
+      const imeis = units.map((u) => u.imei);
       if (imeis.length !== qty) {
         const phone = phones.find((p) => p.id === Number(l.productId));
         errs.push(
@@ -319,6 +355,7 @@ export function PurchaseForm({
         warranty: l.warranty.trim() || null,
         condition: l.condition.trim() || null,
         imeis,
+        imei_colors: units.map((u) => u.color),
       });
     }
 
@@ -584,24 +621,36 @@ export function PurchaseForm({
                             {l.imeis.filter((s) => s.trim()).length} / {l.quantity} entered
                           </span>
                         </div>
+                        <p className="mb-1 mt-2 text-[11px] text-slate-400">
+                          Colours (optional — one per line, same order as the IMEIs above).
+                        </p>
+                        <textarea
+                          className="w-full rounded border border-[#CBD5E1] bg-white px-3 py-2 text-[13px] outline-none transition-all"
+                          rows={Math.min(5, Number(l.quantity) || 1)}
+                          value={l.imeiColors.join("\n")}
+                          disabled={saving}
+                          placeholder={"e.g.\nGreen\nBlue\nNatural Titanium"}
+                          onChange={(e) => setPhoneBulkColors(l.key, e.target.value)}
+                        />
                       </div>
                     ) : (
-                      <div
-                        className={`grid gap-2 ${
-                          l.imeis.length > 1
-                            ? "grid-cols-2"
-                            : "grid-cols-1"
-                        }`}
-                      >
+                      <div className="flex flex-col gap-2">
                         {l.imeis.map((imei, i) => (
-                          <Input
-                            key={i}
-                            placeholder={`IMEI ${i + 1}`}
-                            value={imei}
-                            disabled={saving}
-                            mono
-                            onChange={(e) => setPhoneImei(l.key, i, e.target.value)}
-                          />
+                          <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            <Input
+                              placeholder={`IMEI ${i + 1}`}
+                              value={imei}
+                              disabled={saving}
+                              mono
+                              onChange={(e) => setPhoneImei(l.key, i, e.target.value)}
+                            />
+                            <Input
+                              placeholder={`Colour ${i + 1}`}
+                              value={l.imeiColors[i] ?? ""}
+                              disabled={saving}
+                              onChange={(e) => setPhoneColor(l.key, i, e.target.value)}
+                            />
+                          </div>
                         ))}
                       </div>
                     )}

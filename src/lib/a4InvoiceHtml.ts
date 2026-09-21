@@ -14,6 +14,7 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
         <td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-size:13px;color:#1F2937">
           ${esc(it.name)}
           ${it.variant ? `<br><span style="font-size:11px;color:#6B7280">Variant: ${esc(it.variant)}</span>` : ""}
+          ${it.color ? `<br><span style="font-size:11px;color:#6B7280">Color: ${esc(it.color)}</span>` : ""}
           ${it.serial ? `<br><span style="font-size:11px;color:#6B7280">Serial: ${esc(it.serial)}</span>` : ""}
           ${it.imei ? `<br><span style="font-size:11px;color:#6B7280">IMEI: ${esc(it.imei)}</span>` : ""}
           ${it.warranty ? `<br><span style="font-size:11px;color:#1D4ED8;font-weight:500">Warranty: ${esc(it.warranty)}${it.warranty_expiry ? ` (till ${esc(it.warranty_expiry)})` : ""}</span>` : ""}

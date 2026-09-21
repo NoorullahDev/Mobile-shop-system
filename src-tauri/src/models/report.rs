@@ -81,6 +81,9 @@ pub struct OnlinePaymentRecord {
     pub account_details: Option<String>,
     pub notes: Option<String>,
     pub created_at: String,
+    pub is_voided: bool,
+    pub void_reason: Option<String>,
+    pub voided_at: Option<String>,
 }
 
 /// A single monthly profit & loss point.

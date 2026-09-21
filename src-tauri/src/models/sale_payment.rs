@@ -19,4 +19,9 @@ pub struct SalePayment {
     pub reference: Option<String>,
     pub notes: Option<String>,
     pub created_at: String,
+    pub is_voided: bool,
+    pub void_reason: Option<String>,
+    pub voided_by: Option<i64>,
+    pub voided_at: Option<String>,
+    pub account_details: Option<String>,
 }

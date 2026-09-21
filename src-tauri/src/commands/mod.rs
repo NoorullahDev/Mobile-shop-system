@@ -13,7 +13,8 @@ use crate::models::license::{ActivateLicenseInput, LicenseStatus};
 use crate::models::member::{CreateMemberInput, Member};
 use crate::models::notification::{AppNotification, CreateNotificationInput, NotificationCount};
 use crate::models::payment::{
-    CreatePaymentInput, CustomerDueInvoice, MemberBalance, Payment, UnpaidSaleInfo,
+    CreatePaymentInput, CustomerDueInvoice, EditPaymentDetailsInput, MemberBalance, Payment,
+    UnpaidSaleInfo, VoidPaymentInput,
 };
 use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
 use crate::models::product_category::{CreateProductCategoryInput, ProductCategory};
@@ -26,6 +27,7 @@ use crate::models::report::{
     PeriodSummary, ProfitLoss, SalePoint, TopSeller,
 };
 use crate::models::sale::{CreateSaleInput, Sale};
+use crate::models::sale_payment::SalePayment;
 use crate::models::staff::{SalaryInput, SalaryRecord, StaffInput, StaffMember};
 use crate::models::user::{
     ChangePasswordInput, CreateRoleInput, CreateUserInput, Permission, ResetPasswordInput,
@@ -36,8 +38,8 @@ use crate::security::SessionState;
 use crate::services::{
     accessory_service, auth_service, backup_service, expense_service, license_service,
     member_service, notification_service, payment_service, phone_service, product_category_service,
-    product_return_service, purchase_service, report_service, sale_service, settings_service,
-    staff_service, supplier_service, user_admin_service,
+    product_return_service, purchase_service, report_service, sale_payment_service, sale_service,
+    settings_service, staff_service, supplier_service, user_admin_service,
 };
 
 /// Acquire the database connection for commands that are intentionally
@@ -541,6 +543,71 @@ pub fn delete_payment(
 }
 
 #[tauri::command]
+pub fn void_payment(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    input: VoidPaymentInput,
+    _actor: Option<i64>,
+) -> Result<Payment, AppError> {
+    let guard = authorized_conn(&db, &session, "payments:delete")?;
+    payment_service::void_payment(&guard, id, &input.reason, Some(current_user_id(&session)?))
+}
+
+#[tauri::command]
+pub fn edit_payment_details(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    input: EditPaymentDetailsInput,
+    _actor: Option<i64>,
+) -> Result<Payment, AppError> {
+    let guard = authorized_conn(&db, &session, "payments:create")?;
+    payment_service::edit_payment_details(
+        &guard,
+        id,
+        input.account_details.as_deref(),
+        input.reference.as_deref(),
+        Some(current_user_id(&session)?),
+    )
+}
+
+#[tauri::command]
+pub fn void_sale_payment(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    input: VoidPaymentInput,
+    _actor: Option<i64>,
+) -> Result<SalePayment, AppError> {
+    let guard = authorized_conn(&db, &session, "payments:delete")?;
+    sale_payment_service::void_sale_payment(
+        &guard,
+        id,
+        &input.reason,
+        Some(current_user_id(&session)?),
+    )
+}
+
+#[tauri::command]
+pub fn edit_sale_payment_details(
+    db: State<Database>,
+    session: State<SessionState>,
+    id: i64,
+    input: EditPaymentDetailsInput,
+    _actor: Option<i64>,
+) -> Result<SalePayment, AppError> {
+    let guard = authorized_conn(&db, &session, "payments:create")?;
+    sale_payment_service::edit_sale_payment_details(
+        &guard,
+        id,
+        input.account_details.as_deref(),
+        input.reference.as_deref(),
+        Some(current_user_id(&session)?),
+    )
+}
+
+#[tauri::command]
 pub fn get_member_balance(
     db: State<Database>,
     session: State<SessionState>,
@@ -798,6 +865,7 @@ pub fn restock_phone(
     id: i64,
     quantity: i64,
     imeis: Vec<String>,
+    imei_colors: Vec<String>,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
     let guard = authorized_conn(&db, &session, "inventory:create")?;
@@ -806,6 +874,7 @@ pub fn restock_phone(
         id,
         quantity,
         imeis,
+        imei_colors,
         Some(current_user_id(&session)?),
     )
 }
@@ -1474,7 +1543,7 @@ pub fn create_backup(
     session: State<SessionState>,
     _actor: Option<i64>,
 ) -> Result<crate::models::backup::Backup, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:manage")?;
     let dir = backup_service::backup_dir(&guard)?;
     backup_service::create_backup(
         &guard,
@@ -1488,7 +1557,7 @@ pub fn create_backup(
 pub fn list_backup_modules(
     session: State<SessionState>,
 ) -> Result<Vec<crate::models::backup::BackupModule>, AppError> {
-    current_user_id(&session)?;
+    require_permission(&session, "backup:view")?;
     Ok(backup_service::available_modules())
 }
 
@@ -1499,7 +1568,7 @@ pub fn pick_backup_folder(
     session: State<SessionState>,
 ) -> Result<Option<String>, AppError> {
     use tauri_plugin_dialog::DialogExt;
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:view")?;
     let folder = backup_service::backup_dir(&guard)?;
     let picked = app
         .dialog()
@@ -1526,7 +1595,7 @@ pub fn create_selective_backup(
     modules: Vec<String>,
     folder: Option<String>,
 ) -> Result<crate::models::backup::Backup, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:manage")?;
     let dir = folder
         .filter(|f| !f.trim().is_empty())
         .map(std::path::PathBuf::from)
@@ -1541,7 +1610,7 @@ pub fn inspect_backup(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<crate::models::backup::BackupInspection, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:view")?;
     let path = if let Some(id) = id {
         backup_service::get_backup(&guard, id)?
             .ok_or_else(|| AppError::validation(format!("Backup #{id} not found")))?
@@ -1554,7 +1623,7 @@ pub fn inspect_backup(
 
 #[tauri::command]
 pub fn open_backup_folder(path: String, session: State<SessionState>) -> Result<(), AppError> {
-    current_user_id(&session)?;
+    require_permission(&session, "backup:view")?;
     let target = std::path::PathBuf::from(path);
     let folder = if target.is_dir() {
         target
@@ -1576,7 +1645,7 @@ pub fn list_backups(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<Vec<crate::models::backup::Backup>, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:view")?;
     backup_service::list_backups(&guard)
 }
 
@@ -1586,7 +1655,7 @@ pub fn get_backup(
     session: State<SessionState>,
     id: i64,
 ) -> Result<Option<crate::models::backup::Backup>, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:view")?;
     backup_service::get_backup(&guard, id)
 }
 
@@ -1597,7 +1666,7 @@ pub fn delete_backup(
     _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:manage")?;
     backup_service::delete_backup(&guard, Some(current_user_id(&session)?), id)
 }
 
@@ -1607,7 +1676,7 @@ pub fn verify_backup(
     session: State<SessionState>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:view")?;
     let item = backup_service::get_backup(&guard, id)?
         .ok_or_else(|| AppError::validation(format!("Backup #{id} not found")))?;
     backup_service::verify_backup_entry(std::path::Path::new(&item.file_path))
@@ -1620,7 +1689,7 @@ pub fn restore_backup(
     _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let mut guard = authenticated_conn(&db, &session)?;
+    let mut guard = authorized_conn(&db, &session, "backup:manage")?;
     let item = backup_service::get_backup(&guard, id)?
         .ok_or_else(|| AppError::validation(format!("Backup #{id} not found")))?;
     let dir = backup_service::backup_dir(&guard)?;
@@ -1639,7 +1708,7 @@ pub fn pick_backup_file(
 ) -> Result<Option<String>, AppError> {
     use tauri_plugin_dialog::DialogExt;
 
-    current_user_id(&session)?;
+    require_permission(&session, "backup:view")?;
 
     let folder = backup_service::desktop_folder().unwrap_or_else(|_| std::env::temp_dir());
     let picked = app
@@ -1672,7 +1741,7 @@ pub fn restore_backup_from_path(
     use std::path::PathBuf;
 
     let source = PathBuf::from(&file_path);
-    let mut guard = authenticated_conn(&db, &session)?;
+    let mut guard = authorized_conn(&db, &session, "backup:manage")?;
     let dir = backup_service::backup_dir(&guard)?;
     let file_name = source
         .file_name()
@@ -1715,7 +1784,7 @@ pub fn get_backup_config(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<crate::models::backup_config::BackupConfig, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:view")?;
     backup_service::get_config(&guard)
 }
 
@@ -1726,7 +1795,7 @@ pub fn update_backup_config(
     _actor: Option<i64>,
     input: crate::models::backup_config::UpdateBackupConfigInput,
 ) -> Result<crate::models::backup_config::BackupConfig, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:manage")?;
     backup_service::update_config(&guard, Some(current_user_id(&session)?), input)
 }
 
@@ -1735,7 +1804,7 @@ pub fn get_backup_status(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<crate::models::backup_config::BackupStatusInfo, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "backup:view")?;
     backup_service::status_info(&guard)
 }
 
@@ -1917,7 +1986,7 @@ pub fn create_phone_option(
     input: crate::models::phone::CreatePhoneOptionInput,
     __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "inventory:create")?;
     crate::services::phone_option_service::create(&guard, input)
 }
 
@@ -1929,7 +1998,7 @@ pub fn update_phone_option(
     input: crate::models::phone::CreatePhoneOptionInput,
     __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "inventory:update")?;
     crate::services::phone_option_service::update(&guard, id, input)
 }
 
@@ -1940,7 +2009,7 @@ pub fn delete_phone_option(
     id: i64,
     __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "inventory:delete")?;
     crate::services::phone_option_service::delete(&guard, id)
 }
 
@@ -1952,7 +2021,7 @@ pub fn set_phone_option_active(
     is_active: bool,
     __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "inventory:update")?;
     crate::services::phone_option_service::set_active(&guard, id, is_active)
 }
 
@@ -1979,7 +2048,7 @@ pub fn create_accessory_option(
     input: crate::models::phone::CreatePhoneOptionInput,
     __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "inventory:create")?;
     crate::services::phone_option_service::create(&guard, input)
 }
 
@@ -1991,7 +2060,7 @@ pub fn update_accessory_option(
     input: crate::models::phone::CreatePhoneOptionInput,
     __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "inventory:update")?;
     crate::services::phone_option_service::update(&guard, id, input)
 }
 
@@ -2002,7 +2071,7 @@ pub fn delete_accessory_option(
     id: i64,
     __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "inventory:delete")?;
     crate::services::phone_option_service::delete(&guard, id)
 }
 
@@ -2014,6 +2083,6 @@ pub fn set_accessory_option_active(
     is_active: bool,
     __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "inventory:update")?;
     crate::services::phone_option_service::set_active(&guard, id, is_active)
 }

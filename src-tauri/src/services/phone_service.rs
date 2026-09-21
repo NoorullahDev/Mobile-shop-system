@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use crate::errors::AppError;
 use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
 use crate::repositories::phone_repository;
+use crate::repositories::purchase_repository;
 use crate::services;
 use crate::services::product_category_service;
 
@@ -168,11 +169,13 @@ pub fn soft_delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(),
 }
 
 /// Add stock quantity and optionally register IMEI units, atomically.
+#[allow(clippy::too_many_arguments)]
 pub fn restock(
     conn: &Connection,
     id: i64,
     quantity: i64,
     imeis: Vec<String>,
+    imei_colors: Vec<String>,
     actor: Option<i64>,
 ) -> Result<(), AppError> {
     if quantity <= 0 {
@@ -182,15 +185,26 @@ pub fn restock(
         return Err(AppError::validation("Phone not found"));
     }
     let mut normalized_imeis = Vec::new();
+    let mut normalized_colors: Vec<Option<String>> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for imei in imeis.iter().map(|value| value.trim().to_uppercase()).filter(|value| !value.is_empty()) {
+    for (i, value) in imeis.iter().enumerate() {
+        let imei = value.trim().to_uppercase();
+        if imei.is_empty() {
+            continue;
+        }
         if imei.len() < 8 {
             return Err(AppError::validation("IMEI must be at least 8 characters"));
         }
         if !seen.insert(imei.clone()) {
             return Err(AppError::validation(format!("IMEI {imei} is duplicated")));
         }
-        normalized_imeis.push(imei);
+        normalized_imeis.push(imei.clone());
+        normalized_colors.push(
+            imei_colors
+                .get(i)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        );
     }
     if normalized_imeis.len() > quantity as usize {
         return Err(AppError::validation(
@@ -202,13 +216,14 @@ pub fn restock(
         return Err(AppError::validation("Phone not found"));
     }
 
-    for imei in normalized_imeis {
-        if phone_repository::imei_exists(&tx, &imei)? {
+    if !normalized_imeis.is_empty() {
+        let used = purchase_repository::imeis_in_use(&tx, &normalized_imeis)?;
+        if let Some(imei) = normalized_imeis.iter().find(|imei| used.contains(*imei)) {
             return Err(AppError::validation(format!(
                 "IMEI {imei} is already in use"
             )));
         }
-        phone_repository::insert_imei(&tx, &AddPhoneImeiInput { phone_id: id, imei })?;
+        purchase_repository::insert_imeis(&tx, id, &normalized_imeis, &normalized_colors)?;
     }
     tx.commit()?;
     services::record_activity(conn, actor, "phone", "restock", Some(id))
@@ -229,11 +244,17 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
     }
 
     let tx = conn.unchecked_transaction()?;
+    let color = input
+        .color
+        .as_deref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let imei_id = phone_repository::insert_imei(
         &tx,
         &AddPhoneImeiInput {
             phone_id: input.phone_id,
             imei: imei.clone(),
+            color: color.clone(),
         },
     )?;
     if !phone_repository::add_quantity(&tx, input.phone_id, 1)? {
@@ -247,6 +268,7 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
         phone_id: input.phone_id,
         imei,
         status: "in_stock".into(),
+        color,
         sold_at: None,
         created_at: String::new(),
     })
@@ -340,6 +362,7 @@ mod tests {
                 AddPhoneImeiInput {
                     phone_id: stock_phone.id,
                     imei: "111222333444555".into(),
+                    color: None,
                 },
             ),
             Err(AppError::Validation(_))
@@ -350,6 +373,7 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: stock_phone.id,
                 imei: "AAAABBBBCCCCDDDD".into(),
+                color: None,
             },
         )
         .unwrap();
@@ -469,6 +493,7 @@ mod tests {
             p.id,
             3,
             vec!["111111111111111".into(), "222222222222222".into()],
+            Vec::new(),
             None,
         )
         .unwrap();
@@ -485,6 +510,7 @@ mod tests {
             p.id,
             2,
             vec!["111111111111111".into(), "111111111111111".into()],
+            Vec::new(),
             None,
         )
         .unwrap_err();
@@ -501,6 +527,7 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: p.id,
                 imei: "999999999999999".into(),
+                color: None,
             },
         )
         .unwrap();

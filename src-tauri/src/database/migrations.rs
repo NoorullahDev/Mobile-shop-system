@@ -1243,9 +1243,72 @@ const MIGRATIONS: &[(&str, &str)] = &[
         ALTER TABLE returns ADD COLUMN reference TEXT;
         "#,
     ),
+    (
+        "0033_payment_void",
+        r#"
+        ALTER TABLE payments ADD COLUMN is_voided INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE payments ADD COLUMN void_reason TEXT;
+        ALTER TABLE payments ADD COLUMN voided_by INTEGER REFERENCES users(id);
+        ALTER TABLE payments ADD COLUMN voided_at DATETIME;
+
+        INSERT OR IGNORE INTO permissions (name) VALUES ('payments:delete');
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM roles r
+        CROSS JOIN permissions p
+        WHERE r.name = 'Admin' AND p.name = 'payments:delete';
+        "#,
+    ),
+    (
+        "0034_sale_payment_void",
+        r#"
+        ALTER TABLE sale_payments ADD COLUMN is_voided INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE sale_payments ADD COLUMN void_reason TEXT;
+        ALTER TABLE sale_payments ADD COLUMN voided_by INTEGER REFERENCES users(id);
+        ALTER TABLE sale_payments ADD COLUMN voided_at DATETIME;
+        ALTER TABLE sale_payments ADD COLUMN account_details TEXT;
+        "#,
+    ),
+    (
+        "0035_sale_item_cost_price",
+        r#"
+        ALTER TABLE sale_items ADD COLUMN cost_price REAL NOT NULL DEFAULT 0;
+
+        UPDATE sale_items SET cost_price = (SELECT p.cost_price FROM phones p WHERE p.id = sale_items.phone_id)
+        WHERE phone_id IS NOT NULL;
+        UPDATE sale_items SET cost_price = (SELECT a.cost_price FROM accessories a WHERE a.id = sale_items.accessory_id)
+        WHERE accessory_id IS NOT NULL;
+        "#,
+    ),
+    (
+        "0036_imei_lookup_indexes",
+        r#"
+        -- Speed up IMEI duplicate checks and bulk restock/import lookups.
+        CREATE INDEX IF NOT EXISTS idx_phones_imei2 ON phones(imei2) WHERE imei2 IS NOT NULL AND is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_phone_imeis_imei ON phone_imeis(imei);
+        "#,
+    ),
+    (
+        "0037_phone_unit_color",
+        r#"
+        -- Per-physical-unit colour tracking: the colour belongs to the IMEI
+        -- unit, and the sale line keeps a snapshot so old invoices never change
+        -- even if the product/unit is edited later.
+        ALTER TABLE phone_imeis ADD COLUMN color TEXT;
+        ALTER TABLE sale_items ADD COLUMN color TEXT;
+        "#,
+    ),
+    (
+        "0038_return_items_color",
+        r#"
+        -- Per-unit colour snapshot on return so the original sale line's colour
+        -- is preserved even if the product/unit is edited later.
+        ALTER TABLE return_items ADD COLUMN color TEXT;
+        "#,
+    ),
 ];
 
-pub fn run(conn: &Connection) -> Result<(), AppError> {
+fn apply_range(conn: &Connection, upto: usize) -> Result<(), AppError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version TEXT PRIMARY KEY,
@@ -1258,7 +1321,7 @@ pub fn run(conn: &Connection) -> Result<(), AppError> {
         .query_map([], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
 
-    for (version, sql) in MIGRATIONS {
+    for (version, sql) in MIGRATIONS.iter().take(upto) {
         if applied.contains(&version.to_string()) {
             continue;
         }
@@ -1273,4 +1336,16 @@ pub fn run(conn: &Connection) -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+pub fn run(conn: &Connection) -> Result<(), AppError> {
+    apply_range(conn, MIGRATIONS.len())
+}
+
+/// Applies only the first `upto` migrations, tracked in `schema_migrations`.
+/// Test-only helper used to build an older-version database for cross-version
+/// backup/restore scenarios.
+#[cfg(test)]
+pub fn run_upto(conn: &Connection, upto: usize) -> Result<(), AppError> {
+    apply_range(conn, upto)
 }

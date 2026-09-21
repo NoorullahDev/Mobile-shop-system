@@ -7,11 +7,24 @@ use chrono::Local;
 use rusqlite::{Connection, DatabaseName};
 use tauri::Manager;
 
+use crate::database::migrations;
 use crate::errors::AppError;
 use crate::models::backup::{Backup, BackupInspection, BackupModule, BackupStatus, BackupType};
 use crate::models::backup_config::{BackupConfig, BackupStatusInfo, UpdateBackupConfigInput};
 use crate::repositories::{backup_repository, settings_repository};
 use crate::services;
+
+/// `settings` keys that hold license state. A restore must never replace the
+/// machine's current activation, so these are captured before the restore and
+/// written back afterwards (hardware ID is machine-derived, never imported).
+const LICENSE_KEYS: &[&str] = &[
+    "license_key",
+    "license_customer",
+    "license_granted_days",
+    "license_activated_at",
+    "license_last_valid_time",
+    "license_last_valid_seal",
+];
 
 const SNAPSHOT_NAME: &str = "business_management.db";
 const MANIFEST_NAME: &str = "backup_info.json";
@@ -612,6 +625,63 @@ pub fn delete_backup(conn: &Connection, actor: Option<i64>, id: i64) -> Result<(
     Ok(())
 }
 
+/// Copies the current license settings out of the live connection so they can be
+/// restored afterwards. Returns an empty list when no license is active.
+fn capture_license_settings(conn: &Connection) -> Result<Vec<(String, String)>, AppError> {
+    let mut captured = Vec::new();
+    for key in LICENSE_KEYS {
+        if let Some(value) = settings_repository::get(conn, key)? {
+            captured.push((key.to_string(), value));
+        }
+    }
+    Ok(captured)
+}
+
+/// Removes any license settings brought in by the restored backup and re-applies
+/// the machine's current activation state. A backup can therefore never inject,
+/// replace or clear the license that was active on this installation.
+fn reapply_license_settings(
+    conn: &Connection,
+    captured: &[(String, String)],
+) -> Result<(), AppError> {
+    conn.execute("DELETE FROM settings WHERE key LIKE 'license_%';", [])?;
+    for (key, value) in captured {
+        settings_repository::set(conn, key, value)?;
+    }
+    Ok(())
+}
+
+/// Stages a backup snapshot into a temp file and upgrades it to the *current*
+/// schema by running any pending migrations. The live database is not touched
+/// until the snapshot has been fully migrated and verified, so a migration
+/// failure (or any other problem) aborts the restore and keeps the current data
+/// intact — never a partial restore.
+///
+/// Returns the path to the migrated staging file; the caller is responsible for
+/// removing it.
+fn stage_for_restore(snapshot: &Path) -> Result<PathBuf, AppError> {
+    let staged = std::env::temp_dir().join(format!("bms_restore_staged_{}.db", unique_token()));
+    if let Err(e) = fs::copy(snapshot, &staged) {
+        let _ = fs::remove_file(&staged);
+        return Err(AppError::file(format!("could not stage backup snapshot: {e}")));
+    }
+
+    let result = (|| -> Result<(), AppError> {
+        let staging = Connection::open(&staged).map_err(|e| {
+            AppError::file(format!("could not open staged backup snapshot: {e}"))
+        })?;
+        migrations::run(&staging)?;
+        drop(staging);
+        verify_backup(&staged)
+    })();
+
+    if let Err(e) = result {
+        let _ = fs::remove_file(&staged);
+        return Err(e);
+    }
+    Ok(staged)
+}
+
 /// Restores the database contents from a stored backup into the live connection.
 ///
 /// The backup (a `.zip` archive or a raw `.db` snapshot) is validated first, and an
@@ -635,6 +705,10 @@ pub fn restore_backup(
     };
 
     verify_backup(&snapshot)?;
+
+    // Capture the machine's current license before the restore can replace the
+    // settings table; it is re-applied after the swap completes.
+    let license = capture_license_settings(conn)?;
 
     // Emergency safety backup (best-effort): never proceed without one if we can help it.
     fs::create_dir_all(backups_dir)
@@ -706,13 +780,24 @@ pub fn restore_backup(
         let _ = conn.execute_batch("DETACH DATABASE selective_backup; PRAGMA foreign_keys=ON;");
         result?;
     } else {
-        conn.restore(
-            DatabaseName::Main,
-            &snapshot,
-            None::<fn(rusqlite::backup::Progress)>,
-        )
-        .map_err(|e| AppError::file(format!("failed to restore: {e}")))?;
+        // Full/database restore: migrate the snapshot to the current schema in a
+        // staging file *first*, so the live database is never exposed to an older
+        // schema and a failed migration can never damage the current data.
+        let staged = stage_for_restore(&snapshot)?;
+        let result = conn
+            .restore(
+                DatabaseName::Main,
+                &staged,
+                None::<fn(rusqlite::backup::Progress)>,
+            )
+            .map_err(|e| AppError::file(format!("failed to restore: {e}")));
+        let _ = fs::remove_file(&staged);
+        result?;
     }
+
+    // Re-apply the current license state so the restore cannot change (or import)
+    // the activation of this machine.
+    reapply_license_settings(conn, &license)?;
 
     let restore_product_assets = inspection.backup_type != BackupType::Selective
         || inspection.modules.iter().any(|m| {
@@ -976,7 +1061,9 @@ pub fn spawn_auto_backup(handle: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::{migrations, seed};
     use crate::services::test_utils;
+    use rusqlite::OptionalExtension;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(tag: &str) -> PathBuf {
@@ -1036,8 +1123,10 @@ mod tests {
 
     #[test]
     fn restore_roundtrips_snapshot() {
-        let mut conn = test_utils::in_memory_conn();
         let dir = temp_dir("restore");
+        let db_path = dir.join("live.db");
+        let mut conn = Connection::open(&db_path).unwrap();
+        migrations::run(&conn).unwrap();
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('shop_name', 'before')",
             [],
@@ -1063,6 +1152,7 @@ mod tests {
             .unwrap();
         assert_eq!(value, "before", "restore reverted the change");
 
+        drop(conn);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1135,5 +1225,252 @@ mod tests {
         let orphan = dir.join("no_such_file.db");
         assert!(verify_backup(&orphan).is_err());
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn restore_older_backup_applies_required_migrations() {
+        let dir = temp_dir("cross_version");
+        let v1_path = dir.join("v1.db");
+        let v2_path = dir.join("v2.db");
+
+        // Build the older-version (V1) database exactly as a client had it before
+        // migration 0035 (sale_items.cost_price) shipped: older schema + real data.
+        let backup;
+        {
+            let v1 = Connection::open(&v1_path).unwrap();
+            migrations::run_upto(&v1, 34).unwrap();
+            seed::seed(&v1).unwrap();
+            v1.execute(
+                "INSERT INTO phones (brand, model, quantity, cost_price, sale_price)
+                 VALUES ('Nokia', '1100', 5, 400.0, 650.0)",
+                [],
+            )
+            .unwrap();
+            v1.execute(
+                "INSERT INTO sales (receipt_no, total_amount, paid_amount)
+                 VALUES ('R-001', 650.0, 650.0)",
+                [],
+            )
+            .unwrap();
+            v1.execute(
+                "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price)
+                 VALUES (1, 1, 1, 650.0)",
+                [],
+            )
+            .unwrap();
+            v1.execute(
+                "INSERT INTO sale_payments (sale_id, amount, payment_method)
+                 VALUES (1, 650.0, 'cash')",
+                [],
+            )
+            .unwrap();
+            v1.execute(
+                "INSERT INTO members (name, phone) VALUES ('Old Customer', '03001234567')",
+                [],
+            )
+            .unwrap();
+            v1.execute(
+                "INSERT INTO settings (key, value) VALUES ('shop_name', 'Old Shop')",
+                [],
+            )
+            .unwrap();
+            v1.execute(
+                "INSERT INTO settings (key, value) VALUES ('license_key', 'OLD-KEY')",
+                [],
+            )
+            .unwrap();
+
+            // Sanity check: the old database has no cost_price column yet.
+            let cols: Vec<String> = v1
+                .prepare("PRAGMA table_info('sale_items')")
+                .unwrap()
+                .query_map([], |r| r.get(1))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(!cols.contains(&"cost_price".to_string()));
+
+            backup = create_backup(&v1, &dir, None, BackupType::Database).expect("backup");
+        }
+
+        // Current (V2) database: full migration set, seeded, holding this machine's
+        // license plus a V2-only value that a restore must overwrite.
+        {
+            let v2 = Connection::open(&v2_path).unwrap();
+            migrations::run(&v2).unwrap();
+            seed::seed(&v2).unwrap();
+            v2.execute(
+                "INSERT INTO settings (key, value) VALUES ('v2_marker', 'present')",
+                [],
+            )
+            .unwrap();
+            v2.execute(
+                "INSERT INTO settings (key, value) VALUES ('license_key', 'NEW-KEY')",
+                [],
+            )
+            .unwrap();
+            v2.execute(
+                "INSERT INTO settings (key, value) VALUES ('license_customer', 'Current Customer')",
+                [],
+            )
+            .unwrap();
+
+            let mut v2 = v2;
+            restore_backup(&mut v2, &dir, None, Path::new(&backup.file_path)).expect("restore");
+
+            // The V2-only marker was replaced by the (older) backup's settings.
+            let marker: Option<String> = v2
+                .query_row(
+                    "SELECT value FROM settings WHERE key='v2_marker'",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()
+                .unwrap();
+            assert!(marker.is_none(), "restore must replace V2 data");
+
+            // Old business data came back intact.
+            let shop_name: String = v2
+                .query_row(
+                    "SELECT value FROM settings WHERE key='shop_name'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(shop_name, "Old Shop");
+            let phones: i64 = v2
+                .query_row("SELECT COUNT(*) FROM phones", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(phones, 1);
+            let member: String = v2
+                .query_row(
+                    "SELECT name FROM members WHERE id=1",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(member, "Old Customer");
+
+            // Required migration 0035 was applied: cost_price exists and backfilled.
+            let cols: Vec<String> = v2
+                .prepare("PRAGMA table_info('sale_items')")
+                .unwrap()
+                .query_map([], |r| r.get(1))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(cols.contains(&"cost_price".to_string()));
+            let cost: f64 = v2
+                .query_row(
+                    "SELECT cost_price FROM sale_items WHERE id=1",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(cost, 400.0);
+            let versions: i64 = v2
+                .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(versions, 38);
+
+            // License preserved: the backup cannot replace this machine's activation.
+            let license_key: String = v2
+                .query_row(
+                    "SELECT value FROM settings WHERE key='license_key'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(license_key, "NEW-KEY");
+            let license_customer: String = v2
+                .query_row(
+                    "SELECT value FROM settings WHERE key='license_customer'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(license_customer, "Current Customer");
+        }
+
+        // Simulate the required application restart: reopen the restored file and
+        // run migrations + seed again (like startup). Everything survives.
+        {
+            let conn = Connection::open(&v2_path).unwrap();
+            migrations::run(&conn).unwrap();
+            seed::seed(&conn).unwrap();
+            let shop_name: String = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key='shop_name'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(shop_name, "Old Shop");
+            let receipts: Vec<String> = conn
+                .prepare("SELECT receipt_no FROM sales")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(receipts, vec!["R-001".to_string()]);
+            let license_key: String = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key='license_key'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(license_key, "NEW-KEY");
+        }
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_restore_migration_keeps_current_database() {
+        let dir = temp_dir("cross_version_failure");
+        let stale_path = dir.join("stale.db");
+        let live_path = dir.join("live.db");
+
+        // A snapshot whose schema is just ahead of its bookkeeping: the cost_price
+        // column already exists but its migration row is missing, so staging re-runs
+        // 0035 and the ALTER TABLE (duplicate column) fails. The failure must abort
+        // before the live database is touched.
+        let backup;
+        {
+            let stale = Connection::open(&stale_path).unwrap();
+            migrations::run(&stale).unwrap();
+            stale.execute(
+                "DELETE FROM schema_migrations WHERE version='0035_sale_item_cost_price'",
+                [],
+            )
+            .unwrap();
+            backup = create_backup(&stale, &dir, None, BackupType::Database).expect("backup");
+        }
+
+        let mut live = Connection::open(&live_path).unwrap();
+        migrations::run(&live).unwrap();
+        live.execute(
+            "INSERT INTO settings (key, value) VALUES ('survivor', 'intact')",
+            [],
+        )
+        .unwrap();
+
+        let result = restore_backup(&mut live, &dir, None, Path::new(&backup.file_path));
+        assert!(result.is_err(), "restore must fail when the migration fails");
+
+        // The current working database is fully intact.
+        let value: String = live
+            .query_row(
+                "SELECT value FROM settings WHERE key='survivor'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(value, "intact");
+
+        drop(live);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

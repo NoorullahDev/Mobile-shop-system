@@ -20,15 +20,19 @@ fn payment_from_row(r: &Row) -> rusqlite::Result<Payment> {
         created_at: r.get("created_at")?,
         is_deleted: r.get::<_, i64>("is_deleted")? != 0,
         sale_id: r.get("sale_id")?,
+        is_voided: r.get::<_, i64>("is_voided")? != 0,
+        void_reason: r.get("void_reason")?,
+        voided_by: r.get("voided_by")?,
+        voided_at: r.get("voided_at")?,
     })
 }
 
 const COLS: &str = "p.id, p.member_id, m.name AS member_name, p.amount, p.payment_method, \
      p.payment_type, p.status, p.reference, p.account_details, p.notes, p.payment_date, p.created_by, p.created_at, \
-     p.is_deleted, p.sale_id";
+     p.is_deleted, p.sale_id, p.is_voided, p.void_reason, p.voided_by, p.voided_at";
 
 const JOIN: &str =
-    "FROM payments p LEFT JOIN members m ON m.id = p.member_id WHERE p.is_deleted = 0";
+    "FROM payments p LEFT JOIN members m ON m.id = p.member_id WHERE p.is_deleted = 0 AND p.is_voided = 0";
 
 pub fn insert(
     conn: &Connection,
@@ -66,6 +70,15 @@ pub fn update(conn: &Connection, id: i64, input: &CreatePaymentInput) -> Result<
 pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<Payment>, AppError> {
     let sql = format!(
         "SELECT {COLS} {JOIN} AND p.id = ?1 ORDER BY p.payment_date DESC, p.id DESC LIMIT 1"
+    );
+    let row = conn.query_row(&sql, [id], payment_from_row).optional()?;
+    Ok(row)
+}
+
+/// Returns a payment regardless of its void status (used by void/edit/delete).
+pub fn get_by_id_any(conn: &Connection, id: i64) -> Result<Option<Payment>, AppError> {
+    let sql = format!(
+        "SELECT {COLS} FROM payments p LEFT JOIN members m ON m.id = p.member_id WHERE p.is_deleted = 0 AND p.id = ?1 ORDER BY p.payment_date DESC, p.id DESC LIMIT 1"
     );
     let row = conn.query_row(&sql, [id], payment_from_row).optional()?;
     Ok(row)
@@ -123,13 +136,29 @@ pub fn soft_delete(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(affected > 0)
 }
 
+pub fn void_payment(conn: &Connection, id: i64, reason: &str, voided_by: i64) -> Result<bool, AppError> {
+    let affected = conn.execute(
+        "UPDATE payments SET is_voided = 1, void_reason = ?2, voided_by = ?3, voided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0 AND is_voided = 0",
+        params![id, reason, voided_by],
+    )?;
+    Ok(affected > 0)
+}
+
+pub fn edit_payment_details(conn: &Connection, id: i64, account_details: Option<&str>, reference: Option<&str>) -> Result<bool, AppError> {
+    let affected = conn.execute(
+        "UPDATE payments SET account_details = ?2, reference = ?3, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0 AND is_voided = 0",
+        params![id, account_details, reference],
+    )?;
+    Ok(affected > 0)
+}
+
 pub fn member_balance(conn: &Connection, member_id: i64) -> Result<MemberBalance, AppError> {
     let row: (Option<String>, Option<String>, Option<f64>, Option<f64>, Option<i64>) = conn
         .query_row(
             "SELECT m.name, m.phone,
                 (SELECT COALESCE(SUM(MAX((s.total_amount - s.paid_amount) - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0)),0) FROM sales s WHERE s.member_id = ?1),
-                (SELECT COALESCE(SUM(amount),0) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND status = 'completed' AND (sale_id IS NULL OR sale_id = 0)),
-                (SELECT COUNT(*) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND status = 'completed')
+                (SELECT COALESCE(SUM(amount),0) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND is_voided = 0 AND status = 'completed' AND (sale_id IS NULL OR sale_id = 0)),
+                (SELECT COUNT(*) FROM payments WHERE member_id = ?1 AND is_deleted = 0 AND is_voided = 0 AND status = 'completed')
              FROM members m WHERE m.id = ?1 AND m.is_deleted = 0",
             [member_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
@@ -162,7 +191,7 @@ pub fn list_balances(
                 COALESCE(SUM(CASE WHEN p.status = 'completed' AND (p.sale_id IS NULL OR p.sale_id = 0) THEN p.amount ELSE 0 END), 0) AS total_paid,
                 COUNT(CASE WHEN p.status = 'completed' THEN p.id END) AS payment_count
          FROM members m
-         LEFT JOIN payments p ON p.member_id = m.id AND p.is_deleted = 0
+         LEFT JOIN payments p ON p.member_id = m.id AND p.is_deleted = 0 AND p.is_voided = 0
          WHERE m.is_deleted = 0",
     );
     let mut q: Vec<rusqlite::types::Value> = Vec::new();
@@ -195,6 +224,7 @@ pub fn list_customer_dues(
                 COALESCE(SUM((SELECT COUNT(*) FROM payments p
                               WHERE p.sale_id = s.id
                                 AND p.is_deleted = 0
+                                AND p.is_voided = 0
                                 AND p.status = 'completed')), 0) AS payment_count
          FROM sales s
          JOIN members m ON m.id = s.member_id AND m.is_deleted = 0
@@ -231,7 +261,7 @@ pub fn list_customer_due_invoices(
                 s.total_amount, s.paid_amount,
                 ROUND(MAX(s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0), 2) AS due_amount,
                 (SELECT COUNT(*) FROM payments p
-                 WHERE p.sale_id = s.id AND p.is_deleted = 0 AND p.status = 'completed') AS payment_count,
+                 WHERE p.sale_id = s.id AND p.is_deleted = 0 AND p.is_voided = 0 AND p.status = 'completed') AS payment_count,
                 s.created_at
          FROM sales s
          JOIN members m ON m.id = s.member_id AND m.is_deleted = 0
