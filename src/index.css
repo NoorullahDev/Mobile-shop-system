@@ -185,7 +185,9 @@ h3 { font-size: 14px; font-weight: 600; line-height: 1.4;  margin: 0; }
 /* ─────────────────────────────────────────
    AMOUNT / MONEY DISPLAY
 ────────────────────────────────────────── */
-.amount       { font-family: var(--font-mono); font-weight: 500; }
+/* Semibold by default so tabular amounts read clearly; can be layered under
+   .amount-large for the strongest (bold) emphasis on big KPI values. */
+.amount       { font-family: var(--font-mono); font-weight: 600; }
 .amount-large { font-family: var(--font-mono); font-size: 22px; font-weight: 700; }
 
 /* ─────────────────────────────────────────

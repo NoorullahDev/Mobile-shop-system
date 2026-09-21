@@ -68,7 +68,7 @@ export function KpiCard({
 
       <div className="px-4 pb-4 pt-1.5">
         <div
-          className="amount text-[22px] font-bold leading-tight"
+          className="amount-large leading-tight"
           style={{ color: "#0F172A", letterSpacing: "-0.3px" }}
         >
           {value}
