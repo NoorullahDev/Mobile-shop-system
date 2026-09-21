@@ -835,39 +835,6 @@ const MIGRATIONS: &[(&str, &str)] = &[
         INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) VALUES
             ('color', 'Pink', 9),
             ('color', 'Transparent', 10);
-
-        -- Sample accessory products (only if the table is empty)
-        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
-        SELECT 'Chargers', 'Anker', 'PowerIQ 3.0 Fast Charger', 'Universal', 'White', 'USB-C', '1 Year', 'New', 'ANK-CHG-001', 1200, 2500, 15, 3
-        WHERE NOT EXISTS (SELECT 1 FROM accessories LIMIT 1);
-
-        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
-        SELECT 'Cables', 'UGREEN', 'USB-C Fast Charging Cable 1m', 'Universal', 'Black', 'USB-C', '6 Months', 'New', 'UGR-CBL-001', 350, 800, 25, 5
-        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'USB-C Fast Charging Cable 1m');
-
-        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
-        SELECT 'Earbuds', 'Audionic', 'Air buds Pro', 'Universal', 'White', 'Bluetooth', '1 Year', 'New', 'AUD-EAR-001', 1800, 3500, 10, 2
-        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Air buds Pro');
-
-        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
-        SELECT 'Covers', 'Spigen', 'Rugged Armor Case', 'Samsung Galaxy S24', 'Black', 'No Connector', 'No Warranty', 'New', 'SPG-CVR-001', 800, 1800, 8, 2
-        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Rugged Armor Case');
-
-        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
-        SELECT 'Power Banks', 'Anker', 'PowerCore 10000mAh', 'Universal', 'Black', 'USB-C', '1 Year', 'New', 'ANK-PWR-001', 2500, 4500, 12, 3
-        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'PowerCore 10000mAh');
-
-        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
-        SELECT 'Screen Protectors', 'Eiger', 'Tempered Glass 9H', 'iPhone 15 Pro', 'Transparent', 'No Connector', 'No Warranty', 'New', 'EIG-SCR-001', 200, 600, 30, 10
-        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Tempered Glass 9H');
-
-        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
-        SELECT 'Bluetooth Speakers', 'JBL', 'Go 2 Portable Speaker', 'Universal', 'Blue', 'Bluetooth', '1 Year', 'New', 'JBL-SPK-001', 3500, 6500, 5, 2
-        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Go 2 Portable Speaker');
-
-        INSERT INTO accessories (accessory_type, brand, product_name, compatible_models, color, connector_type, warranty, condition, sku, cost_price, sale_price, quantity, low_stock_threshold)
-        SELECT 'Handsfree', 'Baseus', 'Wired Earphone Type-C', 'Universal', 'White', 'Type-C to Type-C', '6 Months', 'New', 'BS-HF-001', 400, 900, 20, 5
-        WHERE NOT EXISTS (SELECT 1 FROM accessories WHERE product_name = 'Wired Earphone Type-C');
         "#,
     ),
     (

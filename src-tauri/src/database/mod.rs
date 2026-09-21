@@ -123,6 +123,36 @@ mod tests {
     }
 
     #[test]
+    fn fresh_migration_creates_no_business_data() {
+        let conn = mem_conn();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        migrations::run(&conn).expect("migrations run");
+        seed::seed(&conn).expect("seed runs");
+
+        // A clean install must never auto-create business records — no dummy
+        // accessories, phones or sales. Only system/reference data (roles,
+        // admin user, settings) is allowed.
+        for (table, label) in [
+            ("accessories", "accessory"),
+            ("phones", "phone"),
+            ("sales", "sale"),
+            ("purchases", "purchase"),
+            ("suppliers", "supplier"),
+            ("members", "member"),
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table}"),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "fresh install must not contain a seeded {label}");
+        }
+    }
+
+    #[test]
     fn soft_delete_hides_but_keeps_member() {
         let conn = mem_conn();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
