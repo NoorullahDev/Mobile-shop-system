@@ -18,9 +18,6 @@ fn validate_category(conn: &Connection, category: &str) -> Result<(), AppError> 
 
 fn normalize(input: CreatePhoneInput) -> Result<CreatePhoneInput, AppError> {
     let brand = input.brand.trim().to_string();
-    if brand.is_empty() {
-        return Err(AppError::validation("Brand is required"));
-    }
     let model = input.model.trim().to_string();
     if model.is_empty() {
         return Err(AppError::validation("Model is required"));
@@ -179,7 +176,9 @@ pub fn restock(
     actor: Option<i64>,
 ) -> Result<(), AppError> {
     if quantity <= 0 {
-        return Err(AppError::validation("Restock quantity must be greater than zero"));
+        return Err(AppError::validation(
+            "Restock quantity must be greater than zero",
+        ));
     }
     if phone_repository::get_by_id(conn, id)?.is_none() {
         return Err(AppError::validation("Phone not found"));
@@ -223,7 +222,16 @@ pub fn restock(
                 "IMEI {imei} is already in use"
             )));
         }
-        purchase_repository::insert_imeis(&tx, id, &normalized_imeis, &normalized_colors)?;
+        purchase_repository::insert_imeis(
+            &tx,
+            id,
+            &normalized_imeis,
+            &[],
+            &normalized_colors,
+            &[],
+            &[],
+            &[],
+        )?;
     }
     tx.commit()?;
     services::record_activity(conn, actor, "phone", "restock", Some(id))
@@ -243,18 +251,61 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
         )));
     }
 
+    let imei2 = input
+        .imei2
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_uppercase);
+    if let Some(second) = imei2.as_deref() {
+        if second.len() < 8 {
+            return Err(AppError::validation("IMEI 2 must be at least 8 characters"));
+        }
+        if second == imei {
+            return Err(AppError::validation("IMEI 1 and IMEI 2 must be different"));
+        }
+        if phone_repository::imei_exists(conn, second)? {
+            return Err(AppError::validation(format!(
+                "IMEI {second} is already in use"
+            )));
+        }
+    }
+
     let tx = conn.unchecked_transaction()?;
     let color = input
         .color
         .as_deref()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let pta_status = input
+        .pta_status
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let storage = input
+        .storage
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(value) = input.battery_health_pct {
+        if !(0..=100).contains(&value) {
+            return Err(AppError::validation(
+                "Battery health must be between 0 and 100",
+            ));
+        }
+    }
     let imei_id = phone_repository::insert_imei(
         &tx,
         &AddPhoneImeiInput {
             phone_id: input.phone_id,
             imei: imei.clone(),
+            imei2: imei2.clone(),
             color: color.clone(),
+            pta_status: pta_status.clone(),
+            storage: storage.clone(),
+            battery_health_pct: input.battery_health_pct,
         },
     )?;
     if !phone_repository::add_quantity(&tx, input.phone_id, 1)? {
@@ -267,8 +318,12 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
         id: imei_id,
         phone_id: input.phone_id,
         imei,
+        imei2,
         status: "in_stock".into(),
         color,
+        pta_status,
+        storage,
+        battery_health_pct: input.battery_health_pct,
         sold_at: None,
         created_at: String::new(),
     })
@@ -310,14 +365,14 @@ mod tests {
     }
 
     #[test]
-    fn create_defaults_low_stock_and_requires_brand() {
+    fn create_accepts_empty_brand() {
         let conn = in_memory_conn();
         let mut input = sample();
         input.brand = "   ".into();
-        assert!(matches!(
-            create(&conn, input).unwrap_err(),
-            AppError::Validation(_)
-        ));
+        input.model = "iPhone 14".into();
+        let phone = create(&conn, input).unwrap();
+        assert_eq!(phone.brand, "");
+        assert_eq!(phone.model, "iPhone 14");
     }
 
     #[test]
@@ -362,7 +417,11 @@ mod tests {
                 AddPhoneImeiInput {
                     phone_id: stock_phone.id,
                     imei: "111222333444555".into(),
+                    imei2: None,
                     color: None,
+                    pta_status: None,
+                    storage: None,
+                    battery_health_pct: None,
                 },
             ),
             Err(AppError::Validation(_))
@@ -373,14 +432,21 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: stock_phone.id,
                 imei: "AAAABBBBCCCCDDDD".into(),
+                imei2: None,
                 color: None,
+                pta_status: None,
+                storage: None,
+                battery_health_pct: None,
             },
         )
         .unwrap();
         let mut duplicate_master = sample();
         duplicate_master.model = "Duplicate Master".into();
         duplicate_master.imei2 = Some("aaaabbbbccccdddd".into());
-        assert!(matches!(create(&conn, duplicate_master), Err(AppError::Validation(_))));
+        assert!(matches!(
+            create(&conn, duplicate_master),
+            Err(AppError::Validation(_))
+        ));
     }
 
     #[test]
@@ -527,7 +593,11 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: p.id,
                 imei: "999999999999999".into(),
+                imei2: None,
                 color: None,
+                pta_status: None,
+                storage: None,
+                battery_health_pct: None,
             },
         )
         .unwrap();

@@ -1283,6 +1283,167 @@ const MIGRATIONS: &[(&str, &str)] = &[
         ALTER TABLE sale_items ADD COLUMN imei_snapshot TEXT;
         "#,
     ),
+    (
+        "0040_phone_unit_imei2_pta_snapshots",
+        r#"
+        -- A row in phone_imeis is one physical handset. IMEI 2 is an optional
+        -- identifier for that same handset, never an additional stock unit.
+        ALTER TABLE phone_imeis ADD COLUMN imei2 TEXT;
+        ALTER TABLE phone_imeis ADD COLUMN pta_status TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_imeis_imei2_unique
+            ON phone_imeis(imei2) WHERE imei2 IS NOT NULL AND imei2 <> '';
+
+        -- Preserve the exact unit details printed at sale/return time.
+        ALTER TABLE sale_items ADD COLUMN imei2_snapshot TEXT;
+        ALTER TABLE sale_items ADD COLUMN pta_status TEXT;
+        ALTER TABLE sale_items ADD COLUMN product_name_snapshot TEXT;
+        ALTER TABLE sale_items ADD COLUMN variant_snapshot TEXT;
+        ALTER TABLE return_items ADD COLUMN imei2 TEXT;
+        ALTER TABLE return_items ADD COLUMN pta_status TEXT;
+        "#,
+    ),
+    (
+        "0041_phone_unit_storage_battery_snapshots",
+        r#"
+        -- Storage and battery health belong to the physical handset. Snapshot
+        -- them on sale/return lines so history remains stable after restarts
+        -- and if the inventory unit is later returned or edited.
+        ALTER TABLE phone_imeis ADD COLUMN storage TEXT;
+        ALTER TABLE phone_imeis ADD COLUMN battery_health_pct INTEGER;
+        ALTER TABLE sale_items ADD COLUMN storage TEXT;
+        ALTER TABLE sale_items ADD COLUMN battery_health_pct INTEGER;
+        ALTER TABLE return_items ADD COLUMN storage TEXT;
+        ALTER TABLE return_items ADD COLUMN battery_health_pct INTEGER;
+        "#,
+    ),
+    (
+        "0042_users_roles_security",
+        r#"
+        INSERT OR IGNORE INTO permissions (name, description) VALUES
+            ('phones:view', 'View mobile phones'),
+            ('phones:create', 'Add or restock mobile phones'),
+            ('phones:update', 'Edit mobile phones and phone options'),
+            ('phones:delete', 'Delete mobile phones and phone options'),
+            ('accessories:view', 'View accessories'),
+            ('accessories:create', 'Add or restock accessories'),
+            ('accessories:update', 'Edit accessories and accessory options'),
+            ('accessories:delete', 'Delete accessories and accessory options'),
+            ('sales:update', 'Edit completed sales'),
+            ('sales:print', 'Print sales invoices'),
+            ('sales:apply_discount', 'Apply a discount to a sale'),
+            ('returns:update', 'Edit a return or exchange'),
+            ('payments:update', 'Edit customer payments'),
+            ('online_payments:view', 'View online payment records'),
+            ('purchases:update', 'Edit purchases'),
+            ('supplier_dues:view', 'View supplier dues and payments'),
+            ('supplier_dues:create', 'Record supplier payments'),
+            ('supplier_dues:update', 'Edit supplier payments'),
+            ('supplier_dues:delete', 'Delete supplier payments'),
+            ('reports:print', 'Print or export reports'),
+            ('activity:view', 'View activity logs'),
+            ('license:view', 'View license information'),
+            ('license:update', 'Change license activation');
+
+        -- Preserve the effective access of every existing custom role while
+        -- splitting formerly combined modules into their real navigation areas.
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id
+        FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name IN ('phones:view', 'accessories:view')
+        WHERE source.name = 'inventory:view';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name IN ('phones:create', 'accessories:create')
+        WHERE source.name = 'inventory:create';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name IN ('phones:update', 'accessories:update')
+        WHERE source.name = 'inventory:update';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name IN ('phones:delete', 'accessories:delete')
+        WHERE source.name = 'inventory:delete';
+
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'online_payments:view'
+        WHERE source.name = 'payments:view';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'payments:update'
+        WHERE source.name = 'payments:create';
+
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'supplier_dues:view'
+        WHERE source.name = 'purchases:view';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name IN ('supplier_dues:create', 'supplier_dues:update')
+        WHERE source.name = 'purchases:create';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'supplier_dues:delete'
+        WHERE source.name = 'purchases:delete';
+
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'activity:view'
+        WHERE source.name = 'reports:view';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'license:view'
+        WHERE source.name = 'settings:view';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'license:update'
+        WHERE source.name = 'settings:update';
+
+        -- Editing used to share Create. Preserve that ability for existing roles.
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name IN ('sales:update', 'returns:update', 'purchases:update')
+        WHERE source.name IN ('sales:create', 'returns:create', 'purchases:create')
+          AND substr(target.name, 1, instr(target.name, ':') - 1) = substr(source.name, 1, instr(source.name, ':') - 1);
+
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name IN ('sales:apply_discount')
+        WHERE source.name = 'sales:create';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'sales:print'
+        WHERE source.name = 'sales:view';
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT rp.role_id, target.id FROM role_permissions rp
+        JOIN permissions source ON source.id = rp.permission_id
+        JOIN permissions target ON target.name = 'reports:print'
+        WHERE source.name = 'reports:view';
+
+        DELETE FROM permissions WHERE name IN (
+            'inventory:view', 'inventory:create', 'inventory:update', 'inventory:delete'
+        );
+
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
+        WHERE lower(r.name) = 'admin' AND r.is_builtin = 1;
+        "#,
+    ),
 ];
 
 fn apply_range(conn: &Connection, upto: usize) -> Result<(), AppError> {

@@ -44,14 +44,14 @@ const mainNav: NavItem[] = [
   { to: "/sales/new", label: "New Sale", icon: ShoppingCart, pos: true, shortcut: "F2", permission: "sales:create" },
   { to: "/sales", label: "Sales History", icon: Receipt, end: true, permission: "sales:view" },
   { to: "/returns", label: "Returns", icon: RotateCcw, permission: "returns:view" },
-  { to: "/inventory", label: "Mobile Phones", icon: Smartphone, permission: "inventory:view" },
-  { to: "/accessories", label: "Accessories", icon: Headphones, permission: "inventory:view" },
+  { to: "/inventory", label: "Mobile Phones", icon: Smartphone, permission: "phones:view" },
+  { to: "/accessories", label: "Accessories", icon: Headphones, permission: "accessories:view" },
   { to: "/purchases", label: "Purchases", icon: PackagePlus, permission: "purchases:view" },
   { to: "/members", label: "Customers", icon: Users, permission: "members:view" },
   { to: "/payments", label: "Customer Dues", icon: CreditCard, permission: "payments:view" },
-  { to: "/online-payments", label: "Online Payments", icon: Banknote, permission: "payments:view" },
+  { to: "/online-payments", label: "Online Payments", icon: Banknote, permission: "online_payments:view" },
   { to: "/suppliers", label: "Suppliers", icon: Building2, permission: "suppliers:view" },
-  { to: "/supplier-dues", label: "Supplier Dues", icon: CreditCard, permission: "purchases:view" },
+  { to: "/supplier-dues", label: "Supplier Dues", icon: CreditCard, permission: "supplier_dues:view" },
   { to: "/expenses", label: "Expenses", icon: TrendingDown, permission: "expenses:view" },
   { to: "/reports", label: "Reports", icon: FileText, end: true, permission: "reports:view" },
 ];
@@ -200,7 +200,15 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
               </div>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-3" style={{ color: "#7E8FAD" }}>
-              <Lock className="h-4 w-4" aria-label="Session locked" />
+              <button
+                type="button"
+                onClick={() => { navigate("/account"); onNavigate?.(); }}
+                className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-white/10 hover:text-white"
+                title="My account / Change password"
+                aria-label="My account"
+              >
+                <Lock className="h-4 w-4" />
+              </button>
               <button
                 type="button"
                 onClick={handleLogout}

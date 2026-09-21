@@ -97,8 +97,8 @@ export function MainLayout() {
           >
             <span>
               You are signed in with the default password. For security, please{" "}
-              <Link to="/users" style={{ textDecoration: "underline", fontWeight: 600, color: "#92400E" }}>
-                change your password in Users
+              <Link to="/account" style={{ textDecoration: "underline", fontWeight: 600, color: "#92400E" }}>
+                change your password
               </Link>
               .
             </span>

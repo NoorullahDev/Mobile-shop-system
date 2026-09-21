@@ -42,7 +42,11 @@ fn series(months: i64, rows: Vec<(String, f64)>) -> Vec<MonthlyPoint> {
         .collect()
 }
 
-pub fn dashboard(conn: &Connection, _months: i64, today: &str) -> Result<DashboardSummary, AppError> {
+pub fn dashboard(
+    conn: &Connection,
+    _months: i64,
+    today: &str,
+) -> Result<DashboardSummary, AppError> {
     let (
         revenue,
         cogs,
@@ -378,11 +382,16 @@ mod tests {
         .unwrap();
 
         let breakdown = payment_breakdown(&conn, &today, &today).unwrap();
-        let cash = breakdown.iter().find(|b| b.payment_method == "cash").unwrap();
+        let cash = breakdown
+            .iter()
+            .find(|b| b.payment_method == "cash")
+            .unwrap();
         assert!((cash.total - 800.0).abs() < 0.001);
         assert_eq!(cash.count, 1);
         assert!(
-            !breakdown.iter().any(|b| b.payment_method == "bank_transfer"),
+            !breakdown
+                .iter()
+                .any(|b| b.payment_method == "bank_transfer"),
             "voided split payment must be excluded from payment breakdown"
         );
     }
@@ -467,7 +476,12 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        assert_eq!(crate::services::sale_service::list(&conn, None).unwrap().len(), 500);
+        assert_eq!(
+            crate::services::sale_service::list(&conn, None)
+                .unwrap()
+                .len(),
+            500
+        );
         assert_eq!(
             crate::services::sale_service::list_for_period(&conn, "2026-01-01", "2026-01-31")
                 .unwrap()
@@ -485,13 +499,9 @@ mod tests {
             600
         );
         assert_eq!(
-            crate::services::purchase_service::list_for_period(
-                &conn,
-                "2026-01-01",
-                "2026-01-31",
-            )
-            .unwrap()
-            .len(),
+            crate::services::purchase_service::list_for_period(&conn, "2026-01-01", "2026-01-31",)
+                .unwrap()
+                .len(),
             600
         );
     }
@@ -597,7 +607,7 @@ mod tests {
     fn profit_loss_discount_to_cost_is_zero_gross_and_below_cost_shows_only_loss() {
         let conn = in_memory_conn();
         conn.execute(
-            "INSERT INTO phones (brand, model, quantity, cost_price, sale_price) VALUES ('Samsung','Galaxy',10,500,650)",
+            "INSERT INTO phones (brand, model, quantity, cost_price, sale_price) VALUES ('Apple','iPhone 18PM',10,250000,400000)",
             [],
         )
         .unwrap();
@@ -605,21 +615,13 @@ mod tests {
         // Discount exactly down to cost -> gross 0, net 0.
         conn.execute(
             "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method, created_at) VALUES
-               ('P1', 500, 150, 500, 'cash', ?1)",
-            rusqlite::params![today],
-        )
-        .unwrap();
-        // Sold at a loss below cost -> only that loss shows.
-        conn.execute(
-            "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method, created_at) VALUES
-               ('P2', 450, 200, 450, 'cash', ?1)",
+               ('P1', 250000, 150000, 250000, 'cash', ?1)",
             rusqlite::params![today],
         )
         .unwrap();
         conn.execute_batch(
             "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price, cost_price) VALUES
-               (1, 1, 1, 650, 500),
-               (2, 1, 1, 650, 500);",
+               (1, 1, 1, 400000, 250000);",
         )
         .unwrap();
 
@@ -627,14 +629,47 @@ mod tests {
             .date_naive()
             .format("%Y-%m-01")
             .to_string();
-        let to = today;
+        let to = today.clone();
+
+        let dashboard_summary = dashboard(&conn, 12, &today).unwrap();
+        assert_eq!(dashboard_summary.revenue, 250_000.0);
+        assert_eq!(dashboard_summary.profit, 0.0);
+
+        let period = period_summary(&conn, &from, &to).unwrap();
+        assert_eq!(period.revenue, 250_000.0);
+        assert_eq!(period.discount, 150_000.0);
+        assert_eq!(period.profit, 0.0);
 
         let pl = profit_loss(&conn, &from, &to).unwrap();
-        assert_eq!(pl.total_revenue, 950.0); // 500 + 450
-        assert_eq!(pl.total_cogs, 1000.0); // 500 x 2
-        assert_eq!(pl.gross_profit, -50.0);
-        assert_eq!(pl.net_profit, -50.0);
-        assert_eq!(pl.total_expenses, 0.0);
-        assert_eq!(pl.sales_count, 2);
+        assert_eq!(pl.total_revenue, 250_000.0);
+        assert_eq!(pl.total_cogs, 250_000.0);
+        assert_eq!(pl.gross_profit, 0.0);
+        assert_eq!(pl.net_profit, 0.0);
+        assert_eq!(pl.monthly.last().unwrap().net_profit, 0.0);
+
+        let top = top_sellers(&conn, &from, &to, 5).unwrap();
+        assert_eq!(top[0].revenue, 250_000.0);
+
+        // A final amount below cost is a real loss, but the discount is still
+        // not subtracted a second time.
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, discount, paid_amount, payment_method, created_at) VALUES
+               ('P2', 240000, 160000, 240000, 'cash', ?1)",
+            rusqlite::params![today],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO sale_items (sale_id, phone_id, quantity, unit_price, cost_price) VALUES
+               (2, 1, 1, 400000, 250000);",
+        )
+        .unwrap();
+
+        let after_loss = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(after_loss.total_revenue, 490_000.0);
+        assert_eq!(after_loss.total_cogs, 500_000.0);
+        assert_eq!(after_loss.gross_profit, -10_000.0);
+        assert_eq!(after_loss.net_profit, -10_000.0);
+        assert_eq!(after_loss.total_expenses, 0.0);
+        assert_eq!(after_loss.sales_count, 2);
     }
 }

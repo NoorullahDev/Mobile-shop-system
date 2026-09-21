@@ -136,7 +136,12 @@ pub fn soft_delete(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(affected > 0)
 }
 
-pub fn void_payment(conn: &Connection, id: i64, reason: &str, voided_by: i64) -> Result<bool, AppError> {
+pub fn void_payment(
+    conn: &Connection,
+    id: i64,
+    reason: &str,
+    voided_by: i64,
+) -> Result<bool, AppError> {
     let affected = conn.execute(
         "UPDATE payments SET is_voided = 1, void_reason = ?2, voided_by = ?3, voided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0 AND is_voided = 0",
         params![id, reason, voided_by],
@@ -144,7 +149,12 @@ pub fn void_payment(conn: &Connection, id: i64, reason: &str, voided_by: i64) ->
     Ok(affected > 0)
 }
 
-pub fn edit_payment_details(conn: &Connection, id: i64, account_details: Option<&str>, reference: Option<&str>) -> Result<bool, AppError> {
+pub fn edit_payment_details(
+    conn: &Connection,
+    id: i64,
+    account_details: Option<&str>,
+    reference: Option<&str>,
+) -> Result<bool, AppError> {
     let affected = conn.execute(
         "UPDATE payments SET account_details = ?2, reference = ?3, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND is_deleted = 0 AND is_voided = 0",
         params![id, account_details, reference],

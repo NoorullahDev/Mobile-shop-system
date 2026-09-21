@@ -1,6 +1,6 @@
 pub mod accessory_repository;
-pub mod category_repository;
 pub mod backup_repository;
+pub mod category_repository;
 pub mod expense_repository;
 pub mod inventory_repository;
 pub mod license_repository;
@@ -13,8 +13,8 @@ pub mod product_category_repository;
 pub mod product_return_repository;
 pub mod purchase_repository;
 pub mod report_repository;
-pub mod sale_repository;
 pub mod sale_payment_repository;
+pub mod sale_repository;
 pub mod settings_repository;
 pub mod staff_repository;
 pub mod supplier_repository;

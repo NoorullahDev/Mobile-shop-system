@@ -296,10 +296,7 @@ fn extract_snapshot(archive_path: &Path) -> Result<PathBuf, AppError> {
 }
 
 /// Constructs the JSON manifest describing a backup (app/version/type/modules).
-fn build_manifest(
-    backup_type: BackupType,
-    modules: &[String],
-) -> serde_json::Value {
+fn build_manifest(backup_type: BackupType, modules: &[String]) -> serde_json::Value {
     serde_json::json!({
         "app": "Mobile Shop Management System",
         "app_version": env!("CARGO_PKG_VERSION"),
@@ -456,7 +453,8 @@ pub fn write_single_file_backup(
                 rusqlite::params![MANIFEST_META_KEY, manifest.to_string()],
             )?;
             if include_product_assets {
-                if let Some(root) = db_path.and_then(|p| PathBuf::from(p).parent().map(Path::to_path_buf))
+                if let Some(root) =
+                    db_path.and_then(|p| PathBuf::from(p).parent().map(Path::to_path_buf))
                 {
                     let images = root.join("product_images");
                     if images.is_dir() {
@@ -477,10 +475,9 @@ pub fn write_single_file_backup(
                             {
                                 continue;
                             }
-                            let data =
-                                fs::read(entry.path()).map_err(|e| {
-                                    AppError::file(format!("could not read product image: {e}"))
-                                })?;
+                            let data = fs::read(entry.path()).map_err(|e| {
+                                AppError::file(format!("could not read product image: {e}"))
+                            })?;
                             tx.execute(
                                 &format!("INSERT INTO {FILES_TABLE}(path,data) VALUES (?1, ?2)"),
                                 rusqlite::params![name, data],
@@ -597,7 +594,8 @@ pub fn create_selective_backup(
         destination = backups_dir.join(&file_name);
         n += 1;
     }
-    let size = write_single_file_backup(conn, &destination, BackupType::Selective, &modules)? as i64;
+    let size =
+        write_single_file_backup(conn, &destination, BackupType::Selective, &modules)? as i64;
     verify_backup_entry(&destination)?;
     let id = backup_repository::insert(
         conn,
@@ -731,13 +729,14 @@ fn stage_for_restore(snapshot: &Path) -> Result<PathBuf, AppError> {
     let staged = std::env::temp_dir().join(format!("bms_restore_staged_{}.db", unique_token()));
     if let Err(e) = fs::copy(snapshot, &staged) {
         let _ = fs::remove_file(&staged);
-        return Err(AppError::file(format!("could not stage backup snapshot: {e}")));
+        return Err(AppError::file(format!(
+            "could not stage backup snapshot: {e}"
+        )));
     }
 
     let result = (|| -> Result<(), AppError> {
-        let staging = Connection::open(&staged).map_err(|e| {
-            AppError::file(format!("could not open staged backup snapshot: {e}"))
-        })?;
+        let staging = Connection::open(&staged)
+            .map_err(|e| AppError::file(format!("could not open staged backup snapshot: {e}")))?;
         migrations::run(&staging)?;
         drop(staging);
         verify_backup(&staged)
@@ -918,26 +917,22 @@ pub fn restore_backup(
             } else {
                 // Current single-file `.db`: product images are BLOBs inside the
                 // snapshot's `__bms_backup_files` table.
-                let embedded = Connection::open_with_flags(
-                    source,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-                )
-                .map_err(|e| AppError::validation(format!("Invalid backup file: {e}")))?;
+                let embedded =
+                    Connection::open_with_flags(source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                        .map_err(|e| AppError::validation(format!("Invalid backup file: {e}")))?;
                 let mut stmt = embedded
                     .prepare(&format!(
                         "SELECT path, data FROM {FILES_TABLE} WHERE path LIKE 'product_images/%'"
                     ))
-                    .map_err(|_| {
-                        AppError::validation("Backup does not contain product images")
-                    })?;
+                    .map_err(|_| AppError::validation("Backup does not contain product images"))?;
                 let rows = stmt
                     .query_map([], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
                     })
                     .map_err(|e| AppError::validation(format!("Invalid image data: {e}")))?;
                 for row in rows {
-                    let (name, data) = row
-                        .map_err(|e| AppError::validation(format!("Invalid image data: {e}")))?;
+                    let (name, data) =
+                        row.map_err(|e| AppError::validation(format!("Invalid image data: {e}")))?;
                     if name.starts_with("product_images/")
                         && !name.contains("..")
                         && !name.ends_with('/')
@@ -1449,11 +1444,7 @@ mod tests {
                 .unwrap();
             assert_eq!(phones, 1);
             let member: String = v2
-                .query_row(
-                    "SELECT name FROM members WHERE id=1",
-                    [],
-                    |r| r.get(0),
-                )
+                .query_row("SELECT name FROM members WHERE id=1", [], |r| r.get(0))
                 .unwrap();
             assert_eq!(member, "Old Customer");
 
@@ -1466,18 +1457,18 @@ mod tests {
                 .collect::<Result<_, _>>()
                 .unwrap();
             assert!(cols.contains(&"cost_price".to_string()));
+            assert!(cols.contains(&"storage".to_string()));
+            assert!(cols.contains(&"battery_health_pct".to_string()));
             let cost: f64 = v2
-                .query_row(
-                    "SELECT cost_price FROM sale_items WHERE id=1",
-                    [],
-                    |r| r.get(0),
-                )
+                .query_row("SELECT cost_price FROM sale_items WHERE id=1", [], |r| {
+                    r.get(0)
+                })
                 .unwrap();
             assert_eq!(cost, 400.0);
             let versions: i64 = v2
                 .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(versions, 39);
+            assert_eq!(versions, 42);
 
             // License preserved: the backup cannot replace this machine's activation.
             let license_key: String = v2
@@ -1547,11 +1538,12 @@ mod tests {
         {
             let stale = Connection::open(&stale_path).unwrap();
             migrations::run(&stale).unwrap();
-            stale.execute(
-                "DELETE FROM schema_migrations WHERE version='0035_sale_item_cost_price'",
-                [],
-            )
-            .unwrap();
+            stale
+                .execute(
+                    "DELETE FROM schema_migrations WHERE version='0035_sale_item_cost_price'",
+                    [],
+                )
+                .unwrap();
             backup = create_backup(&stale, &dir, None, BackupType::Database).expect("backup");
         }
 
@@ -1564,15 +1556,16 @@ mod tests {
         .unwrap();
 
         let result = restore_backup(&mut live, &dir, None, Path::new(&backup.file_path));
-        assert!(result.is_err(), "restore must fail when the migration fails");
+        assert!(
+            result.is_err(),
+            "restore must fail when the migration fails"
+        );
 
         // The current working database is fully intact.
         let value: String = live
-            .query_row(
-                "SELECT value FROM settings WHERE key='survivor'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT value FROM settings WHERE key='survivor'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(value, "intact");
 
@@ -1606,11 +1599,15 @@ mod tests {
         assert!(!is_zip_backup(&dest));
         let probe = Connection::open(&dest).unwrap();
         let meta: i64 = probe
-            .query_row(&format!("SELECT COUNT(*) FROM {META_TABLE}"), [], |r| r.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {META_TABLE}"), [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(meta, 1);
         let files: i64 = probe
-            .query_row(&format!("SELECT COUNT(*) FROM {FILES_TABLE}"), [], |r| r.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {FILES_TABLE}"), [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(files, 1);
         let blob: Vec<u8> = probe

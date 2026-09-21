@@ -159,6 +159,17 @@ pub fn is_admin_user(conn: &Connection, id: i64) -> Result<bool, AppError> {
     Ok(n > 0)
 }
 
+pub fn is_primary_admin(conn: &Connection, id: i64) -> Result<bool, AppError> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id
+         WHERE u.id = ?1 AND u.is_deleted = 0
+           AND lower(u.username) = 'admin' AND lower(r.name) = 'admin' AND r.is_builtin = 1",
+        [id],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
 pub fn active_admin_count(conn: &Connection) -> Result<i64, AppError> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id
@@ -255,9 +266,11 @@ pub fn get_role(conn: &Connection, id: i64) -> Result<Option<Role>, AppError> {
 }
 
 pub fn role_name_exists(conn: &Connection, name: &str) -> Result<bool, AppError> {
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM roles WHERE name = ?1", [name], |r| {
-        r.get(0)
-    })?;
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM roles WHERE lower(name) = lower(?1)",
+        [name],
+        |r| r.get(0),
+    )?;
     Ok(n > 0)
 }
 
@@ -267,7 +280,7 @@ pub fn role_name_exists_excluding(
     exclude_id: i64,
 ) -> Result<bool, AppError> {
     let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM roles WHERE name = ?1 AND id != ?2",
+        "SELECT COUNT(*) FROM roles WHERE lower(name) = lower(?1) AND id != ?2",
         params![name, exclude_id],
         |r| r.get(0),
     )?;

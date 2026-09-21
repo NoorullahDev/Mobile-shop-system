@@ -52,6 +52,9 @@ pub struct SaleItem {
     pub product_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub imei: Option<String>,
+    /// Optional second IMEI snapshotted from the same sold handset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imei2: Option<String>,
     /// Phone variant (e.g. "256GB Midnight") — phones only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
@@ -67,6 +70,15 @@ pub struct SaleItem {
     /// Colour of the sold unit, snapshot at sale time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// PTA status of the physical unit, snapshot at sale time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pta_status: Option<String>,
+    /// Storage of the exact physical unit, snapshotted at sale time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage: Option<String>,
+    /// Battery health of the exact physical unit, snapshotted at sale time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battery_health_pct: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -17,8 +17,14 @@ import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
 import type { CreateMemberInput, Member } from "../types/member";
 import type { MemberBalance } from "../types/payment";
+import { useSessionStore } from "../store/session";
+import { can } from "../lib/permissions";
 
 export function MembersPage() {
+  const permissions = useSessionStore((s) => s.user?.permissions);
+  const canCreate = can(permissions, "members:create");
+  const canUpdate = can(permissions, "members:update");
+  const canDelete = can(permissions, "members:delete");
   const { members, loading, error, load, add, update, remove } =
     useMemberStore();
   const businessName = useSettingsStore((s) => s.businessName);
@@ -80,14 +86,14 @@ export function MembersPage() {
         description="Manage customer records, dues, and payment history"
         breadcrumb={[{ label: "Customers" }]}
         meta={`${members.length} total`}
-        actions={
+        actions={canCreate ? (
           <Button
             onClick={() => setCreateOpen(true)}
             icon={<Plus className="h-3.5 w-3.5" />}
           >
             Add Customer
           </Button>
-        }
+        ) : undefined}
       />
 
       {error && (
@@ -190,7 +196,7 @@ export function MembersPage() {
                   : "Add your first customer to get started."
               }
               action={
-                !search ? (
+                !search && canCreate ? (
                   <Button
                     onClick={() => setCreateOpen(true)}
                     icon={<Plus className="h-3.5 w-3.5" />}
@@ -300,7 +306,7 @@ export function MembersPage() {
                           }
                           return null;
                         })()}
-                        <button
+                        {canUpdate && <button
                           type="button"
                           onClick={() => setEditing(m)}
                           className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50"
@@ -308,8 +314,8 @@ export function MembersPage() {
                           title="Edit customer"
                         >
                           <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
+                        </button>}
+                        {canDelete && <button
                           type="button"
                           onClick={() => setConfirmDelete(m.id)}
                           className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50"
@@ -317,7 +323,7 @@ export function MembersPage() {
                           title="Delete customer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>

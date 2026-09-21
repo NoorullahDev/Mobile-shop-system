@@ -9,17 +9,35 @@ use crate::repositories::user_admin_repository as repo;
 use crate::security::hash_password;
 use crate::services;
 
-fn normalize_status(s: Option<String>) -> String {
+fn normalize_status(s: Option<String>) -> Result<String, AppError> {
     let s = s.unwrap_or_default().trim().to_lowercase();
-    if matches!(s.as_str(), "active" | "disabled") {
-        s
+    if s.is_empty() {
+        Ok("active".into())
+    } else if matches!(s.as_str(), "active" | "disabled") {
+        Ok(s)
     } else {
-        "active".into()
+        Err(AppError::validation("Status must be active or disabled"))
     }
 }
 
 fn clean_opt(s: Option<String>) -> Option<String> {
     s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+}
+
+fn validate_permissions(conn: &Connection, permissions: &[String]) -> Result<(), AppError> {
+    for permission in permissions {
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM permissions WHERE name = ?1",
+            [permission],
+            |r| r.get(0),
+        )?;
+        if exists == 0 {
+            return Err(AppError::validation(format!(
+                "Unknown permission: {permission}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ----- Users -----
@@ -48,7 +66,7 @@ pub fn create_user(
     }
 
     let hash = hash_password(&input.password)?;
-    let status = normalize_status(input.status);
+    let status = normalize_status(input.status)?;
     let full_name = clean_opt(input.full_name);
     let email = clean_opt(input.email);
 
@@ -91,7 +109,18 @@ pub fn update_user(
 
     let full_name = clean_opt(input.full_name).or(current.full_name);
     let email = clean_opt(input.email).or(current.email);
-    let status = input.status.unwrap_or_else(|| current.status.clone());
+    let status = match input.status {
+        Some(status) => normalize_status(Some(status))?,
+        None => current.status.clone(),
+    };
+
+    if repo::is_primary_admin(conn, id)?
+        && (role_id != current.role_id || !status.eq_ignore_ascii_case("active"))
+    {
+        return Err(AppError::validation(
+            "The primary admin role and active status are protected",
+        ));
+    }
 
     if status == "disabled" && repo::is_admin_user(conn, id)? {
         let active_admins = repo::active_admin_count(conn)?;
@@ -114,6 +143,22 @@ pub fn update_user(
         return Err(AppError::validation("User not found"));
     }
     services::record_activity(conn, actor, "user", "update", Some(id))?;
+    if role_id != current.role_id {
+        services::record_activity(conn, actor, "user", "role_changed", Some(id))?;
+    }
+    if status != current.status {
+        services::record_activity(
+            conn,
+            actor,
+            "user",
+            if status == "disabled" {
+                "disabled"
+            } else {
+                "enabled"
+            },
+            Some(id),
+        )?;
+    }
     repo::get_user(conn, id)?
         .ok_or_else(|| AppError::Internal("Updated user could not be retrieved".into()))
 }
@@ -124,7 +169,12 @@ pub fn set_user_status(
     status: &str,
     actor: Option<i64>,
 ) -> Result<UserDetail, AppError> {
-    let status = normalize_status(Some(status.into()));
+    let status = normalize_status(Some(status.into()))?;
+    if status == "disabled" && repo::is_primary_admin(conn, id)? {
+        return Err(AppError::validation(
+            "The primary admin account cannot be disabled",
+        ));
+    }
     if status == "disabled" && repo::is_admin_user(conn, id)? {
         let active_admins = repo::active_admin_count(conn)?;
         if active_admins <= 1 {
@@ -137,7 +187,17 @@ pub fn set_user_status(
     if !ok {
         return Err(AppError::validation("User not found"));
     }
-    services::record_activity(conn, actor, "user", "status", Some(id))?;
+    services::record_activity(
+        conn,
+        actor,
+        "user",
+        if status == "disabled" {
+            "disabled"
+        } else {
+            "enabled"
+        },
+        Some(id),
+    )?;
     repo::get_user(conn, id)?
         .ok_or_else(|| AppError::Internal("Updated user could not be retrieved".into()))
 }
@@ -148,6 +208,11 @@ pub fn reset_password(
     new_password: &str,
     actor: Option<i64>,
 ) -> Result<(), AppError> {
+    if repo::is_primary_admin(conn, id)? {
+        return Err(AppError::validation(
+            "Reset is disabled for the primary admin; use Change Password with the current password",
+        ));
+    }
     if new_password.len() < 6 {
         return Err(AppError::validation(
             "Password must be at least 6 characters",
@@ -162,6 +227,11 @@ pub fn reset_password(
 }
 
 pub fn delete_user(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
+    if repo::is_primary_admin(conn, id)? {
+        return Err(AppError::validation(
+            "The primary admin account cannot be deleted",
+        ));
+    }
     if repo::is_admin_user(conn, id)? {
         let active_admins = repo::active_admin_count(conn)?;
         if active_admins <= 1 {
@@ -220,6 +290,7 @@ pub fn create_role(
     if repo::role_name_exists(conn, &name)? {
         return Err(AppError::validation("A role with this name already exists"));
     }
+    validate_permissions(conn, &input.permissions)?;
     let description = clean_opt(input.description);
     let tx = conn.unchecked_transaction()?;
     let id = repo::insert_role(&tx, &name, description.as_deref())?;
@@ -235,7 +306,7 @@ pub fn update_role(
     input: UpdateRoleInput,
     actor: Option<i64>,
 ) -> Result<RoleWithPermissions, AppError> {
-    let _current =
+    let current =
         repo::get_role(conn, id)?.ok_or_else(|| AppError::validation("Role not found"))?;
     let name = input.name.trim().to_string();
     if name.is_empty() {
@@ -244,6 +315,18 @@ pub fn update_role(
     if repo::role_name_exists_excluding(conn, &name, id)? {
         return Err(AppError::validation("A role with this name already exists"));
     }
+    if current.is_builtin && !name.eq_ignore_ascii_case(&current.name) {
+        return Err(AppError::validation(
+            "Built-in role names cannot be changed",
+        ));
+    }
+    if current.is_builtin && current.name.eq_ignore_ascii_case("admin") {
+        return Err(AppError::validation(
+            "The built-in Admin role and its full access permissions are protected",
+        ));
+    }
+    validate_permissions(conn, &input.permissions)?;
+    let previous_permissions = repo::role_permissions(conn, id)?;
     let description = clean_opt(input.description);
 
     // Builtin roles cannot be renamed/deleted but their permissions may be edited by an admin.
@@ -255,6 +338,9 @@ pub fn update_role(
     repo::set_role_permissions(&tx, id, &input.permissions)?;
     tx.commit()?;
     services::record_activity(conn, actor, "role", "update", Some(id))?;
+    if previous_permissions != input.permissions {
+        services::record_activity(conn, actor, "role", "permissions_changed", Some(id))?;
+    }
     get_role(conn, id)
 }
 
@@ -302,7 +388,13 @@ pub fn change_password(
     if !ok {
         return Err(AppError::validation("User not found"));
     }
-    Ok(())
+    services::record_activity(
+        conn,
+        Some(user_id),
+        "user",
+        "password_changed",
+        Some(user_id),
+    )
 }
 
 #[cfg(test)]
@@ -313,7 +405,7 @@ mod tests {
     fn seed_roles(conn: &Connection) {
         conn.execute_batch(
             "INSERT INTO roles (name, is_builtin) VALUES ('Admin', 1), ('Staff', 0);
-             INSERT INTO permissions (name) VALUES ('members:view'), ('members:create'), ('sales:create'), ('users:manage');
+             INSERT INTO permissions (name) VALUES ('dashboard:view'), ('members:view'), ('members:create'), ('sales:view'), ('sales:create'), ('users:manage');
              INSERT INTO role_permissions (role_id, permission_id) SELECT 1, id FROM permissions WHERE name='users:manage';
              INSERT INTO users (username, password_hash, role_id, status) VALUES ('admin','x',1,'active');",
         )
@@ -427,9 +519,64 @@ mod tests {
     fn resets_password() {
         let conn = in_memory_conn();
         seed_roles(&conn);
-        reset_password(&conn, 1, "newpass123", None).unwrap();
-        let h = repo::get_password_hash(&conn, 1).unwrap().unwrap();
+        let user = create_user(
+            &conn,
+            CreateUserInput {
+                username: "staffer".into(),
+                password: "secret123".into(),
+                full_name: None,
+                email: None,
+                role_id: 2,
+                status: None,
+            },
+            None,
+        )
+        .unwrap();
+        reset_password(&conn, user.id, "newpass123", None).unwrap();
+        let h = repo::get_password_hash(&conn, user.id).unwrap().unwrap();
         assert!(crate::security::verify_password("newpass123", &h).unwrap());
+    }
+
+    #[test]
+    fn primary_admin_cannot_be_disabled_deleted_reset_or_demoted() {
+        let conn = in_memory_conn();
+        seed_roles(&conn);
+
+        assert!(set_user_status(&conn, 1, "disabled", None).is_err());
+        assert!(delete_user(&conn, 1, None).is_err());
+        assert!(reset_password(&conn, 1, "newpass123", None).is_err());
+        assert!(update_user(
+            &conn,
+            1,
+            UpdateUserInput {
+                role_id: Some(2),
+                ..Default::default()
+            },
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn builtin_admin_permissions_cannot_be_stripped() {
+        let conn = in_memory_conn();
+        seed_roles(&conn);
+        let err = update_role(
+            &conn,
+            1,
+            UpdateRoleInput {
+                name: "Admin".into(),
+                description: None,
+                permissions: vec![],
+            },
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        assert_eq!(
+            repo::role_permissions(&conn, 1).unwrap(),
+            vec!["users:manage"]
+        );
     }
 
     #[test]
@@ -473,5 +620,51 @@ mod tests {
         seed_roles(&conn);
         let err = delete_role(&conn, 1, None).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn restricted_salesman_login_only_receives_granted_access() {
+        let conn = in_memory_conn();
+        seed_roles(&conn);
+        let role = create_role(
+            &conn,
+            CreateRoleInput {
+                name: "Salesman".into(),
+                description: None,
+                permissions: vec![
+                    "dashboard:view".into(),
+                    "sales:create".into(),
+                    "sales:view".into(),
+                    "members:view".into(),
+                ],
+            },
+            None,
+        )
+        .unwrap();
+        create_user(
+            &conn,
+            CreateUserInput {
+                username: "ali".into(),
+                password: "Secure123!".into(),
+                full_name: Some("Ali".into()),
+                email: None,
+                role_id: role.id,
+                status: None,
+            },
+            None,
+        )
+        .unwrap();
+
+        let session = crate::services::auth_service::login(&conn, "ali", "Secure123!").unwrap();
+        assert_eq!(session.role, "Salesman");
+        assert!(session.permissions.contains(&"sales:create".to_string()));
+        for denied in [
+            "purchases:view",
+            "reports:view",
+            "settings:view",
+            "users:manage",
+        ] {
+            assert!(!session.permissions.contains(&denied.to_string()));
+        }
     }
 }

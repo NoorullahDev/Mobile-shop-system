@@ -15,6 +15,7 @@ import { useCategoryStore } from "../store/categories";
 import { useSessionStore } from "../store/session";
 import { formatMoneyCompact } from "../lib/format";
 import type { Expense } from "../types/expense";
+import { can } from "../lib/permissions";
 
 export function ExpensesPage() {
   const { expenses, loading, error, load, add, remove } = useExpenseStore();
@@ -27,6 +28,9 @@ export function ExpensesPage() {
     remove: removeCategory,
   } = useCategoryStore();
   const user = useSessionStore((s) => s.user);
+  const canCreate = can(user?.permissions, "expenses:create");
+  const canUpdate = can(user?.permissions, "expenses:update");
+  const canDelete = can(user?.permissions, "expenses:delete");
 
   const [filter, setFilter] = useState("");
   const [recordOpen, setRecordOpen] = useState(false);
@@ -78,21 +82,21 @@ export function ExpensesPage() {
         meta={expenses.length > 0 ? formatMoneyCompact(total) : undefined}
         actions={
           <div className="flex gap-2">
-            <Button
+            {(canCreate || canUpdate || canDelete) && <Button
               variant="secondary"
               size="sm"
               onClick={() => setCatOpen(true)}
               icon={<Tags className="h-3.5 w-3.5" />}
             >
               Categories
-            </Button>
-            <Button
+            </Button>}
+            {canCreate && <Button
               size="sm"
               onClick={() => setRecordOpen(true)}
               icon={<Plus className="h-3.5 w-3.5" />}
             >
               Record Expense
-            </Button>
+            </Button>}
           </div>
         }
       />
@@ -142,7 +146,7 @@ export function ExpensesPage() {
               title="No expenses recorded"
               description={filter ? "No expenses in this category." : "Record your first expense to start tracking spending."}
               action={
-                !filter ? (
+                !filter && canCreate ? (
                   <Button onClick={() => setRecordOpen(true)} icon={<Plus className="h-3.5 w-3.5" />}>
                     Record First Expense
                   </Button>
@@ -188,7 +192,7 @@ export function ExpensesPage() {
                     </td>
                     <td>
                       <div className="flex justify-end">
-                        <button
+                        {canDelete && <button
                           type="button"
                           onClick={() => setConfirmDelete(e)}
                           className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50"
@@ -196,7 +200,7 @@ export function ExpensesPage() {
                           title="Delete expense"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>
@@ -238,20 +242,20 @@ export function ExpensesPage() {
                     >
                       <span className="text-[13px] font-medium" style={{ color: "#0F172A" }}>{c.name}</span>
                       <div className="flex gap-1">
-                        <button type="button" onClick={() => setEditingCategory({ id: c.id, name: c.name })}
+                        {canUpdate && <button type="button" onClick={() => setEditingCategory({ id: c.id, name: c.name })}
                           className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-blue-50" style={{ color: "#3B6FD4" }}>
                           <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button type="button" onClick={() => setConfirmCatDelete({ id: c.id, name: c.name })}
+                        </button>}
+                        {canDelete && <button type="button" onClick={() => setConfirmCatDelete({ id: c.id, name: c.name })}
                           className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-red-50" style={{ color: "#DC2626" }}>
                           <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        </button>}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-              <div style={{ borderTop: "1px solid #E2E8F0", paddingTop: "16px" }}>
+              {canCreate && <div style={{ borderTop: "1px solid #E2E8F0", paddingTop: "16px" }}>
                 <div className="text-[12px] font-semibold uppercase tracking-wide mb-2" style={{ color: "#64748B" }}>
                   {editingCategory ? "Edit Category" : "Add New Category"}
                 </div>
@@ -261,7 +265,7 @@ export function ExpensesPage() {
                   onCancel={() => { editingCategory ? setEditingCategory(null) : setCatOpen(false); }}
                   initial={editingCategory}
                 />
-              </div>
+              </div>}
             </>
           )}
         </div>

@@ -41,8 +41,12 @@ export interface SaleItem {
   cost_price: number;
   product_name?: string | null;
   imei?: string | null;
+  imei2?: string | null;
   variant?: string | null;
   color?: string | null;
+  pta_status?: string | null;
+  storage?: string | null;
+  battery_health_pct?: number | null;
   serial_no?: string | null;
   warranty?: string | null;
   warranty_expiry?: string | null;

@@ -14,8 +14,14 @@ import * as purchaseService from "../services/purchaseService";
 import { formatMoney } from "../lib/format";
 import type { CreateSupplierInput, Supplier } from "../types/inventory";
 import type { SupplierBalance } from "../types/purchase";
+import { useSessionStore } from "../store/session";
+import { can } from "../lib/permissions";
 
 export function SuppliersPage() {
+  const permissions = useSessionStore((s) => s.user?.permissions);
+  const canCreate = can(permissions, "suppliers:create");
+  const canUpdate = can(permissions, "suppliers:update");
+  const canDelete = can(permissions, "suppliers:delete");
   const { suppliers, loading, error, load, add, update, remove } = useSupplierStore();
   const [balances, setBalances] = useState<SupplierBalance[]>([]);
   const [search, setSearch] = useState("");
@@ -69,11 +75,11 @@ export function SuppliersPage() {
         description="Manage your mobile phone suppliers and contacts"
         breadcrumb={[{ label: "Suppliers" }]}
         meta={`${suppliers.length} total`}
-        actions={
+        actions={canCreate ? (
           <Button onClick={openCreate} icon={<Plus className="h-3.5 w-3.5" />}>
             Add Supplier
           </Button>
-        }
+        ) : undefined}
       />
 
       {error && (
@@ -143,7 +149,7 @@ export function SuppliersPage() {
               icon={Building2}
               title="No suppliers found"
               description={search ? "Try a different search term." : "Add your first supplier to get started."}
-              action={!search ? <Button onClick={openCreate} icon={<Plus className="h-3.5 w-3.5" />}>Add Supplier</Button> : undefined}
+              action={!search && canCreate ? <Button onClick={openCreate} icon={<Plus className="h-3.5 w-3.5" />}>Add Supplier</Button> : undefined}
             />
           </div>
         ) : (
@@ -191,12 +197,12 @@ export function SuppliersPage() {
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1">
-                        <button type="button" onClick={() => openEdit(s)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit">
+                        {canUpdate && <button type="button" onClick={() => openEdit(s)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit">
                           <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button type="button" onClick={() => setConfirmDelete(s.id)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50" style={{ color: "#DC2626" }} title="Delete">
+                        </button>}
+                        {canDelete && <button type="button" onClick={() => setConfirmDelete(s.id)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50" style={{ color: "#DC2626" }} title="Delete">
                           <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>

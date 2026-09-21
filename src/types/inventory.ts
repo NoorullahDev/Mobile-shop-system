@@ -118,8 +118,12 @@ export interface PhoneImei {
   id: number;
   phone_id: number;
   imei: string;
+  imei2?: string | null;
   status: string;
   color?: string | null;
+  pta_status?: string | null;
+  storage?: string | null;
+  battery_health_pct?: number | null;
   sold_at?: string | null;
   created_at: string;
 }
@@ -127,7 +131,11 @@ export interface PhoneImei {
 export interface AddPhoneImeiInput {
   phone_id: number;
   imei: string;
+  imei2?: string | null;
   color?: string;
+  pta_status?: string | null;
+  storage?: string | null;
+  battery_health_pct?: number | null;
 }
 
 // ===========================================================================

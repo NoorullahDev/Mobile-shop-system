@@ -49,7 +49,9 @@ fn create_exit_backup(db: &Database) -> Result<(), String> {
     .map_err(|e| format!("Backup file creation failed: {e}"))?;
 
     // 4. Record in the backup history so it appears in Backup Manager.
-    if let Err(e) = services::backup_service::record_exit_backup(&conn, &file_name, &file_path, size as i64) {
+    if let Err(e) =
+        services::backup_service::record_exit_backup(&conn, &file_name, &file_path, size as i64)
+    {
         log::warn!("Exit backup could not be recorded in history: {e}");
     }
 
@@ -70,10 +72,7 @@ pub fn run() {
             let db = Database::open(&app_data_dir)?;
             {
                 let conn = db.conn.lock().map_err(|_| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "database lock is unavailable",
-                    )
+                    std::io::Error::new(std::io::ErrorKind::Other, "database lock is unavailable")
                 })?;
                 database::migrations::run(&conn)?;
                 database::seed::seed(&conn)

@@ -59,20 +59,16 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
 
   const brands = getOptionsByType("brand");
   const rams = getOptionsByType("ram");
-  const storages = getOptionsByType("storage");
-  const colors = getOptionsByType("color");
   const networkTypes = getOptionsByType("network_type");
   const conditions = getOptionsByType("condition");
   const conditionRatings = getOptionsByType("condition_rating");
   const bodyConditions = getOptionsByType("body_condition");
   const screenConditions = getOptionsByType("screen_condition");
-  const batteryHealths = getOptionsByType("battery_health");
   const cameraConditions = getOptionsByType("camera_condition");
   const faceIds = getOptionsByType("face_id");
   const speakers = getOptionsByType("speaker");
   const chargers = getOptionsByType("charger");
   const boxes = getOptionsByType("box_condition");
-  const ptaStatuses = getOptionsByType("pta_status");
 
   const [form, setForm] = useState<CreatePhoneInput>({
     brand: initial?.brand ?? "",
@@ -106,7 +102,6 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
     condition_notes: initial?.condition_notes ?? "",
   });
 
-  const [brandError, setBrandError] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,19 +110,13 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
     setForm((f) => ({ ...f, [key]: value }));
 
   const showConditionDetails = !!form.condition && form.condition.trim() !== "New";
-  const isAppleBrand = (form.brand ?? "").trim().toLowerCase() === "apple";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.brand.trim()) {
-      setBrandError("Brand is required");
-      return;
-    }
     if (!form.model.trim()) {
       setModelError("Model is required");
       return;
     }
-    setBrandError(null);
     setModelError(null);
     setSaving(true);
     setError(null);
@@ -137,15 +126,19 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
         model: form.model.trim(),
         condition: form.condition ? form.condition.trim() : "",
         variant: form.variant ? form.variant.trim() : "",
-        color: form.color ? form.color.trim() : "",
+        // New masters do not define unit colour/PTA. Preserve legacy values
+        // during an edit so older records are not silently destroyed.
+        color: initial?.color ?? null,
         ram: form.ram ? form.ram.trim() : "",
-        storage: form.storage ? form.storage.trim() : "",
+        storage: initial?.storage ?? null,
         processor: form.processor ? form.processor.trim() : "",
         chipset: form.chipset ? form.chipset.trim() : "",
         network_type: form.network_type ? form.network_type.trim() : "",
         battery_capacity: form.battery_capacity ? form.battery_capacity.trim() : "",
         image_paths: form.image_paths ?? [],
-        quantity: 0,
+        // Stock is owned by purchases/sales and must never be reset when the
+        // phone master is edited.
+        quantity: initial?.quantity ?? 0,
         low_stock_threshold: Number(form.low_stock_threshold) || 0,
         sku: form.sku ? form.sku.trim() : "",
         cost_price: Number(form.cost_price) || 0,
@@ -153,9 +146,9 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
         condition_rating: form.condition_rating ? form.condition_rating.trim() : "",
         body_condition: form.body_condition ? form.body_condition.trim() : "",
         screen_condition: form.screen_condition ? form.screen_condition.trim() : "",
-        battery_health: form.battery_health ? form.battery_health.trim() : "",
-        pta_status: form.pta_status ? form.pta_status.trim() : "",
-        battery_health_pct: form.battery_health_pct ? Number(form.battery_health_pct) : null,
+        battery_health: initial?.battery_health ?? null,
+        pta_status: initial?.pta_status ?? null,
+        battery_health_pct: initial?.battery_health_pct ?? null,
         camera_condition: form.camera_condition ? form.camera_condition.trim() : "",
         face_id: form.face_id ? form.face_id.trim() : "",
         speaker: form.speaker ? form.speaker.trim() : "",
@@ -190,16 +183,11 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
         <Section index="1" title="Basic Information">
           <Select
             name="brand"
-            label="Brand"
-            required
+            label="Brand (Optional)"
             placeholder="— Select brand —"
             options={mapOptions(brands, "— Select brand —")}
             value={form.brand}
-            onChange={(e) => {
-              set("brand", e.target.value);
-              setBrandError(null);
-            }}
-            error={brandError ?? undefined}
+            onChange={(e) => set("brand", e.target.value)}
             disabled={saving}
           />
           <Input
@@ -224,15 +212,6 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
             disabled={saving}
           />
           <Select
-            name="color"
-            label="Color"
-            placeholder="— Select color —"
-            options={mapOptions(colors, "— Select color —")}
-            value={form.color ?? ""}
-            onChange={(e) => set("color", e.target.value)}
-            disabled={saving}
-          />
-          <Select
             name="condition"
             label="Condition"
             placeholder="— Select condition —"
@@ -251,15 +230,6 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
             options={mapOptions(rams, "— Select RAM —")}
             value={form.ram ?? ""}
             onChange={(e) => set("ram", e.target.value)}
-            disabled={saving}
-          />
-          <Select
-            name="storage"
-            label="Storage"
-            placeholder="— Select storage —"
-            options={mapOptions(storages, "— Select storage —")}
-            value={form.storage ?? ""}
-            onChange={(e) => set("storage", e.target.value)}
             disabled={saving}
           />
           <Input
@@ -297,37 +267,6 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
           />
         </Section>
 
-        {isAppleBrand && (
-          <Section index="2A" title="iPhone Details" description="Apple/iPhone specific fields.">
-            <Select
-              name="pta_status"
-              label="PTA Status"
-              placeholder="— Select PTA status —"
-              options={mapOptions(ptaStatuses, "— Select PTA status —")}
-              value={form.pta_status ?? ""}
-              onChange={(e) => set("pta_status", e.target.value)}
-              disabled={saving}
-            />
-            <Input
-              name="battery_health_pct"
-              label="Battery Health %"
-              type="number"
-              min="0"
-              max="100"
-              placeholder="e.g. 87"
-              hint="0–100%"
-              value={form.battery_health_pct != null ? String(form.battery_health_pct) : ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "") { set("battery_health_pct", null); return; }
-                const n = parseInt(v);
-                if (!isNaN(n) && n >= 0 && n <= 100) set("battery_health_pct", n);
-              }}
-              disabled={saving}
-            />
-          </Section>
-        )}
-
         <Section
           index="3"
           title="Device Condition"
@@ -364,15 +303,6 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
                 options={mapOptions(screenConditions, "— Select —")}
                 value={form.screen_condition ?? ""}
                 onChange={(e) => set("screen_condition", e.target.value)}
-                disabled={saving}
-              />
-              <Select
-                name="battery_health"
-                label="Battery Health"
-                placeholder="— Select % —"
-                options={mapOptions(batteryHealths, "— Select % —")}
-                value={form.battery_health ?? ""}
-                onChange={(e) => set("battery_health", e.target.value)}
                 disabled={saving}
               />
               <Select

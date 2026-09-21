@@ -9,6 +9,7 @@ const rowTitle = (item: Phone) => `${item.brand} ${item.model}`;
 
 function phoneSubtitle(item: Phone) {
   const parts: string[] = [];
+  if (item.condition) parts.push(item.condition);
   if (item.variant) parts.push(item.variant);
   if (item.storage) parts.push(item.storage);
   if (item.ram) parts.push(item.ram);
@@ -44,6 +45,7 @@ export function InventoryPage() {
       icon={Smartphone}
       showImeiCol
       showImeiButton
+      permissionPrefix="phones"
     />
   );
 }

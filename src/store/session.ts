@@ -23,7 +23,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       const user = await authService.getCurrentUser();
       set({ user, checking: false, error: null });
     } catch (e) {
-      set({ checking: false, error: String(e) });
+      set({ user: null, checking: false, error: String(e) });
     }
   },
 

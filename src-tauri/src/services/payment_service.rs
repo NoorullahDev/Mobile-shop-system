@@ -304,10 +304,19 @@ pub fn edit_payment_details(
     if existing.is_voided {
         return Err(AppError::validation("Cannot edit a voided payment"));
     }
-    let trimmed_account = account_details.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let trimmed_ref = reference.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let trimmed_account = account_details
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let trimmed_ref = reference
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let tx = conn.unchecked_transaction()?;
-    if !payment_repository::edit_payment_details(&tx, id, trimmed_account.as_deref(), trimmed_ref.as_deref())? {
+    if !payment_repository::edit_payment_details(
+        &tx,
+        id,
+        trimmed_account.as_deref(),
+        trimmed_ref.as_deref(),
+    )? {
         return Err(AppError::validation("Payment not found"));
     }
     tx.commit()?;
@@ -616,7 +625,10 @@ mod tests {
         let mut too_much = sample(Some(mid));
         too_much.sale_id = Some(sale_id);
         too_much.amount = 310.01;
-        assert!(matches!(create(&conn, too_much, None), Err(AppError::Validation(_))));
+        assert!(matches!(
+            create(&conn, too_much, None),
+            Err(AppError::Validation(_))
+        ));
 
         let mut exact = sample(Some(mid));
         exact.sale_id = Some(sale_id);
@@ -822,7 +834,9 @@ mod tests {
         assert!((bal_after.total_paid).abs() < 0.01);
         assert_eq!(bal_after.payment_count, 0);
 
-        let fetched = payment_repository::get_by_id_any(&conn, p.id).unwrap().unwrap();
+        let fetched = payment_repository::get_by_id_any(&conn, p.id)
+            .unwrap()
+            .unwrap();
         assert!(fetched.is_voided);
         assert_eq!(fetched.void_reason.as_deref(), Some("Duplicate entry"));
     }
@@ -849,7 +863,9 @@ mod tests {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let breakdown =
             crate::services::report_service::payment_breakdown(&conn, &today, &today).unwrap();
-        let bank = breakdown.iter().find(|b| b.payment_method == "bank_transfer");
+        let bank = breakdown
+            .iter()
+            .find(|b| b.payment_method == "bank_transfer");
         assert!(bank.is_some());
         assert!((bank.unwrap().total - 5000.0).abs() < 0.01);
 
@@ -857,7 +873,9 @@ mod tests {
 
         let breakdown2 =
             crate::services::report_service::payment_breakdown(&conn, &today, &today).unwrap();
-        let bank2 = breakdown2.iter().find(|b| b.payment_method == "bank_transfer");
+        let bank2 = breakdown2
+            .iter()
+            .find(|b| b.payment_method == "bank_transfer");
         assert!(bank2.is_none());
     }
 
@@ -888,17 +906,24 @@ mod tests {
         .unwrap();
         let sp_id = conn.last_insert_rowid();
 
-        let err =
-            crate::services::sale_payment_service::void_sale_payment(&conn, sp_id, "x", None)
-                .unwrap_err();
+        let err = crate::services::sale_payment_service::void_sale_payment(&conn, sp_id, "x", None)
+            .unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
 
         let is_voided: i64 = conn
-            .query_row("SELECT is_voided FROM sale_payments WHERE id = ?1", [sp_id], |r| r.get(0))
+            .query_row(
+                "SELECT is_voided FROM sale_payments WHERE id = ?1",
+                [sp_id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(is_voided, 0);
         let paid: f64 = conn
-            .query_row("SELECT paid_amount FROM sales WHERE id = ?1", [sale_id], |r| r.get(0))
+            .query_row(
+                "SELECT paid_amount FROM sales WHERE id = ?1",
+                [sale_id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(paid, 10000.0);
     }
@@ -922,8 +947,7 @@ mod tests {
         let conn = in_memory_conn();
         let p = create(&conn, sample(None), None).unwrap();
         void_payment(&conn, p.id, "reason", None).unwrap();
-        let err =
-            edit_payment_details(&conn, p.id, Some("x"), Some("y"), None).unwrap_err();
+        let err = edit_payment_details(&conn, p.id, Some("x"), Some("y"), None).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
     }
 }

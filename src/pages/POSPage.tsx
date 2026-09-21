@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   ShoppingCart,
@@ -32,6 +32,8 @@ import type { CreateMemberInput } from "../types/member";
 import type { CreateSaleInput, Sale, SalePaymentInput } from "../types/sale";
 import { PAYMENT_METHOD_LABELS } from "../types/sale";
 import { WARRANTY_OPTIONS, computeWarrantyExpiry } from "../lib/warranty";
+import { PhysicalUnitPicker } from "../components/PhysicalUnitPicker";
+import { can } from "../lib/permissions";
 
 const posImageCache = new Map<string, Promise<string>>();
 
@@ -105,6 +107,11 @@ interface CartLine {
   custom_warranty_expiry: string;
 }
 
+interface PhoneUnitLoad {
+  available: PhoneImei[];
+  tracked: boolean;
+}
+
 let lineKey = 0;
 
 export function POSPage() {
@@ -112,12 +119,19 @@ export function POSPage() {
   const { products, load: loadInventory } = useInventoryStore();
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
+  const canApplyDiscount = can(user?.permissions, "sales:apply_discount");
+  const canCreateCustomer = can(user?.permissions, "members:create");
   const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
   const [productType, setProductType] = useState<"phone" | "accessory">("phone");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [imeiByItem, setImeiByItem] = useState<Record<number, PhoneImei[]>>({});
+  const [imeiLoadingByItem, setImeiLoadingByItem] = useState<Record<number, boolean>>({});
+  const [trackedPhoneByItem, setTrackedPhoneByItem] = useState<Record<number, boolean>>({});
+  const imeiRequests = useRef(new Map<number, Promise<PhoneUnitLoad>>());
+  const [pendingPhone, setPendingPhone] = useState<Product | null>(null);
+  const [pendingImeiId, setPendingImeiId] = useState<number | null>(null);
   const [memberId, setMemberId] = useState("");
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [discount, setDiscount] = useState("0");
@@ -145,12 +159,18 @@ export function POSPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return typeProducts;
-    return typeProducts.filter((p) =>
-      `${p.brand} ${p.model} ${p.color ?? ""} ${p.storage ?? ""} ${p.item_type === "accessory" ? p.model : ""}`
+    return typeProducts.filter((p) => {
+      const unitTerms = p.item_type === "phone"
+        ? (imeiByItem[p.item_id] ?? [])
+            .flatMap((unit) => [unit.color, unit.storage])
+            .filter(Boolean)
+            .join(" ")
+        : "";
+      return `${p.brand} ${p.model} ${p.color ?? ""} ${p.storage ?? ""} ${unitTerms}`
         .toLowerCase()
-        .includes(q),
-    );
-  }, [typeProducts, search]);
+        .includes(q);
+    });
+  }, [imeiByItem, typeProducts, search]);
 
   const createCustomer = async (input: CreateMemberInput): Promise<number> => {
     const created = await memberService.createMember(input);
@@ -160,57 +180,129 @@ export function POSPage() {
     return created.id;
   };
 
-  const loadImeis = async (itemId: number) => {
-    if (imeiByItem[itemId]) return;
-    try {
-      const all = await inventoryService.listPhoneImeis(itemId);
-      setImeiByItem((prev) => ({
-        ...prev,
-        [itemId]: all.filter((i) => i.status === "in_stock"),
-      }));
-    } catch {
-      setImeiByItem((prev) => ({ ...prev, [itemId]: [] }));
+  const loadImeis = (itemId: number): Promise<PhoneUnitLoad> => {
+    if (Object.prototype.hasOwnProperty.call(imeiByItem, itemId)) {
+      return Promise.resolve({
+        available: imeiByItem[itemId],
+        tracked: trackedPhoneByItem[itemId] === true,
+      });
     }
+    const activeRequest = imeiRequests.current.get(itemId);
+    if (activeRequest) return activeRequest;
+
+    setImeiLoadingByItem((prev) => ({ ...prev, [itemId]: true }));
+    const request = inventoryService
+      .listPhoneImeis(itemId)
+      .then((all) => {
+        const result = {
+          available: all.filter((unit) => unit.status === "in_stock"),
+          tracked: all.length > 0,
+        };
+        setImeiByItem((prev) => ({ ...prev, [itemId]: result.available }));
+        setTrackedPhoneByItem((prev) => ({ ...prev, [itemId]: result.tracked }));
+        return result;
+      })
+      .catch((cause) => {
+        setImeiByItem((prev) => {
+          const next = { ...prev };
+          delete next[itemId];
+          return next;
+        });
+        setTrackedPhoneByItem((prev) => {
+          const next = { ...prev };
+          delete next[itemId];
+          return next;
+        });
+        throw cause;
+      })
+      .finally(() => {
+        imeiRequests.current.delete(itemId);
+        setImeiLoadingByItem((prev) => ({ ...prev, [itemId]: false }));
+      });
+    imeiRequests.current.set(itemId, request);
+    return request;
+  };
+
+  useEffect(() => {
+    for (const product of products) {
+      if (product.item_type === "phone") {
+        void loadImeis(product.item_id).catch(() => {});
+      }
+    }
+    // Unit summaries are refreshed when the inventory product list changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
+
+  const appendSinglePhone = (item: Product, imeiId: number | null) => {
+    setCart((prev) => [
+      ...prev,
+      {
+        key: ++lineKey,
+        item_type: "phone",
+        item_id: item.item_id,
+        quantity: 1,
+        imei_id: imeiId,
+        unit_price: item.sale_price,
+        warranty: "",
+        warranty_expiry: null,
+        custom_warranty_expiry: "",
+      },
+    ]);
+  };
+
+  const beginPhoneSelection = async (item: Product) => {
+    setError(null);
+    setPendingPhone(item);
+    setPendingImeiId(null);
+    try {
+      const { available, tracked } = await loadImeis(item.item_id);
+      if (!tracked) {
+        const alreadyInCart = cart
+          .filter((line) => line.item_type === "phone" && line.item_id === item.item_id)
+          .reduce((sum, line) => sum + line.quantity, 0);
+        setPendingPhone(null);
+        if (alreadyInCart >= item.quantity) {
+          setError(`Only ${item.quantity} in stock.`);
+          return;
+        }
+        appendSinglePhone(item, null);
+        return;
+      }
+      const reserved = new Set(
+        cart
+          .map((line) => line.imei_id)
+          .filter((id): id is number => id != null),
+      );
+      if (!available.some((unit) => !reserved.has(unit.id))) {
+        setPendingPhone(null);
+        setError("No available physical units remain for this phone.");
+      }
+    } catch (cause) {
+      setPendingPhone(null);
+      setError(`Could not load physical units: ${String(cause)}`);
+    }
+  };
+
+  const confirmPhoneSelection = () => {
+    if (!pendingPhone || pendingImeiId == null) return;
+    const selectable = (imeiByItem[pendingPhone.item_id] ?? []).some(
+      (unit) =>
+        unit.id === pendingImeiId &&
+        !cart.some((line) => line.imei_id === pendingImeiId),
+    );
+    if (!selectable) {
+      setError("That physical unit is no longer available. Select another unit.");
+      return;
+    }
+    appendSinglePhone(pendingPhone, pendingImeiId);
+    setPendingPhone(null);
+    setPendingImeiId(null);
   };
 
   const addToCart = (item: Product) => {
     setError(null);
     if (item.item_type === "phone") {
-      // A tracked phone is sold as exact physical units: one cart line per
-      // unit, each line carrying its own IMEI. Lines are never merged so a
-      // line never ends up with quantity > 1 and a single IMEI.
-      const inStock = imeiByItem[item.item_id]?.length;
-      if (typeof inStock === "number" && inStock > 0) {
-        const already = cart.filter(
-          (l) => l.item_type === "phone" && l.item_id === item.item_id,
-        ).length;
-        if (already >= inStock) {
-          setError(`Only ${inStock} unit${inStock !== 1 ? "s" : ""} in stock.`);
-          return;
-        }
-      }
-      const existing = cart.find(
-        (l) => l.item_type === "phone" && l.item_id === item.item_id,
-      );
-      if (existing && existing.quantity >= item.quantity) {
-        setError(`Only ${item.quantity} in stock.`);
-        return;
-      }
-      setCart((prev) => [
-        ...prev,
-        {
-          key: ++lineKey,
-          item_type: item.item_type,
-          item_id: item.item_id,
-          quantity: 1,
-          imei_id: null,
-          unit_price: item.sale_price,
-          warranty: "",
-          warranty_expiry: null,
-          custom_warranty_expiry: "",
-        },
-      ]);
-      loadImeis(item.item_id);
+      void beginPhoneSelection(item);
       return;
     }
     const existing = cart.find(
@@ -257,7 +349,7 @@ export function POSPage() {
     if (!line) return;
     const backendMax =
       line.item_type === "phone" &&
-      (imeiByItem[line.item_id]?.length ?? 0) > 0
+      trackedPhoneByItem[line.item_id] === true
         ? 1
         : undefined;
     const product = backendMax
@@ -281,9 +373,28 @@ export function POSPage() {
   const totalPaid = roundMoney(cashPaid + onlinePaid);
   const remaining = roundMoney(Math.max(0, total - totalPaid));
   const change = totalPaid >= total ? totalPaid - total : 0;
+  const pendingUnits = useMemo(() => {
+    if (!pendingPhone) return [];
+    const reserved = new Set(
+      cart
+        .map((line) => line.imei_id)
+        .filter((id): id is number => id != null),
+    );
+    return (imeiByItem[pendingPhone.item_id] ?? []).filter(
+      (unit) => !reserved.has(unit.id),
+    );
+  }, [cart, imeiByItem, pendingPhone]);
 
   const clearCart = () => {
     setCart([]);
+    // Refresh physical availability after checkout so the sold unit cannot
+    // remain selectable in a later order.
+    setImeiByItem({});
+    setImeiLoadingByItem({});
+    setTrackedPhoneByItem({});
+    imeiRequests.current.clear();
+    setPendingPhone(null);
+    setPendingImeiId(null);
     setMemberId("");
     setDiscount("0");
     setSearch("");
@@ -304,7 +415,7 @@ export function POSPage() {
     // A tracked phone must be sold as an exact unit: every line of that phone
     // needs its own IMEI selected, at quantity 1.
     for (const l of cart) {
-      if (l.item_type === "phone" && (imeiByItem[l.item_id]?.length ?? 0) > 0) {
+      if (l.item_type === "phone" && trackedPhoneByItem[l.item_id] === true) {
         if (l.imei_id === null) {
           setError("Select the exact unit (IMEI) being sold for every phone line.");
           return;
@@ -352,8 +463,8 @@ export function POSPage() {
     setError(null);
     try {
       const created = await add(input, user?.id ?? null);
-      await loadInventory();
       clearCart();
+      await loadInventory();
       setJustSold(created);
     } catch (err) {
       setError(String(err));
@@ -483,16 +594,32 @@ export function POSPage() {
           ) : (
             <div className="grid flex-1 grid-cols-2 gap-3 overflow-y-auto pr-1 xl:grid-cols-3" style={{ maxHeight: "100%" }}>
               {filtered.map((p) => {
-                const inCart = cart.find(
+                const cartLines = cart.filter(
                   (l) => l.item_type === p.item_type && l.item_id === p.item_id,
                 );
-                const soldOut = p.quantity === 0 || (inCart ? inCart.quantity >= p.quantity : false);
+                const inCartQuantity = cartLines.reduce((sum, line) => sum + line.quantity, 0);
+                const inCart = inCartQuantity > 0;
+                const phoneUnits = p.item_type === "phone" ? imeiByItem[p.item_id] ?? [] : [];
+                const remainingPhoneUnits = phoneUnits.filter(
+                  (unit) => !cart.some((line) => line.imei_id === unit.id),
+                );
+                const trackedPhone = p.item_type === "phone" && trackedPhoneByItem[p.item_id] === true;
+                const availableCount = trackedPhone
+                  ? remainingPhoneUnits.length
+                  : Math.max(0, p.quantity - inCartQuantity);
+                const storageSummary = trackedPhone
+                  ? Array.from(
+                      new Set(remainingPhoneUnits.map((unit) => unit.storage).filter(Boolean)),
+                    ).join(" / ")
+                  : p.storage ?? "";
+                const soldOut = p.quantity === 0 || availableCount === 0;
                 return (
                   <button
                     key={`${p.item_type}:${p.item_id}`}
                     type="button"
                     onClick={() => addToCart(p)}
-                    className="group flex flex-col rounded-lg text-left transition-all"
+                    disabled={soldOut}
+                    className="group flex flex-col rounded-lg text-left transition-all disabled:cursor-not-allowed disabled:opacity-60"
                     style={{
                       border: `1px solid ${inCart ? "#3B6FD4" : "#E2E8F0"}`,
                       background: inCart ? "#F5F8FF" : "#fff",
@@ -506,9 +633,16 @@ export function POSPage() {
                           {p.brand} {p.model}
                         </div>
                         {p.item_type === "phone" ? (
-                          <div className="truncate text-[11px]" style={{ color: "#64748B" }}>
-                            {[p.storage, p.color].filter(Boolean).join(" · ") || "—"}
-                          </div>
+                          <>
+                            <div className="text-[11px] font-medium" style={{ color: availableCount > 0 ? "#047857" : "#B91C1C" }}>
+                              {imeiLoadingByItem[p.item_id] && !Object.prototype.hasOwnProperty.call(imeiByItem, p.item_id)
+                                ? "Checking units..."
+                                : `${availableCount} available`}
+                            </div>
+                            <div className="truncate text-[11px]" style={{ color: "#64748B" }}>
+                              {storageSummary || "Storage not set"}
+                            </div>
+                          </>
                         ) : (
                           <div className="truncate text-[11px]" style={{ color: "#64748B" }}>
                             {[p.model, p.color].filter(Boolean).join(" · ") || "—"}
@@ -517,25 +651,16 @@ export function POSPage() {
                       </div>
                     </div>
 
-                    {p.item_type === "phone" && p.imei && (
-                      <div className="mt-2 px-3">
-                        <span
-                          className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                          style={{ background: "#EFF6FF", color: "#1D4ED8" }}
-                        >
-                          IMEI: {p.imei}
-                        </span>
-                      </div>
-                    )}
-
                     <div className="mt-2 flex items-end justify-between px-3 pb-3">
                       <div>
                         <div className="text-[15px] font-bold" style={{ color: "#0F172A" }}>
                           {formatMoneyCompact(p.sale_price)}
                         </div>
-                        <div className="text-[11px]" style={{ color: inCart ? "#3B6FD4" : "#64748B" }}>
-                          {inCart ? `${inCart.quantity} in cart` : `${p.quantity} in stock`}
-                        </div>
+                        {inCart && (
+                          <div className="text-[11px]" style={{ color: "#3B6FD4" }}>
+                            {inCartQuantity} in order
+                          </div>
+                        )}
                       </div>
                       <span
                         className="flex h-7 w-7 items-center justify-center rounded-full transition-colors"
@@ -592,7 +717,10 @@ export function POSPage() {
                   const product = products.find(
                     (p) => p.item_type === l.item_type && p.item_id === l.item_id,
                   );
-                  const imeis = l.item_type === "phone" ? imeiByItem[l.item_id] ?? [] : [];
+                  const trackedPhone = l.item_type === "phone" && trackedPhoneByItem[l.item_id] === true;
+                  const selectedUnit = trackedPhone
+                    ? (imeiByItem[l.item_id] ?? []).find((unit) => unit.id === l.imei_id)
+                    : undefined;
                   return (
                     <div
                       key={l.key}
@@ -604,45 +732,82 @@ export function POSPage() {
                           <div className="truncate text-[13px] font-semibold" style={{ color: "#0F172A" }}>
                             {product ? `${product.brand} ${product.model}` : "Product"}
                           </div>
-                          <div className="text-[11px]" style={{ color: "#94A3B8" }}>
-                            {formatMoney(l.unit_price)} each
-                          </div>
+                          {!trackedPhone && (
+                            <div className="text-[11px]" style={{ color: "#94A3B8" }}>
+                              {formatMoney(l.unit_price)} each
+                            </div>
+                          )}
                         </div>
                         <div className="text-[13px] font-bold" style={{ color: "#0F172A" }}>
                           {formatMoney(lineTotal(l))}
                         </div>
                       </div>
 
-                      <div className="mt-2 flex items-center justify-between gap-2">
+                      {selectedUnit && (
                         <div
-                          className="flex items-center gap-1 rounded border"
-                          style={{ borderColor: "#CBD5E1" }}
+                          className="mt-2 min-w-0 rounded-md px-2.5 py-2"
+                          style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}
                         >
-                          <button
-                            type="button"
-                            onClick={() => setQty(l.key, l.quantity - 1)}
-                            className="flex h-7 w-7 items-center justify-center rounded-l hover:bg-slate-100"
-                            style={{ color: "#475569" }}
+                          <div className="text-[11px] leading-4" style={{ color: "#334155" }}>
+                            {[
+                              selectedUnit.color,
+                              selectedUnit.storage,
+                              selectedUnit.pta_status,
+                              selectedUnit.battery_health_pct != null
+                                ? `Battery ${selectedUnit.battery_health_pct}%`
+                                : null,
+                            ].filter(Boolean).join(" · ")}
+                          </div>
+                          <div
+                            className="mt-0.5 truncate font-mono text-[10px]"
+                            style={{ color: "#64748B" }}
+                            title={`IMEI 1: ${selectedUnit.imei}${selectedUnit.imei2 ? ` · IMEI 2: ${selectedUnit.imei2}` : ""}`}
                           >
-                            <Minus className="h-3.5 w-3.5" />
-                          </button>
-                          <input
-                            type="number"
-                            min={1}
-                            value={l.quantity}
-                            onChange={(e) => setQty(l.key, Number(e.target.value) || 1)}
-                            className="h-7 w-10 border-x text-center text-[13px] outline-none"
-                            style={{ borderColor: "#CBD5E1" }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setQty(l.key, l.quantity + 1)}
-                            className="flex h-7 w-7 items-center justify-center rounded-r hover:bg-slate-100"
-                            style={{ color: "#475569" }}
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                          </button>
+                            IMEI 1: ...{selectedUnit.imei.slice(-4)}
+                            {selectedUnit.imei2 ? ` · IMEI 2: ...${selectedUnit.imei2.slice(-4)}` : ""}
+                          </div>
                         </div>
+                      )}
+
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        {trackedPhone ? (
+                          <span
+                            className="rounded-full px-2 py-1 text-[10px] font-semibold"
+                            style={{ background: "#EFF6FF", color: "#1D4ED8" }}
+                          >
+                            1 exact unit
+                          </span>
+                        ) : (
+                          <div
+                            className="flex items-center gap-1 rounded border"
+                            style={{ borderColor: "#CBD5E1" }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setQty(l.key, l.quantity - 1)}
+                              className="flex h-7 w-7 items-center justify-center rounded-l hover:bg-slate-100"
+                              style={{ color: "#475569" }}
+                            >
+                              <Minus className="h-3.5 w-3.5" />
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              value={l.quantity}
+                              onChange={(e) => setQty(l.key, Number(e.target.value) || 1)}
+                              className="h-7 w-10 border-x text-center text-[13px] outline-none"
+                              style={{ borderColor: "#CBD5E1" }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setQty(l.key, l.quantity + 1)}
+                              className="flex h-7 w-7 items-center justify-center rounded-r hover:bg-slate-100"
+                              style={{ color: "#475569" }}
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
                         <button
                           type="button"
                           onClick={() => removeLine(l.key)}
@@ -653,30 +818,6 @@ export function POSPage() {
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
-
-                      {imeis.length > 0 && (
-                        <Select
-                          name={`imei-${l.key}`}
-                          className="mt-2"
-                          options={[
-                            {
-                              value: "",
-                              label:
-                                l.item_type === "phone"
-                                  ? "Select the exact unit (IMEI)"
-                                  : "No IMEI (count as units)",
-                            },
-                            ...imeis.map((i) => ({
-                              value: String(i.id),
-                              label: i.imei,
-                            })),
-                          ]}
-                          value={l.imei_id ? String(l.imei_id) : ""}
-                          onChange={(e) =>
-                            updateLine(l.key, { imei_id: e.target.value ? Number(e.target.value) : null })
-                          }
-                        />
-                      )}
 
                       {l.item_type === "phone" && (
                         <>
@@ -732,7 +873,7 @@ export function POSPage() {
                     onChange={(e) => setMemberId(e.target.value)}
                   />
                 </div>
-                <button
+                {canCreateCustomer && <button
                   type="button"
                   onClick={() => setNewCustomerOpen(true)}
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded transition-colors hover:bg-blue-50"
@@ -740,15 +881,15 @@ export function POSPage() {
                   title="Create new customer"
                 >
                   <UserPlus className="h-4 w-4" />
-                </button>
+                </button>}
               </div>
-              <Input
+              {canApplyDiscount ? <Input
                 label="Discount (Rs)"
                 type="number"
                 min={0}
                 value={discount}
                 onChange={(e) => setDiscount(e.target.value)}
-              />
+              /> : <div />}
             </div>
 
             {/* ── Split Payment: Cash + Online Transfer ──────── */}
@@ -897,6 +1038,53 @@ export function POSPage() {
           </div>
         </div>
       </div>
+
+      {/* Phone unit selection happens before the handset enters Current Order. */}
+      <Modal
+        open={pendingPhone != null}
+        title="Select exact phone"
+        subtitle={pendingPhone
+          ? `${pendingPhone.brand} ${pendingPhone.model} · ${formatMoneyCompact(pendingPhone.sale_price)}`
+          : undefined}
+        onClose={() => {
+          setPendingPhone(null);
+          setPendingImeiId(null);
+        }}
+        size="sm"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setPendingPhone(null);
+                setPendingImeiId(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={pendingImeiId == null || Boolean(pendingPhone && imeiLoadingByItem[pendingPhone.item_id])}
+              onClick={confirmPhoneSelection}
+              icon={<Plus className="h-3.5 w-3.5" />}
+            >
+              Add to Current Order
+            </Button>
+          </>
+        }
+      >
+        {pendingPhone && (
+          <PhysicalUnitPicker
+            name={`pos-phone-unit-${pendingPhone.item_id}`}
+            units={pendingUnits}
+            selectedId={pendingImeiId}
+            unitPrice={pendingPhone.sale_price}
+            loading={imeiLoadingByItem[pendingPhone.item_id] === true}
+            compact
+            onChange={setPendingImeiId}
+          />
+        )}
+      </Modal>
 
       {/* New Customer Modal */}
       <Modal

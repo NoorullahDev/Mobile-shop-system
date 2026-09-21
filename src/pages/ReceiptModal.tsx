@@ -13,6 +13,8 @@ import { useReceiptSettingsStore } from "../store/receiptSettings";
 import { useSettingsStore } from "../store/settings";
 import type { Sale } from "../types/sale";
 import type { Payment } from "../types/payment";
+import { useSessionStore } from "../store/session";
+import { can } from "../lib/permissions";
 
 type PrintType = "thermal_58" | "thermal_80" | "a4";
 
@@ -30,6 +32,7 @@ const PRINT_TYPES: Array<{ value: PrintType; label: string }> = [
 ];
 
 export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptModalProps) {
+  const canPrint = can(useSessionStore((s) => s.user?.permissions), "sales:print");
   const rs = useReceiptSettingsStore();
   const business = useSettingsStore();
   const [error, setError] = useState<string | null>(null);
@@ -124,14 +127,14 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
-          <Button
+          {canPrint && <Button
             variant="primary"
             onClick={handlePrint}
             disabled={!loadedSale}
             icon={<Printer className="h-3.5 w-3.5" />}
           >
             Print Invoice
-          </Button>
+          </Button>}
         </div>
       }
     >
@@ -142,7 +145,7 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
       )}
 
       {/* Print type selector */}
-      <div className="mb-3 flex items-center gap-2">
+      {canPrint && <div className="mb-3 flex items-center gap-2">
         <FileText className="h-4 w-4" style={{ color: "#64748B" }} />
         <span className="text-[12px] font-medium" style={{ color: "#64748B" }}>Print format:</span>
         <div className="flex gap-1">
@@ -161,7 +164,7 @@ export function ReceiptModal({ open, sale, onClose, initialPrintType }: ReceiptM
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       <div className="py-3" style={{ background: "#F7F8FA", borderRadius: 8 }}>
         {!loadedSale ? (

@@ -4,7 +4,9 @@ use rusqlite::Connection;
 
 use crate::errors::AppError;
 use crate::models::sale::{CreateSaleInput, Sale};
-use crate::repositories::{member_repository, product_return_repository, sale_repository, sale_payment_repository};
+use crate::repositories::{
+    member_repository, product_return_repository, sale_payment_repository, sale_repository,
+};
 use crate::services;
 use crate::utils;
 
@@ -20,6 +22,12 @@ struct Line {
     warranty_expiry: Option<String>,
     color: Option<String>,
     imei_snapshot: Option<String>,
+    imei2_snapshot: Option<String>,
+    pta_status: Option<String>,
+    storage: Option<String>,
+    battery_health_pct: Option<i64>,
+    product_name_snapshot: Option<String>,
+    variant_snapshot: Option<String>,
 }
 
 struct PreparedSale {
@@ -57,7 +65,9 @@ fn prepare(
     for item in &input.items {
         if let Some(line_id) = item.sale_item_id {
             if !seen_ids.insert(line_id) {
-                return Err(AppError::validation("A sale item cannot be listed more than once"));
+                return Err(AppError::validation(
+                    "A sale item cannot be listed more than once",
+                ));
             }
         }
         let item_type = match item.item_type.as_str() {
@@ -104,8 +114,7 @@ fn prepare(
             }
         };
 
-        let cost_price = sale_repository::item_cost(conn, &item_type, item.item_id)?
-            .unwrap_or(0.0);
+        let cost_price = sale_repository::item_cost(conn, &item_type, item.item_id)?.unwrap_or(0.0);
 
         let exempt = item
             .sale_item_id
@@ -147,8 +156,18 @@ fn prepare(
 
         let line_total = utils::round2(unit_price * item.quantity as f64);
         subtotal += line_total;
-        let warranty = item.warranty.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
-        let warranty_expiry = item.warranty_expiry.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        let warranty = item
+            .warranty
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let warranty_expiry = item
+            .warranty_expiry
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
         // Colour snapshot: the unit's colour when an IMEI was selected,
         // otherwise the product's nominal colour. Stored on the sale line so
         // old invoices are stable even if product/unit details change later.
@@ -171,6 +190,32 @@ fn prepare(
         } else {
             None
         };
+        let imei2_snapshot = if item_type == "phone" {
+            match line_imei {
+                Some(imei_id) => sale_repository::imei2_value(conn, imei_id)?,
+                None => None,
+            }
+        } else {
+            None
+        };
+        let pta_status = if item_type == "phone" {
+            match line_imei {
+                Some(imei_id) => sale_repository::imei_pta_status(conn, imei_id)?,
+                None => None,
+            }
+        } else {
+            None
+        };
+        let (storage, battery_health_pct) = if item_type == "phone" {
+            match line_imei {
+                Some(imei_id) => sale_repository::imei_unit_details(conn, imei_id)?,
+                None => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+        let (product_name_snapshot, variant_snapshot) =
+            sale_repository::item_sale_identity(conn, &item_type, item.item_id)?;
         lines.push(Line {
             sale_item_id: item.sale_item_id,
             item_type,
@@ -183,6 +228,12 @@ fn prepare(
             warranty_expiry,
             color,
             imei_snapshot,
+            imei2_snapshot,
+            pta_status,
+            storage,
+            battery_health_pct,
+            product_name_snapshot,
+            variant_snapshot,
         });
     }
 
@@ -215,7 +266,9 @@ fn prepare(
         let mut validated = Vec::new();
         for p in &input.payments {
             if !p.amount.is_finite() || p.amount <= 0.0 {
-                return Err(AppError::validation("Each payment amount must be greater than zero"));
+                return Err(AppError::validation(
+                    "Each payment amount must be greater than zero",
+                ));
             }
             let method = p.payment_method.trim().to_lowercase();
             if method.is_empty() {
@@ -236,14 +289,24 @@ fn prepare(
     }?;
 
     let (validated_payments, computed_paid) = payments;
-    let final_paid_amount = if !validated_payments.is_empty() { computed_paid } else { paid_amount };
+    let final_paid_amount = if !validated_payments.is_empty() {
+        computed_paid
+    } else {
+        paid_amount
+    };
     if final_paid_amount > total_amount + 0.005 {
         return Err(AppError::validation(
             "Paid amount cannot be greater than the invoice total",
         ));
     }
 
-    Ok(PreparedSale { lines, total_amount, paid_amount: final_paid_amount, payment_method, payments: validated_payments })
+    Ok(PreparedSale {
+        lines,
+        total_amount,
+        paid_amount: final_paid_amount,
+        payment_method,
+        payments: validated_payments,
+    })
 }
 
 pub fn create(
@@ -251,12 +314,16 @@ pub fn create(
     input: CreateSaleInput,
     actor: Option<i64>,
 ) -> Result<Sale, AppError> {
+    let discount = input.discount;
     let tx = conn.unchecked_transaction()?;
     let sale_id = create_tx(&tx, input, actor)?;
 
     tx.commit()?;
 
     services::record_activity(conn, actor, "sale", "create", Some(sale_id))?;
+    if discount > 0.0 {
+        services::record_activity(conn, actor, "sale", "discount_applied", Some(sale_id))?;
+    }
 
     sale_repository::get_sale_with_items(conn, sale_id)?
         .ok_or_else(|| AppError::Internal("Created sale could not be retrieved".into()))
@@ -316,6 +383,12 @@ pub fn create_tx(
             line.warranty_expiry.as_deref(),
             line.color.as_deref(),
             line.imei_snapshot.as_deref(),
+            line.imei2_snapshot.as_deref(),
+            line.pta_status.as_deref(),
+            line.storage.as_deref(),
+            line.battery_health_pct,
+            line.product_name_snapshot.as_deref(),
+            line.variant_snapshot.as_deref(),
         )?;
 
         if !sale_repository::decrement_stock(tx, &line.item_type, line.item_id, line.quantity)? {
@@ -340,6 +413,7 @@ pub fn update(
     actor: Option<i64>,
 ) -> Result<Sale, AppError> {
     let old = get(conn, id)?;
+    let discount_changed = (old.discount - input.discount).abs() > 0.005;
     let old_ids: HashSet<i64> = old.items.iter().map(|item| item.id).collect();
     let returned = product_return_repository::returned_qty_by_sale_items(
         conn,
@@ -349,7 +423,9 @@ pub fn update(
     for item in &input.items {
         if let Some(line_id) = item.sale_item_id {
             if !old_ids.contains(&line_id) {
-                return Err(AppError::validation("A sale item does not belong to this invoice"));
+                return Err(AppError::validation(
+                    "A sale item does not belong to this invoice",
+                ));
             }
             let old_line = old.items.iter().find(|line| line.id == line_id).unwrap();
             let returned_qty = returned.get(&line_id).copied().unwrap_or(0);
@@ -372,7 +448,10 @@ pub fn update(
     }
     for old_line in &old.items {
         if returned.get(&old_line.id).copied().unwrap_or(0) > 0
-            && !input.items.iter().any(|item| item.sale_item_id == Some(old_line.id))
+            && !input
+                .items
+                .iter()
+                .any(|item| item.sale_item_id == Some(old_line.id))
         {
             return Err(AppError::validation(
                 "A sale line with an existing return cannot be removed",
@@ -383,7 +462,12 @@ pub fn update(
     let tx = conn.unchecked_transaction()?;
     let mut imei_exempt = HashSet::new();
     for old_line in &old.items {
-        sale_repository::increment_stock(&tx, &old_line.item_type, old_line.item_id, old_line.quantity)?;
+        sale_repository::increment_stock(
+            &tx,
+            &old_line.item_type,
+            old_line.item_id,
+            old_line.quantity,
+        )?;
         let has_return = returned.get(&old_line.id).copied().unwrap_or(0) > 0;
         if has_return {
             imei_exempt.insert(old_line.id);
@@ -394,7 +478,32 @@ pub fn update(
         }
     }
 
-    let prepared = prepare(&tx, &input, &imei_exempt)?;
+    let mut prepared = prepare(&tx, &input, &imei_exempt)?;
+    // Editing payment, notes, discount, warranty, or price must not refresh an
+    // unchanged physical unit from mutable inventory data. Keep the original
+    // sale-time identity snapshot unless the line is explicitly changed to a
+    // different product/unit.
+    for line in &mut prepared.lines {
+        let Some(line_id) = line.sale_item_id else {
+            continue;
+        };
+        let Some(old_line) = old.items.iter().find(|item| item.id == line_id) else {
+            continue;
+        };
+        if line.item_type == old_line.item_type
+            && line.item_id == old_line.item_id
+            && line.imei_id == old_line.imei_id
+        {
+            line.color = old_line.color.clone();
+            line.imei_snapshot = old_line.imei.clone();
+            line.imei2_snapshot = old_line.imei2.clone();
+            line.pta_status = old_line.pta_status.clone();
+            line.storage = old_line.storage.clone();
+            line.battery_health_pct = old_line.battery_health_pct;
+            line.product_name_snapshot = old_line.product_name.clone();
+            line.variant_snapshot = old_line.variant.clone();
+        }
+    }
     let linked_due_payments: f64 = tx.query_row(
         "SELECT COALESCE(SUM(amount), 0) FROM payments
          WHERE sale_id = ?1 AND is_deleted = 0 AND is_voided = 0 AND status = 'completed'",
@@ -412,7 +521,11 @@ pub fn update(
             "The corrected invoice total cannot be lower than its recorded payments",
         ));
     }
-    let notes = input.notes.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let notes = input
+        .notes
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     sale_repository::update_sale(
         &tx,
         id,
@@ -424,7 +537,11 @@ pub fn update(
         notes,
     )?;
 
-    let new_ids: HashSet<i64> = prepared.lines.iter().filter_map(|line| line.sale_item_id).collect();
+    let new_ids: HashSet<i64> = prepared
+        .lines
+        .iter()
+        .filter_map(|line| line.sale_item_id)
+        .collect();
     for old_line in &old.items {
         if !new_ids.contains(&old_line.id) {
             sale_repository::delete_sale_item(&tx, old_line.id)?;
@@ -433,23 +550,60 @@ pub fn update(
     for line in &prepared.lines {
         if let Some(line_id) = line.sale_item_id {
             sale_repository::update_sale_item(
-                &tx, line_id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price, line.cost_price,
-                line.warranty.as_deref(), line.warranty_expiry.as_deref(), line.color.as_deref(), line.imei_snapshot.as_deref(),
+                &tx,
+                line_id,
+                &line.item_type,
+                line.item_id,
+                line.imei_id,
+                line.quantity,
+                line.unit_price,
+                line.cost_price,
+                line.warranty.as_deref(),
+                line.warranty_expiry.as_deref(),
+                line.color.as_deref(),
+                line.imei_snapshot.as_deref(),
+                line.imei2_snapshot.as_deref(),
+                line.pta_status.as_deref(),
+                line.storage.as_deref(),
+                line.battery_health_pct,
+                line.product_name_snapshot.as_deref(),
+                line.variant_snapshot.as_deref(),
             )?;
         } else {
             sale_repository::insert_sale_item(
-                &tx, id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price, line.cost_price,
-                line.warranty.as_deref(), line.warranty_expiry.as_deref(), line.color.as_deref(), line.imei_snapshot.as_deref(),
+                &tx,
+                id,
+                &line.item_type,
+                line.item_id,
+                line.imei_id,
+                line.quantity,
+                line.unit_price,
+                line.cost_price,
+                line.warranty.as_deref(),
+                line.warranty_expiry.as_deref(),
+                line.color.as_deref(),
+                line.imei_snapshot.as_deref(),
+                line.imei2_snapshot.as_deref(),
+                line.pta_status.as_deref(),
+                line.storage.as_deref(),
+                line.battery_health_pct,
+                line.product_name_snapshot.as_deref(),
+                line.variant_snapshot.as_deref(),
             )?;
         }
         if !sale_repository::decrement_stock(&tx, &line.item_type, line.item_id, line.quantity)? {
             return Err(AppError::validation("Not enough stock for this correction"));
         }
-        let is_returned_line = line.sale_item_id.map(|line_id| imei_exempt.contains(&line_id)).unwrap_or(false);
+        let is_returned_line = line
+            .sale_item_id
+            .map(|line_id| imei_exempt.contains(&line_id))
+            .unwrap_or(false);
         if line.item_type == "phone" && !is_returned_line {
             if let Some(imei_id) = line.imei_id {
                 if !sale_repository::mark_imei_sold(&tx, imei_id, line.item_id)? {
-                    return Err(AppError::validation("IMEI is not available for this correction"));
+                    return Err(AppError::validation(
+                        "IMEI is not available for this correction",
+                    ));
                 }
             }
         }
@@ -474,6 +628,9 @@ pub fn update(
 
     tx.commit()?;
     services::record_activity(conn, actor, "sale", "update", Some(id))?;
+    if discount_changed {
+        services::record_activity(conn, actor, "sale", "discount_changed", Some(id))?;
+    }
     get(conn, id)
 }
 
@@ -629,7 +786,10 @@ mod tests {
         let id = phone(&conn, 5, 100.0);
         let mut single = sale_input(id, 1);
         single.paid_amount = Some(100.01);
-        assert!(matches!(create(&conn, single, None), Err(AppError::Validation(_))));
+        assert!(matches!(
+            create(&conn, single, None),
+            Err(AppError::Validation(_))
+        ));
 
         let mut split = sale_input(id, 1);
         split.paid_amount = None;
@@ -647,7 +807,10 @@ mod tests {
                 notes: None,
             },
         ];
-        assert!(matches!(create(&conn, split, None), Err(AppError::Validation(_))));
+        assert!(matches!(
+            create(&conn, split, None),
+            Err(AppError::Validation(_))
+        ));
         assert!(list(&conn, None).unwrap().is_empty());
         assert_eq!(phone_service::get(&conn, id).unwrap().quantity, 5);
     }
@@ -723,8 +886,13 @@ mod tests {
             .find(|sp| sp.payment_method == "card")
             .unwrap()
             .clone();
-        crate::services::sale_payment_service::void_sale_payment(&conn, card_sp.id, "customer paid twice", None)
-            .unwrap();
+        crate::services::sale_payment_service::void_sale_payment(
+            &conn,
+            card_sp.id,
+            "customer paid twice",
+            None,
+        )
+        .unwrap();
         assert!((get(&conn, sale.id).unwrap().paid_amount - 40.0).abs() < 0.01);
 
         let mut correction = sale_input(id, 1);
@@ -749,7 +917,11 @@ mod tests {
         assert_eq!(voided.amount, 60.0);
         assert_eq!(voided.void_reason.as_deref(), Some("customer paid twice"));
 
-        let active: Vec<_> = corrected.sale_payments.iter().filter(|sp| !sp.is_voided).collect();
+        let active: Vec<_> = corrected
+            .sale_payments
+            .iter()
+            .filter(|sp| !sp.is_voided)
+            .collect();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].amount, 40.0);
         assert!((corrected.paid_amount - 40.0).abs() < 0.01);
@@ -765,7 +937,11 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: id,
                 imei: "111111111111111".into(),
+                imei2: None,
                 color: None,
+                pta_status: None,
+                storage: None,
+                battery_health_pct: None,
             },
         )
         .unwrap();
@@ -797,7 +973,11 @@ mod tests {
                     AddPhoneImeiInput {
                         phone_id: id,
                         imei: imei.into(),
+                        imei2: None,
                         color: Some(colour.into()),
+                        pta_status: None,
+                        storage: None,
+                        battery_health_pct: None,
                     },
                 )
                 .unwrap(),
@@ -823,9 +1003,18 @@ mod tests {
             .iter()
             .map(|i| (i.imei.clone(), i.status.clone()))
             .collect();
-        assert_eq!(by_imei.get("762387998439").map(String::as_str), Some("sold"));
-        assert_eq!(by_imei.get("762387998440").map(String::as_str), Some("in_stock"));
-        assert_eq!(by_imei.get("762387998441").map(String::as_str), Some("in_stock"));
+        assert_eq!(
+            by_imei.get("762387998439").map(String::as_str),
+            Some("sold")
+        );
+        assert_eq!(
+            by_imei.get("762387998440").map(String::as_str),
+            Some("in_stock")
+        );
+        assert_eq!(
+            by_imei.get("762387998441").map(String::as_str),
+            Some("in_stock")
+        );
 
         // The sale line carries the sale-time IMEI + colour snapshot.
         let got = get(&conn, sale.id).unwrap();
@@ -852,7 +1041,11 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: id,
                 imei: "700000000000001".into(),
+                imei2: None,
                 color: Some("Purple".into()),
+                pta_status: None,
+                storage: None,
+                battery_health_pct: None,
             },
         )
         .unwrap();
@@ -884,8 +1077,9 @@ mod tests {
         let id = phone(&conn, 0, 100.0);
         let mut unit_ids: Vec<i64> = Vec::new();
         let mut colours: Vec<String> = Vec::new();
-        for (ci, (colour, count)) in
-            [("Green", 3usize), ("Blue", 3), ("Natural Titanium", 4)].iter().enumerate()
+        for (ci, (colour, count)) in [("Green", 3usize), ("Blue", 3), ("Natural Titanium", 4)]
+            .iter()
+            .enumerate()
         {
             for k in 0..*count {
                 unit_ids.push(
@@ -894,7 +1088,11 @@ mod tests {
                         AddPhoneImeiInput {
                             phone_id: id,
                             imei: format!("1000000{:04}{ci}{k}", k),
+                            imei2: None,
                             color: Some(colour.to_string()),
+                            pta_status: None,
+                            storage: None,
+                            battery_health_pct: None,
                         },
                     )
                     .unwrap()
@@ -956,7 +1154,11 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id: id,
                 imei: "999999999999999".into(),
+                imei2: None,
                 color: None,
+                pta_status: None,
+                storage: None,
+                battery_health_pct: None,
             },
         )
         .unwrap();
@@ -1153,6 +1355,8 @@ mod tests {
 
         assert_eq!(phone_service::get(&conn, id).unwrap().quantity, 5);
         assert!(get(&conn, sale.id).is_err());
-        assert!(product_return_service::list(&conn, None).unwrap().is_empty());
+        assert!(product_return_service::list(&conn, None)
+            .unwrap()
+            .is_empty());
     }
 }

@@ -15,6 +15,8 @@ import { formatDate, formatMoneyCompact, toLocalDate } from "../lib/format";
 import * as staffService from "../services/staffService";
 import type { SalaryInput, SalaryRecord, StaffInput, StaffMember } from "../types/staff";
 import type { UserDetail } from "../types/user";
+import { useSessionStore } from "../store/session";
+import { can } from "../lib/permissions";
 
 const today = () => toLocalDate(new Date());
 const thisMonth = () => {
@@ -31,6 +33,10 @@ function formatMonth(month: string) {
 
 export function StaffSection({ users, actor }: { users: UserDetail[]; actor: number | null }) {
   const { toast } = useToast();
+  const permissions = useSessionStore((s) => s.user?.permissions ?? []);
+  const canCreate = can(permissions, "staff:create");
+  const canUpdate = can(permissions, "staff:update");
+  const canDelete = can(permissions, "staff:delete");
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -83,9 +89,9 @@ export function StaffSection({ users, actor }: { users: UserDetail[]; actor: num
               ]}
               className="w-40"
             />
-            <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => { setEditing(null); setModal("create"); }}>
+            {canCreate && <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => { setEditing(null); setModal("create"); }}>
               Add Staff
-            </Button>
+            </Button>}
           </div>
         }
         noPadding
@@ -127,8 +133,8 @@ export function StaffSection({ users, actor }: { users: UserDetail[]; actor: num
                     <td style={{ color: "#64748B", fontSize: "12px" }}>{s.username ?? "Not linked"}</td>
                     <td>
                       <div className="flex justify-end gap-1">
-                        <IconButton title="Edit staff" onClick={() => { setEditing(s); setModal("edit"); }}><Pencil className="h-3.5 w-3.5" /></IconButton>
-                        <IconButton title="Delete staff" danger onClick={() => setDeleting(s)}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+                        {canUpdate && <IconButton title="Edit staff" onClick={() => { setEditing(s); setModal("edit"); }}><Pencil className="h-3.5 w-3.5" /></IconButton>}
+                        {canDelete && <IconButton title="Delete staff" danger onClick={() => setDeleting(s)}><Trash2 className="h-3.5 w-3.5" /></IconButton>}
                       </div>
                     </td>
                   </tr>
@@ -163,6 +169,10 @@ export function StaffSection({ users, actor }: { users: UserDetail[]; actor: num
 
 export function SalarySection({ actor }: { actor: number | null }) {
   const { toast } = useToast();
+  const permissions = useSessionStore((s) => s.user?.permissions ?? []);
+  const canCreate = can(permissions, "staff:create");
+  const canUpdate = can(permissions, "staff:update");
+  const canDelete = can(permissions, "staff:delete");
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [salaries, setSalaries] = useState<SalaryRecord[]>([]);
   const [search, setSearch] = useState("");
@@ -238,9 +248,9 @@ export function SalarySection({ actor }: { actor: number | null }) {
               { value: "", label: "All Staff" },
               ...staff.map((s) => ({ value: String(s.id), label: s.name })),
             ]} />
-            <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => { setEditing(null); setModal("create"); }}>
+            {canCreate && <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => { setEditing(null); setModal("create"); }}>
               Record Salary
-            </Button>
+            </Button>}
           </div>
         }
         noPadding
@@ -289,8 +299,8 @@ export function SalarySection({ actor }: { actor: number | null }) {
                     </td>
                     <td>
                       <div className="flex justify-end gap-1">
-                        <IconButton title="Edit salary" onClick={() => { setEditing(s); setModal("edit"); }}><Pencil className="h-3.5 w-3.5" /></IconButton>
-                        <IconButton title="Delete salary" danger onClick={() => setDeleting(s)}><Trash2 className="h-3.5 w-3.5" /></IconButton>
+                        {canUpdate && <IconButton title="Edit salary" onClick={() => { setEditing(s); setModal("edit"); }}><Pencil className="h-3.5 w-3.5" /></IconButton>}
+                        {canDelete && <IconButton title="Delete salary" danger onClick={() => setDeleting(s)}><Trash2 className="h-3.5 w-3.5" /></IconButton>}
                       </div>
                     </td>
                   </tr>

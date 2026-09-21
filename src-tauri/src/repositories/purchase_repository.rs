@@ -212,7 +212,8 @@ pub fn imeis_in_use(
         let placeholders = vec!["?"; chunk.len()].join(",");
         let sql = format!(
             "SELECT value FROM (
-               SELECT imei AS value FROM phone_imeis
+             SELECT imei AS value FROM phone_imeis
+               UNION SELECT imei2 AS value FROM phone_imeis WHERE imei2 IS NOT NULL
                UNION SELECT imei AS value FROM phones WHERE imei IS NOT NULL AND is_deleted = 0
                UNION SELECT imei2 AS value FROM phones WHERE imei2 IS NOT NULL AND is_deleted = 0
              ) WHERE value IN ({placeholders})"
@@ -228,32 +229,42 @@ pub fn imeis_in_use(
 }
 
 /// Inserts several IMEIs for one phone, batched to stay within
-/// SQLite's default 999-variable parameter limit (3 params per row).
-/// `colors` is aligned positionally with `imeis`; when shorter, missing
-/// entries are stored without a colour.
+/// SQLite's default 999-variable parameter limit. Every row is one physical
+/// handset; the optional second IMEI never creates another stock unit.
 pub fn insert_imeis(
     conn: &Connection,
     phone_id: i64,
     imeis: &[String],
+    imei2s: &[Option<String>],
     colors: &[Option<String>],
+    pta_statuses: &[Option<String>],
+    storages: &[Option<String>],
+    battery_healths: &[Option<i64>],
 ) -> Result<(), AppError> {
     if imeis.is_empty() {
         return Ok(());
     }
-    debug_assert!(imeis.len() >= colors.len());
-    const BATCH: usize = 330;
+    const BATCH: usize = 140;
     for (ci, chunk) in imeis.chunks(BATCH).enumerate() {
-        let placeholders = vec!["(?1, ?, ?)"; chunk.len()].join(",");
-        let sql = format!("INSERT INTO phone_imeis (phone_id, imei, color) VALUES {placeholders}");
+        let placeholders = vec!["(?1, ?, ?, ?, ?, ?, ?)"; chunk.len()].join(",");
+        let sql = format!("INSERT INTO phone_imeis (phone_id, imei, imei2, color, pta_status, storage, battery_health_pct) VALUES {placeholders}");
         let mut params: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::from(phone_id)];
         let offset = ci * BATCH;
         for (j, imei) in chunk.iter().enumerate() {
             params.push(rusqlite::types::Value::from(imei.clone()));
+            let imei2 = imei2s.get(offset + j).and_then(|v| v.clone());
+            params.push(imei2.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
             let color = colors.get(offset + j).and_then(|c| c.clone());
             params.push(match color {
                 Some(c) => rusqlite::types::Value::from(c),
                 None => rusqlite::types::Value::Null,
             });
+            let pta = pta_statuses.get(offset + j).and_then(|v| v.clone());
+            params.push(pta.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
+            let storage = storages.get(offset + j).and_then(|v| v.clone());
+            params.push(storage.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
+            let battery = battery_healths.get(offset + j).copied().flatten();
+            params.push(battery.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
         }
         conn.execute(&sql, rusqlite::params_from_iter(params.iter()))?;
     }
@@ -332,6 +343,10 @@ fn list_items(conn: &Connection, purchase_id: i64) -> Result<Vec<PurchaseItem>, 
             line_total: (unit_cost * quantity as f64 * 100.0).round() / 100.0,
             serials: parse_serials(r.get("serials")?),
             imei_colors: Vec::new(),
+            imei2s: Vec::new(),
+            imei_pta_statuses: Vec::new(),
+            imei_storages: Vec::new(),
+            imei_battery_healths: Vec::new(),
         })
     })?;
     let mut out = Vec::new();
@@ -353,23 +368,44 @@ fn attach_imei_colors(conn: &Connection, items: &mut Vec<PurchaseItem>) -> Resul
             continue;
         }
         let mut colors: Vec<String> = vec![String::new(); it.serials.len()];
+        let mut imei2s: Vec<String> = vec![String::new(); it.serials.len()];
+        let mut pta_statuses: Vec<String> = vec![String::new(); it.serials.len()];
+        let mut storages: Vec<String> = vec![String::new(); it.serials.len()];
+        let mut battery_healths: Vec<Option<i64>> = vec![None; it.serials.len()];
         const BATCH: usize = 400;
         for chunk in it.serials.chunks(BATCH) {
             let placeholders = vec!["?"; chunk.len()].join(",");
-            let sql = format!("SELECT imei, color FROM phone_imeis WHERE imei IN ({placeholders})");
+            let sql = format!("SELECT imei, imei2, color, pta_status, storage, battery_health_pct FROM phone_imeis WHERE imei IN ({placeholders})");
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(
                 rusqlite::params_from_iter(chunk.iter().map(|s| s.as_str())),
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                        r.get::<_, Option<i64>>(5)?,
+                    ))
+                },
             )?;
             for r in rows {
-                let (imei, color) = r?;
+                let (imei, imei2, color, pta_status, storage, battery_health) = r?;
                 if let Some(idx) = it.serials.iter().position(|s| *s == imei) {
+                    imei2s[idx] = imei2.unwrap_or_default();
                     colors[idx] = color.unwrap_or_default();
+                    pta_statuses[idx] = pta_status.unwrap_or_default();
+                    storages[idx] = storage.unwrap_or_default();
+                    battery_healths[idx] = battery_health;
                 }
             }
         }
         it.imei_colors = colors;
+        it.imei2s = imei2s;
+        it.imei_pta_statuses = pta_statuses;
+        it.imei_storages = storages;
+        it.imei_battery_healths = battery_healths;
     }
     Ok(())
 }
@@ -403,6 +439,10 @@ fn item_from_r(r: &rusqlite::Row) -> rusqlite::Result<PurchaseItem> {
         line_total: (unit_cost * quantity as f64 * 100.0).round() / 100.0,
         serials: parse_serials(r.get("serials")?),
         imei_colors: Vec::new(),
+        imei2s: Vec::new(),
+        imei_pta_statuses: Vec::new(),
+        imei_storages: Vec::new(),
+        imei_battery_healths: Vec::new(),
     })
 }
 
@@ -727,10 +767,7 @@ pub fn delete_purchase_imeis(
     Ok(())
 }
 
-pub fn delete_purchase(
-    conn: &Connection,
-    purchase_id: i64,
-) -> Result<bool, AppError> {
+pub fn delete_purchase(conn: &Connection, purchase_id: i64) -> Result<bool, AppError> {
     let affected = conn.execute(
         "DELETE FROM purchases WHERE id = ?1",
         rusqlite::params![purchase_id],
@@ -770,10 +807,7 @@ pub fn update_purchase_record(
     Ok(affected > 0)
 }
 
-pub fn delete_purchase_items(
-    conn: &Connection,
-    purchase_id: i64,
-) -> Result<bool, AppError> {
+pub fn delete_purchase_items(conn: &Connection, purchase_id: i64) -> Result<bool, AppError> {
     let affected = conn.execute(
         "DELETE FROM purchase_items WHERE purchase_id = ?1",
         rusqlite::params![purchase_id],

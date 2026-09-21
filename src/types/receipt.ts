@@ -65,6 +65,10 @@ export interface ReceiptItemData {
   color?: string | null;
   serial?: string | null;
   imei?: string | null;
+  imei2?: string | null;
+  pta_status?: string | null;
+  storage?: string | null;
+  battery_health_pct?: number | null;
   qty: number;
   price: number;
   total: number;

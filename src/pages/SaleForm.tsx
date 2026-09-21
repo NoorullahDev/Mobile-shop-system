@@ -10,6 +10,9 @@ import type { CreateSaleInput, Sale, SaleItemInput, SalePaymentInput } from "../
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "../types/sale";
 import * as inventoryService from "../services/inventoryService";
 import { roundMoney, formatMoneyCompact } from "../lib/format";
+import { PhysicalUnitPicker } from "../components/PhysicalUnitPicker";
+import { useSessionStore } from "../store/session";
+import { can } from "../lib/permissions";
 
 interface Line {
   key: number;
@@ -42,6 +45,7 @@ interface SaleFormProps {
 let lineKey = 0;
 
 export function SaleForm({ onSubmit, onCancel, products, members, initialSale }: SaleFormProps) {
+  const canApplyDiscount = can(useSessionStore((s) => s.user?.permissions), "sales:apply_discount");
   const inStock = useMemo(
     () => products.filter((p) => p.quantity > 0 || initialSale?.items.some((item) => item.item_type === p.item_type && item.item_id === p.item_id)),
     [products, initialSale],
@@ -56,6 +60,7 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
     unit_price: item.unit_price,
   })) ?? []);
   const [imeiByItem, setImeiByItem] = useState<Record<number, PhoneImei[]>>({});
+  const [imeiLoadingByItem, setImeiLoadingByItem] = useState<Record<number, boolean>>({});
   const [discount, setDiscount] = useState(String(initialSale?.discount ?? 0));
   const initialInvoicePayments = (initialSale?.sale_payments ?? []).filter((sp) => !sp.is_voided);
   const [paidAmount, setPaidAmount] = useState(initialSale
@@ -100,6 +105,7 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
   };
 
   const loadImeis = async (itemId: number) => {
+    setImeiLoadingByItem((prev) => ({ ...prev, [itemId]: true }));
     try {
       const all = await inventoryService.listPhoneImeis(itemId);
       const selectedIds = new Set(lines.filter((line) => line.item_id === itemId).map((line) => line.imei_id));
@@ -107,6 +113,8 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
       setImeiByItem((prev) => ({ ...prev, [itemId]: inStockImeis }));
     } catch {
       setImeiByItem((prev) => ({ ...prev, [itemId]: [] }));
+    } finally {
+      setImeiLoadingByItem((prev) => ({ ...prev, [itemId]: false }));
     }
   };
 
@@ -157,11 +165,6 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
     value: `${p.item_type}:${p.item_id}`,
     label: `${p.display_name} — ${p.quantity} in stock`,
   }));
-
-  const emeiOptionsFor = (itemId: number) => [
-    { value: "", label: "— No IMEI (count as units) —" },
-    ...(imeiByItem[itemId] ?? []).map((i) => ({ value: String(i.id), label: i.imei })),
-  ];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -242,7 +245,15 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
 
       <div className="flex flex-col gap-3">
         {lines.map((l, index) => {
-          const imeis = l.item_type === "phone" ? imeiByItem[l.item_id] ?? [] : [];
+          const imeis = l.item_type === "phone"
+            ? (imeiByItem[l.item_id] ?? []).filter(
+                (unit) =>
+                  unit.id === l.imei_id ||
+                  !lines.some(
+                    (other) => other.key !== l.key && other.imei_id === unit.id,
+                  ),
+              )
+            : [];
           return (
             <div
               key={l.key}
@@ -311,18 +322,16 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
                     {formatMoneyCompact(lineTotal(l))}
                   </div>
                 </div>
-                {imeis.length > 0 && (
+                {l.item_type === "phone" && (
                   <div className="col-span-12 mt-1">
-                    <Select
+                    <PhysicalUnitPicker
                       name={`imei-${l.key}`}
-                      label={
-                        l.item_type === "phone"
-                          ? "IMEI Number (Select the exact unit)"
-                          : "IMEI Number (Optional)"
-                      }
-                      options={emeiOptionsFor(l.item_id)}
-                      value={l.imei_id ? String(l.imei_id) : ""}
-                      onChange={(e) => updateLine(l.key, { imei_id: e.target.value ? Number(e.target.value) : null })}
+                      units={imeis}
+                      selectedId={l.imei_id}
+                      unitPrice={l.unit_price}
+                      loading={imeiLoadingByItem[l.item_id] === true}
+                      allowSelectedSoldUnit={Boolean(initialSale)}
+                      onChange={(imeiId) => updateLine(l.key, { imei_id: imeiId })}
                       disabled={saving}
                     />
                   </div>
@@ -371,7 +380,8 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
           min="0"
           value={discount}
           onChange={(e) => setDiscount(e.target.value)}
-          disabled={saving}
+          disabled={saving || !canApplyDiscount}
+          hint={!canApplyDiscount ? "Your role cannot apply or change discounts" : undefined}
         />
         {!useSplitPayments && (
           <Input

@@ -59,6 +59,8 @@ pub struct ReturnItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub imei: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub imei2: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_no: Option<String>,
     pub quantity: i64,
     pub unit_price: f64,
@@ -71,6 +73,12 @@ pub struct ReturnItem {
     pub restocked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pta_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery_health_pct: Option<i64>,
     pub created_at: String,
 }
 

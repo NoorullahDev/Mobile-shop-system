@@ -43,8 +43,13 @@ pub struct Line {
     pub warranty: Option<String>,
     pub condition: Option<String>,
     pub imeis: Vec<String>,
+    /// Optional second IMEI aligned with `imeis`; it belongs to the same unit.
+    pub imei2s: Vec<Option<String>>,
     /// Unit colours aligned positionally with `imeis` (phone lines only).
     pub imei_colors: Vec<Option<String>>,
+    pub imei_pta_statuses: Vec<Option<String>>,
+    pub imei_storages: Vec<Option<String>>,
+    pub imei_battery_healths: Vec<Option<i64>>,
 }
 
 pub fn prepare_purchase_lines(
@@ -104,7 +109,11 @@ pub fn prepare_purchase_lines(
         }
 
         let mut seen: Vec<String> = Vec::new();
+        let mut imei2s: Vec<Option<String>> = Vec::new();
         let mut imei_colors: Vec<Option<String>> = Vec::new();
+        let mut imei_pta_statuses: Vec<Option<String>> = Vec::new();
+        let mut imei_storages: Vec<Option<String>> = Vec::new();
+        let mut imei_battery_healths: Vec<Option<i64>> = Vec::new();
         if item_type == "phone" {
             // Colours are indexed by the same position as the original IMEI input,
             // so blank (skipped) entries do not shift colour alignment.
@@ -121,12 +130,61 @@ pub fn prepare_purchase_lines(
                     return Err(AppError::validation(format!("IMEI {imei} is duplicated")));
                 }
                 seen.push(imei.clone());
+                let imei2 = item
+                    .imei2s
+                    .get(i)
+                    .map(|s| s.trim().to_uppercase())
+                    .filter(|s| !s.is_empty());
+                if let Some(second) = imei2.as_deref() {
+                    if second.len() < 8 {
+                        return Err(AppError::validation("IMEI 2 must be at least 8 characters"));
+                    }
+                    if second == imei {
+                        return Err(AppError::validation(
+                            "IMEI 1 and IMEI 2 must be different for a physical unit",
+                        ));
+                    }
+                    all_imeis.push(second.to_string());
+                }
+                imei2s.push(imei2);
                 imei_colors.push(
                     colors
                         .get(i)
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty()),
                 );
+                let pta = item
+                    .imei_pta_statuses
+                    .get(i)
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(ToOwned::to_owned);
+                imei_pta_statuses.push(pta);
+                let storage = item
+                    .imei_storages
+                    .get(i)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                if !item.imei_storages.is_empty() && storage.is_none() {
+                    return Err(AppError::validation(
+                        "Storage is required for every physical phone unit",
+                    ));
+                }
+                imei_storages.push(storage);
+                let battery_health = item.imei_battery_healths.get(i).copied().flatten();
+                if !item.imei_battery_healths.is_empty() && battery_health.is_none() {
+                    return Err(AppError::validation(
+                        "Battery health is required for every physical phone unit",
+                    ));
+                }
+                if let Some(value) = battery_health {
+                    if !(0..=100).contains(&value) {
+                        return Err(AppError::validation(
+                            "Battery health must be between 0 and 100",
+                        ));
+                    }
+                }
+                imei_battery_healths.push(battery_health);
                 all_imeis.push(imei.clone());
             }
             if seen.len() != item.quantity as usize {
@@ -154,7 +212,11 @@ pub fn prepare_purchase_lines(
             warranty: trim(&item.warranty),
             condition: trim(&item.condition),
             imeis: seen,
+            imei2s,
             imei_colors,
+            imei_pta_statuses,
+            imei_storages,
+            imei_battery_healths,
         });
     }
 
@@ -167,7 +229,6 @@ pub fn create_purchase(
     actor: Option<i64>,
 ) -> Result<Purchase, AppError> {
     let (lines, all_imeis, subtotal) = prepare_purchase_lines(conn, &input)?;
-
 
     // One query for the whole batch (duplicates across line items are handled
     // by the per-line `seen` check plus a global HashSet scan below).
@@ -275,7 +336,16 @@ pub fn create_purchase(
             line.selling_price,
         )?;
         if line.item_type == "phone" {
-            purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis, &line.imei_colors)?;
+            purchase_repository::insert_imeis(
+                &tx,
+                line.item_id,
+                &line.imeis,
+                &line.imei2s,
+                &line.imei_colors,
+                &line.imei_pta_statuses,
+                &line.imei_storages,
+                &line.imei_battery_healths,
+            )?;
         }
     }
     tx.commit()?;
@@ -290,11 +360,7 @@ pub fn list(conn: &Connection, search: Option<String>) -> Result<Vec<Purchase>, 
     purchase_repository::list_purchases(conn, search.as_deref())
 }
 
-pub fn list_for_period(
-    conn: &Connection,
-    from: &str,
-    to: &str,
-) -> Result<Vec<Purchase>, AppError> {
+pub fn list_for_period(conn: &Connection, from: &str, to: &str) -> Result<Vec<Purchase>, AppError> {
     purchase_repository::list_purchases_for_period(conn, from, to)
 }
 
@@ -324,22 +390,10 @@ pub fn delete_purchase(
     purchase_repository::delete_purchase(&tx, id)?;
     tx.commit()?;
 
-    services::record_activity(
-        conn,
-        actor,
-        "purchase",
-        "delete",
-        Some(id),
-    )?;
+    services::record_activity(conn, actor, "purchase", "delete", Some(id))?;
 
     if let Some(r) = reason {
-        services::record_activity(
-            conn,
-            actor,
-            "purchase",
-            "delete_reason",
-            Some(id),
-        )?;
+        services::record_activity(conn, actor, "purchase", "delete_reason", Some(id))?;
         conn.execute("UPDATE activity_logs SET new_value = ?1 WHERE id = (SELECT MAX(id) FROM activity_logs WHERE action = 'delete' AND module = 'purchase')", [r])?;
     }
 
@@ -353,9 +407,9 @@ pub fn update_purchase(
     actor: Option<i64>,
 ) -> Result<Purchase, AppError> {
     let existing = get(conn, id)?;
-    
+
     let (lines, all_imeis, subtotal) = prepare_purchase_lines(conn, &input)?;
-    
+
     // Check global IMEIs
     if !all_imeis.is_empty() {
         let mut seen_global: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -371,9 +425,14 @@ pub fn update_purchase(
                 for imei in &item.serials {
                     existing_imeis.insert(imei.clone());
                 }
+                for imei2 in &item.imei2s {
+                    if !imei2.is_empty() {
+                        existing_imeis.insert(imei2.clone());
+                    }
+                }
             }
         }
-        
+
         let mut used = purchase_repository::imeis_in_use(conn, &all_imeis)?;
         used.retain(|u| seen_global.contains(u) && !existing_imeis.contains(u));
         if let Some(first) = used.into_iter().next() {
@@ -382,7 +441,7 @@ pub fn update_purchase(
             )));
         }
     }
-    
+
     let total_amount = utils::round2(subtotal - input.discount);
     if total_amount < 0.0 {
         return Err(AppError::validation("Discount cannot exceed subtotal"));
@@ -478,10 +537,19 @@ pub fn update_purchase(
             line.selling_price,
         )?;
         if line.item_type == "phone" {
-            purchase_repository::insert_imeis(&tx, line.item_id, &line.imeis, &line.imei_colors)?;
+            purchase_repository::insert_imeis(
+                &tx,
+                line.item_id,
+                &line.imeis,
+                &line.imei2s,
+                &line.imei_colors,
+                &line.imei_pta_statuses,
+                &line.imei_storages,
+                &line.imei_battery_healths,
+            )?;
         }
     }
-    
+
     tx.commit()?;
 
     services::record_activity(conn, actor, "purchase", "update", Some(id))?;
@@ -646,8 +714,11 @@ mod tests {
     use crate::models::inventory::CreateSupplierInput;
     use crate::models::phone::CreatePhoneInput;
     use crate::models::purchase::PurchaseItemInput;
+    use crate::models::sale::{CreateSaleInput, SaleItemInput};
     use crate::repositories::phone_repository;
-    use crate::services::{phone_service, supplier_service, test_utils::in_memory_conn};
+    use crate::services::{
+        phone_service, sale_service, supplier_service, test_utils::in_memory_conn,
+    };
     use rusqlite::params;
 
     fn supplier(conn: &Connection) -> i64 {
@@ -702,7 +773,11 @@ mod tests {
                 warranty: Some("12 months".into()),
                 condition: Some("new".into()),
                 imeis: vec!["111111111111111".into(), "222222222222222".into()],
+                imei2s: Vec::new(),
                 imei_colors: vec!["Green".into(), "Blue".into()],
+                imei_pta_statuses: Vec::new(),
+                imei_storages: Vec::new(),
+                imei_battery_healths: Vec::new(),
             }],
         }
     }
@@ -755,13 +830,22 @@ mod tests {
     fn purchase_registers_units_inventory_with_their_colours() {
         let conn = in_memory_conn();
         let iid = phone_item(&conn, None);
-        create_purchase(&conn, purchase_input(iid, None), None).unwrap();
+        let mut input = purchase_input(iid, None);
+        input.items[0].imei2s = vec!["111111111111112".into(), "222222222222223".into()];
+        input.items[0].imei_pta_statuses = vec!["PTA Approved".into(), "Non-PTA".into()];
+        let purchase = create_purchase(&conn, input, None).unwrap();
 
         // Each physical IMEI unit keeps the colour entered on its purchase line.
         let imeis = phone_service::list_imei(&conn, iid).unwrap();
         assert_eq!(imeis.len(), 2);
         assert_eq!(imeis[0].color.as_deref(), Some("Green"));
         assert_eq!(imeis[1].color.as_deref(), Some("Blue"));
+        assert_eq!(imeis[0].imei2.as_deref(), Some("111111111111112"));
+        assert_eq!(imeis[1].imei2.as_deref(), Some("222222222222223"));
+        assert_eq!(imeis[0].pta_status.as_deref(), Some("PTA Approved"));
+        assert_eq!(imeis[1].pta_status.as_deref(), Some("Non-PTA"));
+        assert_eq!(purchase.items[0].imei2s[0], "111111111111112");
+        assert_eq!(purchase.items[0].imei_pta_statuses[1], "Non-PTA");
 
         // In-stock units are counted per colour.
         let by_color = phone_repository::stock_by_color(&conn, iid).unwrap();
@@ -775,6 +859,129 @@ mod tests {
     }
 
     #[test]
+    fn purchase_preserves_default_and_custom_pta_statuses_per_unit() {
+        let conn = in_memory_conn();
+        let iid = phone_item(&conn, None);
+        let mut input = purchase_input(iid, None);
+        input.items[0].imei_pta_statuses = vec!["JV".into(), "Factory Unlocked".into()];
+
+        let purchase = create_purchase(&conn, input, None).unwrap();
+        let imeis = phone_service::list_imei(&conn, iid).unwrap();
+
+        assert_eq!(imeis[0].pta_status.as_deref(), Some("JV"));
+        assert_eq!(imeis[1].pta_status.as_deref(), Some("Factory Unlocked"));
+        assert_eq!(purchase.items[0].imei_pta_statuses[0], "JV");
+        assert_eq!(purchase.items[0].imei_pta_statuses[1], "Factory Unlocked");
+    }
+
+    #[test]
+    fn phone_master_purchase_and_sale_share_the_same_physical_units() {
+        let conn = in_memory_conn();
+        let phone = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Apple".into(),
+                model: "15 Pro Max".into(),
+                condition: Some("New".into()),
+                quantity: 0,
+                cost_price: 0.0,
+                sale_price: 0.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let mut input = purchase_input(phone.id, None);
+        input.paid_amount = None;
+        input.items[0].quantity = 3;
+        input.items[0].selling_price = Some(190_000.0);
+        input.items[0].imeis = vec![
+            "150000000000001".into(),
+            "150000000000002".into(),
+            "150000000000003".into(),
+        ];
+        input.items[0].imei2s = vec![
+            "150000000000011".into(),
+            "150000000000012".into(),
+            String::new(),
+        ];
+        input.items[0].imei_colors = vec!["Purple".into(), "Green".into(), "White".into()];
+        input.items[0].imei_pta_statuses =
+            vec!["PTA Approved".into(), "Non-PTA".into(), "JV".into()];
+        input.items[0].imei_storages = vec!["256GB".into(), "128GB".into(), "256GB".into()];
+        input.items[0].imei_battery_healths = vec![Some(92), Some(88), Some(78)];
+
+        let purchase = create_purchase(&conn, input, None).unwrap();
+        assert_eq!(purchase.items[0].item_id, phone.id);
+        assert_eq!(phone_service::get(&conn, phone.id).unwrap().quantity, 3);
+
+        let units = phone_service::list_imei(&conn, phone.id).unwrap();
+        assert_eq!(units.len(), 3);
+        assert_eq!(units[0].color.as_deref(), Some("Purple"));
+        assert_eq!(units[0].pta_status.as_deref(), Some("PTA Approved"));
+        assert_eq!(units[0].storage.as_deref(), Some("256GB"));
+        assert_eq!(units[0].battery_health_pct, Some(92));
+        assert_eq!(units[1].color.as_deref(), Some("Green"));
+        assert_eq!(units[1].pta_status.as_deref(), Some("Non-PTA"));
+        assert_eq!(units[1].storage.as_deref(), Some("128GB"));
+        assert_eq!(units[1].battery_health_pct, Some(88));
+
+        let sold_unit_id = units[1].id;
+        let sale = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                member_id: None,
+                discount: 0.0,
+                paid_amount: None,
+                payment_method: Some("cash".into()),
+                notes: None,
+                payments: Vec::new(),
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: phone.id,
+                    quantity: 1,
+                    imei_id: Some(sold_unit_id),
+                    unit_price: Some(190_000.0),
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+            },
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(phone_service::get(&conn, phone.id).unwrap().quantity, 2);
+        let refreshed_units = phone_service::list_imei(&conn, phone.id).unwrap();
+        assert_eq!(refreshed_units[0].status, "in_stock");
+        assert_eq!(refreshed_units[1].status, "sold");
+        assert_eq!(refreshed_units[2].status, "in_stock");
+        assert_eq!(sale.items[0].unit_price, 190_000.0);
+        assert_eq!(sale.items[0].imei.as_deref(), Some("150000000000002"));
+        assert_eq!(sale.items[0].imei2.as_deref(), Some("150000000000012"));
+        assert_eq!(sale.items[0].color.as_deref(), Some("Green"));
+        assert_eq!(sale.items[0].pta_status.as_deref(), Some("Non-PTA"));
+        assert_eq!(sale.items[0].storage.as_deref(), Some("128GB"));
+        assert_eq!(sale.items[0].battery_health_pct, Some(88));
+
+        // Completed invoices must keep their sale-time unit snapshot even if
+        // the inventory unit is edited later.
+        conn.execute(
+            "UPDATE phone_imeis SET imei = '159999999999999', imei2 = NULL, color = 'Gold', pta_status = 'JV', storage = '1TB', battery_health_pct = 50 WHERE id = ?1",
+            [sold_unit_id],
+        )
+        .unwrap();
+        let historical_sale = sale_service::get(&conn, sale.id).unwrap();
+        let historical_unit = &historical_sale.items[0];
+        assert_eq!(historical_unit.imei.as_deref(), Some("150000000000002"));
+        assert_eq!(historical_unit.imei2.as_deref(), Some("150000000000012"));
+        assert_eq!(historical_unit.color.as_deref(), Some("Green"));
+        assert_eq!(historical_unit.pta_status.as_deref(), Some("Non-PTA"));
+        assert_eq!(historical_unit.storage.as_deref(), Some("128GB"));
+        assert_eq!(historical_unit.battery_health_pct, Some(88));
+    }
+
+    #[test]
     fn purchase_without_supplier_syncs_prices() {
         let conn = in_memory_conn();
         let iid = phone_item(&conn, None);
@@ -784,7 +991,11 @@ mod tests {
         input.items[0].quantity = 3;
         input.items[0].unit_cost = Some(200_000.0);
         input.items[0].selling_price = Some(500_000.0);
-        input.items[0].imeis = vec!["333333333333333".into(), "444444444444444".into(), "555555555555555".into()];
+        input.items[0].imeis = vec![
+            "333333333333333".into(),
+            "444444444444444".into(),
+            "555555555555555".into(),
+        ];
         input.paid_amount = Some(600_000.0);
         let p = create_purchase(&conn, input, None).unwrap();
         assert!(p.id > 0);
@@ -851,7 +1062,11 @@ mod tests {
                 warranty: None,
                 condition: None,
                 imeis: vec!["111111111111111".into()],
+                imei2s: Vec::new(),
                 imei_colors: Vec::new(),
+                imei_pta_statuses: Vec::new(),
+                imei_storages: Vec::new(),
+                imei_battery_healths: Vec::new(),
             }],
         };
         let p = create_purchase(&conn, input, None).unwrap();
@@ -879,6 +1094,18 @@ mod tests {
         // transaction rolled back: stock unchanged, no purchase recorded
         assert_eq!(phone_service::get(&conn, iid).unwrap().quantity, 5);
         assert!(list(&conn, None).unwrap().is_empty());
+        assert!(phone_service::list_imei(&conn, iid).unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_imei2_that_duplicates_another_physical_identifier() {
+        let conn = in_memory_conn();
+        let iid = phone_item(&conn, None);
+        let mut input = purchase_input(iid, None);
+        input.items[0].imei2s = vec!["222222222222222".into(), String::new()];
+
+        let err = create_purchase(&conn, input, None).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
         assert!(phone_service::list_imei(&conn, iid).unwrap().is_empty());
     }
 

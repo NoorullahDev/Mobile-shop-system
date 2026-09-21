@@ -181,7 +181,14 @@ pub fn period_summary(
         params![from, to],
         |r| r.get::<_, f64>(0),
     )?;
-    Ok((revenue, expenses, sales_count, received, discount, outstanding))
+    Ok((
+        revenue,
+        expenses,
+        sales_count,
+        received,
+        discount,
+        outstanding,
+    ))
 }
 
 /// Daily sales revenue grouped by date within an inclusive range (earliest..latest).
@@ -215,10 +222,16 @@ pub fn top_sellers(
 ) -> Result<Vec<crate::models::report::TopSeller>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT item_type, item_id, product_name, SUM(quantity) AS quantity,
-                SUM(quantity * unit_price) AS revenue
+                SUM(net_line_revenue) AS revenue
          FROM (
              SELECT 'phone' AS item_type, si.phone_id AS item_id,
-                    (p.brand || ' ' || p.model) AS product_name, si.quantity, si.unit_price
+                    (p.brand || ' ' || p.model) AS product_name, si.quantity,
+                    COALESCE(
+                      (si.quantity * si.unit_price)
+                      * (s.total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = s.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0))
+                      / NULLIF((SELECT SUM(all_si.quantity * all_si.unit_price) FROM sale_items all_si WHERE all_si.sale_id = s.id), 0),
+                      0
+                    ) AS net_line_revenue
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN phones p ON p.id = si.phone_id
@@ -226,7 +239,13 @@ pub fn top_sellers(
                  AND si.phone_id IS NOT NULL
              UNION ALL
              SELECT 'accessory' AS item_type, si.accessory_id AS item_id,
-                    (a.brand || ' ' || a.product_name) AS product_name, si.quantity, si.unit_price
+                    (a.brand || ' ' || a.product_name) AS product_name, si.quantity,
+                    COALESCE(
+                      (si.quantity * si.unit_price)
+                      * (s.total_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = s.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0))
+                      / NULLIF((SELECT SUM(all_si.quantity * all_si.unit_price) FROM sale_items all_si WHERE all_si.sale_id = s.id), 0),
+                      0
+                    ) AS net_line_revenue
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN accessories a ON a.id = si.accessory_id

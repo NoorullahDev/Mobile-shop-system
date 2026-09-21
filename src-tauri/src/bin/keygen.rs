@@ -26,16 +26,15 @@ fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
     let (customer, days, hardware_id) = if args.len() >= 3 {
-        (
-            args[0].clone(),
-            parse_days(&args[1]),
-            args[2].clone(),
-        )
+        (args[0].clone(), parse_days(&args[1]), args[2].clone())
     } else {
         (
             prompt("Customer name", None),
             choose_duration(),
-            prompt("Hardware ID (from the customer's activation screen)", Some("MSP")),
+            prompt(
+                "Hardware ID (from the customer's activation screen)",
+                Some("MSP"),
+            ),
         )
     };
 

@@ -26,6 +26,7 @@ import { useSessionStore } from "../store/session";
 import * as purchaseService from "../services/purchaseService";
 import { formatMoney, formatDate } from "../lib/format";
 import type { Purchase } from "../types/purchase";
+import { can } from "../lib/permissions";
 
 const methodLabels: Record<string, string> = {
   cash: "Cash",
@@ -39,6 +40,9 @@ export function PurchasesPage() {
   const { phones, accessories, load: loadInventory, addPhone, addAccessory } = useInventoryStore();
   const { suppliers, load: loadSuppliers } = useSupplierStore();
   const user = useSessionStore((s) => s.user);
+  const canCreate = can(user?.permissions, "purchases:create");
+  const canUpdate = can(user?.permissions, "purchases:update");
+  const canDelete = can(user?.permissions, "purchases:delete");
 
   const [search, setSearch] = useState("");
   const [recordOpen, setRecordOpen] = useState(false);
@@ -83,11 +87,11 @@ export function PurchasesPage() {
         description="Record purchase orders and track supplier costs"
         breadcrumb={[{ label: "Suppliers" }, { label: "Purchases" }]}
         meta={`${purchases.length} purchase${purchases.length !== 1 ? "s" : ""}`}
-        actions={
+        actions={canCreate ? (
           <Button onClick={() => setRecordOpen(true)} icon={<Plus className="h-3.5 w-3.5" />}>
             Record Purchase
           </Button>
-        }
+        ) : undefined}
       />
 
       {error && (
@@ -183,7 +187,7 @@ export function PurchasesPage() {
                 search ? "No purchases match your search." : "Record your first purchase order."
               }
               action={
-                !search ? (
+                !search && canCreate ? (
                   <Button onClick={() => setRecordOpen(true)} icon={<Plus className="h-3.5 w-3.5" />}>
                     Record Purchase
                   </Button>
@@ -260,23 +264,23 @@ export function PurchasesPage() {
                           >
                             View
                           </Button>
-                          <Button
+                          {canUpdate && <Button
                             variant="ghost"
                             size="sm"
                             onClick={async () => {
                               // We need the full purchase details (items, imeis) to edit properly
+                              // Editing needs the physical-unit fields, which
+                              // are loaded by the purchase detail endpoint.
                               let toEdit = p;
-                              if (!p.items || p.items.length === 0) {
-                                const full = await purchaseService.getPurchase(p.id);
-                                if (full) toEdit = full;
-                              }
+                              const full = await purchaseService.getPurchase(p.id);
+                              if (full) toEdit = full;
                               setEditTarget(toEdit);
                             }}
                             title={`Edit ${p.purchase_no}`}
                           >
                             Edit
-                          </Button>
-                          <Button
+                          </Button>}
+                          {canDelete && <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => setDeleteTarget(p)}
@@ -284,7 +288,7 @@ export function PurchasesPage() {
                             style={{ color: "#EF4444" }}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          </Button>}
                         </div>
                       </td>
                     </tr>
@@ -502,8 +506,19 @@ export function PurchasesPage() {
                               </div>
                             )}
                             {it.serials && it.serials.length > 0 && (
-                              <div className="font-mono text-[11px]" style={{ color: "#64748B" }}>
-                                IMEI / Serial: {it.serials.join(", ")}
+                              <div className="mt-1 flex flex-col gap-0.5 text-[11px]" style={{ color: "#64748B" }}>
+                                {it.serials.map((imei, index) => (
+                                  <div key={imei}>
+                                    <span className="font-mono">IMEI 1: {imei}</span>
+                                    {it.imei2s?.[index] && <span className="font-mono"> · IMEI 2: {it.imei2s[index]}</span>}
+                                    {it.imei_colors?.[index] && <span> · {it.imei_colors[index]}</span>}
+                                    {it.imei_pta_statuses?.[index] && <span> · {it.imei_pta_statuses[index]}</span>}
+                                    {it.imei_storages?.[index] && <span> · {it.imei_storages[index]}</span>}
+                                    {it.imei_battery_healths?.[index] != null && (
+                                      <span> · Battery {it.imei_battery_healths[index]}%</span>
+                                    )}
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </td>

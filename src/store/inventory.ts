@@ -17,7 +17,7 @@ interface InventoryState {
   load: () => Promise<void>;
   loadPhones: (search?: string) => Promise<void>;
   loadAccessories: (search?: string) => Promise<void>;
-  addPhone: (input: CreatePhoneInput) => Promise<void>;
+  addPhone: (input: CreatePhoneInput) => Promise<Phone>;
   updatePhone: (id: number, input: CreatePhoneInput) => Promise<void>;
   removePhone: (id: number) => Promise<void>;
   restockPhone: (id: number, quantity: number, imeis: string[], imeiColors?: string[]) => Promise<void>;
@@ -112,6 +112,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
       const created = await inventoryService.createPhone(input);
       const phones = [created, ...get().phones];
       set((s) => ({ phones, products: buildProducts(phones, s.accessories) }));
+      return created;
     } catch (e) {
       set({ error: String(e) });
       throw e;

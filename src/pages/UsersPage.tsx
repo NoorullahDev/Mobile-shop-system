@@ -33,13 +33,56 @@ import type {
 
 type Tab = "users" | "staff" | "salary" | "roles";
 
-export function UsersPage() {
+const MODULE_LABELS: Record<string, string> = {
+  dashboard: "Dashboard",
+  sales: "Sales / POS",
+  returns: "Returns / Exchange",
+  phones: "Mobile Phones",
+  accessories: "Accessories",
+  purchases: "Purchases",
+  members: "Customers",
+  payments: "Customer Dues / Payments",
+  online_payments: "Online Payments",
+  suppliers: "Suppliers",
+  supplier_dues: "Supplier Dues",
+  expenses: "Expenses",
+  reports: "Reports",
+  staff: "Staff / Salary",
+  settings: "Settings",
+  backup: "Backup / Restore",
+  users: "Users & Roles",
+  activity: "Activity Logs",
+  license: "License",
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  view: "View",
+  create: "Create",
+  update: "Edit",
+  delete: "Delete",
+  print: "Print / Export",
+  manage: "Manage Users",
+  apply_discount: "Apply Discount",
+};
+
+const PERMISSION_LABELS: Record<string, string> = {
+  "returns:create": "Return / Exchange",
+  "payments:create": "Manage Payments",
+  "sales:apply_discount": "Apply Discount",
+  "users:manage": "Manage Users & Roles",
+  "backup:manage": "Backup / Restore",
+  "license:update": "Manage License",
+};
+
+export function UsersPage({ initialTab = "users" }: { initialTab?: Tab }) {
   const session = useSessionStore((s) => s.user);
   const actor = session?.id ?? null;
   const permissions = session?.permissions ?? [];
+  const canManageUsers = can(permissions, "users:manage");
+  const canViewStaff = can(permissions, "staff:view");
   const { toast } = useToast();
 
-  const [tab, setTab] = useState<Tab>("users");
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   const [search, setSearch] = useState("");
 
@@ -70,14 +113,16 @@ export function UsersPage() {
     (async () => {
       setLoading(true);
       try {
-        await Promise.all([loadUsers(), loadRoles()]);
+        if (canManageUsers) {
+          await Promise.all([loadUsers(), loadRoles()]);
+        }
       } catch (e) {
         toast(String(e), { variant: "error", title: "Failed to load" });
       } finally {
         setLoading(false);
       }
     })();
-  }, [loadUsers, toast]);
+  }, [canManageUsers, loadUsers, toast]);
 
   const activeUsers = useMemo(() => users.filter((u) => !u.is_deleted), [users]);
   const filteredUsers = useMemo(() => {
@@ -107,26 +152,25 @@ export function UsersPage() {
   return (
     <div>
       <PageHeader
-        title="Users & Roles"
-        description="Manage system users, roles, and access permissions"
-        breadcrumb={[{ label: "System" }, { label: "Users & Roles" }]}
-        meta="Phase 8"
+        title={canManageUsers ? "Users & Roles" : "Staff / Salary"}
+        description={canManageUsers ? "Manage system users, roles, and access permissions" : "Manage employee records and salary history"}
+        breadcrumb={[{ label: "System" }, { label: canManageUsers ? "Users & Roles" : "Staff / Salary" }]}
       />
 
       {/* Tabs */}
       <div className="mb-5 flex gap-2">
-        <TabButton active={tab === "users"} onClick={() => setTab("users")} icon={<Users className="h-3.5 w-3.5" />}>
+        {canManageUsers && <TabButton active={tab === "users"} onClick={() => setTab("users")} icon={<Users className="h-3.5 w-3.5" />}>
           Users
-        </TabButton>
-        <TabButton active={tab === "staff"} onClick={() => setTab("staff")} icon={<BriefcaseBusiness className="h-3.5 w-3.5" />}>
+        </TabButton>}
+        {canViewStaff && <TabButton active={tab === "staff"} onClick={() => setTab("staff")} icon={<BriefcaseBusiness className="h-3.5 w-3.5" />}>
           Staff
-        </TabButton>
-        <TabButton active={tab === "salary"} onClick={() => setTab("salary")} icon={<Banknote className="h-3.5 w-3.5" />}>
+        </TabButton>}
+        {canViewStaff && <TabButton active={tab === "salary"} onClick={() => setTab("salary")} icon={<Banknote className="h-3.5 w-3.5" />}>
           Salary
-        </TabButton>
-        <TabButton active={tab === "roles"} onClick={() => setTab("roles")} icon={<Shield className="h-3.5 w-3.5" />}>
+        </TabButton>}
+        {canManageUsers && <TabButton active={tab === "roles"} onClick={() => setTab("roles")} icon={<Shield className="h-3.5 w-3.5" />}>
           Roles
-        </TabButton>
+        </TabButton>}
       </div>
 
       {tab === "users" ? (
@@ -220,10 +264,10 @@ export function UsersPage() {
                             <IconBtn title="Edit" onClick={() => { setEditingUser(u); setUserModal("edit"); }}>
                               <Pencil className="h-3.5 w-3.5" />
                             </IconBtn>
-                            <IconBtn title="Reset password" onClick={() => setResetTarget(u)}>
+                            {!(u.username.toLowerCase() === "admin" && u.role_name.toLowerCase() === "admin") && <IconBtn title="Reset password" onClick={() => setResetTarget(u)}>
                               <KeyRound className="h-3.5 w-3.5" />
-                            </IconBtn>
-                            {!isSelf(u) && (
+                            </IconBtn>}
+                            {!isSelf(u) && !(u.username.toLowerCase() === "admin" && u.role_name.toLowerCase() === "admin") && (
                               <IconBtn title="Delete" danger onClick={() => setDeleteTarget(u)}>
                                 <Trash2 className="h-3.5 w-3.5" />
                               </IconBtn>
@@ -239,7 +283,7 @@ export function UsersPage() {
           )}
         </Card>
       ) : tab === "staff" ? (
-        <StaffSection users={activeUsers} actor={actor} />
+        <StaffSection users={canManageUsers ? activeUsers : []} actor={actor} />
       ) : tab === "salary" ? (
         <SalarySection actor={actor} />
       ) : (
@@ -275,9 +319,9 @@ export function UsersPage() {
                   </div>
                   {can(permissions, "users:manage") && (
                     <div className="flex items-center gap-1">
-                      <IconBtn title="Edit" onClick={() => { setEditingRole(r); setRoleModal("edit"); }}>
+                      {!(r.is_builtin && r.name.toLowerCase() === "admin") && <IconBtn title="Edit" onClick={() => { setEditingRole(r); setRoleModal("edit"); }}>
                         <Pencil className="h-3.5 w-3.5" />
-                      </IconBtn>
+                      </IconBtn>}
                       {!r.is_builtin && (
                         <IconBtn title="Delete" danger onClick={() => setDeleteRoleTarget(r)}>
                           <Trash2 className="h-3.5 w-3.5" />
@@ -403,6 +447,9 @@ function UserFormModal({
   loadUsers: () => Promise<void>;
 }) {
   const isEdit = userModal === "edit";
+  const primaryProtected = !!editingUser
+    && editingUser.username.toLowerCase() === "admin"
+    && editingUser.role_name.toLowerCase() === "admin";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -430,7 +477,8 @@ function UserFormModal({
       setConfirmPassword("");
       setFullName("");
       setEmail("");
-      setRoleId(roles[0] ? String(roles[0].id) : "");
+      const defaultRole = roles.find((role) => role.name.toLowerCase() !== "admin") ?? roles[0];
+      setRoleId(defaultRole ? String(defaultRole.id) : "");
       setStatus("active");
     }
   }, [userModal, editingUser, roles]);
@@ -510,6 +558,8 @@ function UserFormModal({
             onChange={(e) => setUsername(e.target.value)}
             placeholder="e.g. cashier1"
             required
+            disabled={primaryProtected}
+            hint={primaryProtected ? "The primary admin role is protected" : undefined}
           />
         )}
         {!isEdit && (
@@ -565,6 +615,7 @@ function UserFormModal({
               { value: "active", label: "Active" },
               { value: "disabled", label: "Disabled" },
             ]}
+            disabled={primaryProtected}
           />
         </div>
       </div>
@@ -855,7 +906,7 @@ function RoleFormModal({
               grouped.map(([module, perms]) => (
                 <div key={module} className="mb-3 last:mb-0">
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#64748B" }}>
-                    {module}
+                    {MODULE_LABELS[module] ?? module.split("_").join(" ")}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {perms.map((p) => {
@@ -876,7 +927,7 @@ function RoleFormModal({
                             checked={checked}
                             onChange={() => toggle(p.name)}
                           />
-                          {p.name}
+                          {PERMISSION_LABELS[p.name] ?? ACTION_LABELS[p.name.split(":")[1] ?? ""] ?? p.name.split(":").slice(1).join(":").split("_").join(" ")}
                         </label>
                       );
                     })}

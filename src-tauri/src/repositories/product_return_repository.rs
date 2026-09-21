@@ -28,7 +28,9 @@ fn summary_from_row(r: &Row) -> rusqlite::Result<ReturnSummary> {
         created_by_name: r.get("created_by_name")?,
         created_at: r.get("created_at")?,
         item_count: r.get("item_count")?,
-        return_type: r.get::<_, Option<String>>("return_type")?.unwrap_or_else(|| "return".to_string()),
+        return_type: r
+            .get::<_, Option<String>>("return_type")?
+            .unwrap_or_else(|| "return".to_string()),
         exchange_sale_id: r.get("exchange_sale_id")?,
         reference: r.get("reference")?,
     })
@@ -41,8 +43,7 @@ const RETURN_COLS: &str = "r.id, r.return_no, r.sale_id, r.receipt_no, r.member_
      (SELECT COUNT(*) FROM return_items ri WHERE ri.return_id = r.id) AS item_count, \
      r.return_type, r.exchange_sale_id, r.reference";
 
-const RETURN_JOIN: &str =
-    "FROM returns r LEFT JOIN users u ON u.id = r.created_by";
+const RETURN_JOIN: &str = "FROM returns r LEFT JOIN users u ON u.id = r.created_by";
 
 pub fn next_return_no(conn: &Connection) -> Result<String, AppError> {
     let max: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM returns", [], |r| r.get(0))?;
@@ -112,6 +113,7 @@ pub fn insert_return_item(
     imei_id: Option<i64>,
     product_name: Option<&str>,
     imei: Option<&str>,
+    imei2: Option<&str>,
     serial_no: Option<&str>,
     quantity: i64,
     unit_price: f64,
@@ -122,6 +124,9 @@ pub fn insert_return_item(
     condition: &str,
     restocked: bool,
     color: Option<&str>,
+    pta_status: Option<&str>,
+    storage: Option<&str>,
+    battery_health_pct: Option<i64>,
 ) -> Result<(), AppError> {
     let (col, val) = if item_type == "phone" {
         ("phone_id", rusqlite::types::Value::from(item_id))
@@ -131,9 +136,9 @@ pub fn insert_return_item(
     conn.execute(
         &format!(
             "INSERT INTO return_items (return_id, sale_item_id, item_type, {col}, imei_id, \
-                 product_name, imei, serial_no, quantity, unit_price, line_total, deduction_amount, \
-                 refund_amount, reason, condition, restocked, color)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
+                 product_name, imei, imei2, serial_no, quantity, unit_price, line_total, deduction_amount, \
+                 refund_amount, reason, condition, restocked, color, pta_status, storage, battery_health_pct)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)"
         ),
         params![
             return_id,
@@ -143,6 +148,7 @@ pub fn insert_return_item(
             imei_id,
             product_name,
             imei,
+            imei2,
             serial_no,
             quantity,
             unit_price,
@@ -152,7 +158,10 @@ pub fn insert_return_item(
             reason,
             condition,
             restocked,
-            color
+            color,
+            pta_status,
+            storage,
+            battery_health_pct
         ],
     )?;
     Ok(())
@@ -221,9 +230,10 @@ pub fn restocked_qty_by_sale_items(
         "SELECT sale_item_id, SUM(quantity) FROM return_items WHERE restocked = 1 AND sale_item_id IN ({placeholders}) GROUP BY sale_item_id"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(sale_item_ids.iter().copied()), |r| {
-        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-    })?;
+    let rows = stmt.query_map(
+        rusqlite::params_from_iter(sale_item_ids.iter().copied()),
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+    )?;
     for row in rows {
         let (id, qty) = row?;
         out.insert(id, qty);
@@ -238,7 +248,9 @@ pub fn sync_sale_snapshot(
 ) -> Result<(), AppError> {
     let member: Option<(String, Option<String>)> = match member_id {
         Some(id) => conn
-            .query_row("SELECT name, phone FROM members WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row("SELECT name, phone FROM members WHERE id = ?1", [id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
             .optional()?,
         None => None,
     };
@@ -266,7 +278,8 @@ pub fn recalculate_for_sale(conn: &Connection, sale_id: i64) -> Result<(), AppEr
             values.push((item.id, unit_price, line_total));
         }
         total = crate::utils::round2(total);
-        let old_percent_deduction = crate::utils::round2(ret.total_sale_price * ret.return_charge_percent / 100.0);
+        let old_percent_deduction =
+            crate::utils::round2(ret.total_sale_price * ret.return_charge_percent / 100.0);
         let fixed = (old_percent_deduction - ret.deduction_amount).abs() > 0.011;
         let target_deduction = if fixed {
             ret.deduction_amount
@@ -274,7 +287,9 @@ pub fn recalculate_for_sale(conn: &Connection, sale_id: i64) -> Result<(), AppEr
             crate::utils::round2(total * ret.return_charge_percent / 100.0)
         };
         if target_deduction > total {
-            return Err(AppError::validation("The corrected sale price is lower than an existing return deduction"));
+            return Err(AppError::validation(
+                "The corrected sale price is lower than an existing return deduction",
+            ));
         }
         let mut allocated = 0.0;
         let count = values.len();
@@ -337,7 +352,11 @@ pub fn update_return(
 }
 
 pub fn set_imei_status(conn: &Connection, imei_id: i64, status: &str) -> Result<(), AppError> {
-    let sold_at: Option<String> = if status == "sold" { Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()) } else { None };
+    let sold_at: Option<String> = if status == "sold" {
+        Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
+    } else {
+        None
+    };
     conn.execute(
         "UPDATE phone_imeis SET status = ?2, sold_at = ?3 WHERE id = ?1",
         params![imei_id, status, sold_at],
@@ -348,9 +367,11 @@ pub fn set_imei_status(conn: &Connection, imei_id: i64, status: &str) -> Result<
 /// Returns the current status of an IMEI (e.g. "sold", "in_stock") if it exists.
 pub fn imei_status(conn: &Connection, imei_id: i64) -> Result<Option<String>, AppError> {
     let s: Option<String> = conn
-        .query_row("SELECT status FROM phone_imeis WHERE id = ?1", [imei_id], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT status FROM phone_imeis WHERE id = ?1",
+            [imei_id],
+            |r| r.get(0),
+        )
         .optional()?;
     Ok(s)
 }
@@ -396,6 +417,7 @@ fn item_from_row(r: &Row) -> rusqlite::Result<ReturnItem> {
         imei_id: r.get("imei_id")?,
         product_name: r.get("product_name")?,
         imei: r.get("imei")?,
+        imei2: r.get("imei2")?,
         serial_no: r.get("serial_no")?,
         quantity: r.get("quantity")?,
         unit_price: r.get("unit_price")?,
@@ -405,6 +427,9 @@ fn item_from_row(r: &Row) -> rusqlite::Result<ReturnItem> {
         reason: r.get("reason")?,
         condition: r.get("condition")?,
         color: r.get("color")?,
+        pta_status: r.get("pta_status")?,
+        storage: r.get("storage")?,
+        battery_health_pct: r.get("battery_health_pct")?,
         restocked: r.get("restocked")?,
         created_at: r.get("created_at")?,
     })
@@ -414,9 +439,10 @@ fn list_items(conn: &Connection, return_id: i64) -> Result<Vec<ReturnItem>, AppE
     let mut stmt = conn.prepare(
         "SELECT ri.id, ri.return_id, ri.sale_item_id, ri.item_type, \
                 COALESCE(ri.phone_id, ri.accessory_id) AS item_id, ri.imei_id, \
-                ri.product_name, ri.imei, ri.serial_no, ri.quantity, ri.unit_price, \
+                ri.product_name, ri.imei, ri.imei2, ri.serial_no, ri.quantity, ri.unit_price, \
                 ri.line_total, ri.deduction_amount, ri.refund_amount, ri.reason, \
-                ri.condition, ri.color, ri.restocked, ri.created_at
+                ri.condition, ri.color, ri.pta_status, ri.storage, ri.battery_health_pct,
+                ri.restocked, ri.created_at
          FROM return_items ri WHERE ri.return_id = ?1 ORDER BY ri.id",
     )?;
     let rows = stmt.query_map([return_id], item_from_row)?;
@@ -456,7 +482,10 @@ fn to_product_return(s: &ReturnSummary, items: Vec<ReturnItem>) -> ProductReturn
     }
 }
 
-pub fn get_return_with_items(conn: &Connection, id: i64) -> Result<Option<ProductReturn>, AppError> {
+pub fn get_return_with_items(
+    conn: &Connection,
+    id: i64,
+) -> Result<Option<ProductReturn>, AppError> {
     let sql = format!(
         "SELECT {RETURN_COLS} {RETURN_JOIN} WHERE r.id = ?1 ORDER BY r.created_at DESC LIMIT 1"
     );
@@ -490,7 +519,10 @@ pub fn returns_for_sale(conn: &Connection, sale_id: i64) -> Result<Vec<ProductRe
     Ok(out)
 }
 
-pub fn list_returns(conn: &Connection, search: Option<&str>) -> Result<Vec<ReturnSummary>, AppError> {
+pub fn list_returns(
+    conn: &Connection,
+    search: Option<&str>,
+) -> Result<Vec<ReturnSummary>, AppError> {
     let mut sql = format!("SELECT {RETURN_COLS} {RETURN_JOIN}");
     let mut q: Vec<rusqlite::types::Value> = Vec::new();
     if let Some(s) = search {
@@ -504,7 +536,15 @@ pub fn list_returns(conn: &Connection, search: Option<&str>) -> Result<Vec<Retur
                             AND (ri.product_name LIKE ? OR ri.imei LIKE ? OR ri.serial_no LIKE ?))",
             );
             let val = rusqlite::types::Value::from(s);
-            q.extend(vec![val.clone(), val.clone(), val.clone(), val.clone(), val.clone(), val.clone(), val]);
+            q.extend(vec![
+                val.clone(),
+                val.clone(),
+                val.clone(),
+                val.clone(),
+                val.clone(),
+                val.clone(),
+                val,
+            ]);
         }
     }
     sql.push_str(" ORDER BY r.created_at DESC, r.id DESC LIMIT 500");

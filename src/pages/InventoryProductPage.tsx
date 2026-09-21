@@ -31,6 +31,7 @@ import { useProductCategoryStore } from "../store/productCategories";
 import { useSessionStore } from "../store/session";
 import { formatMoneyCompact } from "../lib/format";
 import * as inventoryService from "../services/inventoryService";
+import { can } from "../lib/permissions";
 import type { PhoneImei, ProductCategory, Supplier } from "../types/inventory";
 
 export interface InventoryRow {
@@ -88,7 +89,7 @@ interface InventoryProductPageProps<T extends InventoryRow, I> {
   onLoad: (search: string) => void;
   rowTitle: (item: T) => string;
   rowSubtitle: (item: T) => string;
-  add: (input: I) => Promise<void>;
+  add: (input: I) => Promise<unknown>;
   update: (id: number, input: I) => Promise<void>;
   remove: (id: number) => Promise<void>;
   restock: (id: number, quantity: number, imeis: string[], imeiColors: string[]) => Promise<void>;
@@ -110,6 +111,7 @@ interface InventoryProductPageProps<T extends InventoryRow, I> {
   showImeiCol?: boolean;
   showImeiButton?: boolean;
   extraAction?: React.ReactNode;
+  permissionPrefix: "phones" | "accessories";
 }
 
 export function InventoryProductPage<T extends InventoryRow, I>({
@@ -135,6 +137,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
   showImeiCol,
   showImeiButton,
   extraAction,
+  permissionPrefix,
 }: InventoryProductPageProps<T, I>) {
 
   const { categories, load: loadProductCategories } = useProductCategoryStore();
@@ -151,7 +154,10 @@ export function InventoryProductPage<T extends InventoryRow, I>({
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const [imagePreview,setImagePreview]=useState<{src:string;title:string}|null>(null);
   const imeiReq = useRef(0);
-  const canManageCategories = user !== null && (user.role === "Admin" || user.role === "Owner");
+  const canCreate = can(user?.permissions, `${permissionPrefix}:create`);
+  const canUpdate = can(user?.permissions, `${permissionPrefix}:update`);
+  const canDelete = can(user?.permissions, `${permissionPrefix}:delete`);
+  const canManageCategories = canUpdate;
 
   useEffect(() => {
     onLoad("");
@@ -229,7 +235,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
         meta={`${totalItems} items`}
         actions={
           <div className="flex items-center gap-2">
-            {extraAction}
+            {canUpdate && extraAction}
             {showCategoryManager && canManageCategories && (
               <Button
                 variant="secondary"
@@ -239,9 +245,9 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                 Manage Categories
               </Button>
             )}
-            <Button onClick={openCreate} icon={<Plus className="h-3.5 w-3.5" />}>
+            {canCreate && <Button onClick={openCreate} icon={<Plus className="h-3.5 w-3.5" />}>
               {addLabel}
-            </Button>
+            </Button>}
           </div>
         }
       />
@@ -399,7 +405,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                   : `Add your first ${itemName} to start tracking stock.`
               }
               action={
-                !search && stockFilter === "all" ? (
+                !search && stockFilter === "all" && canCreate ? (
                   <Button onClick={openCreate} icon={<Plus className="h-3.5 w-3.5" />}>
                     {addLabel}
                   </Button>
@@ -512,7 +518,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                       )}
                       <td>
                         <div className="flex items-center justify-end gap-1">
-                          <button
+                          {canCreate && <button
                             type="button"
                             onClick={() => setRestockItem(item)}
                             className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-green-50"
@@ -520,8 +526,8 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                             title="Restock"
                           >
                             <PackagePlus className="h-3.5 w-3.5" />
-                          </button>
-                          <button
+                          </button>}
+                          {canUpdate && <button
                             type="button"
                             onClick={() => openEdit(item)}
                             className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50"
@@ -529,8 +535,8 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                             title="Edit"
                           >
                             <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
+                          </button>}
+                          {canDelete && <button
                             type="button"
                             onClick={() => setConfirmDelete(item.id)}
                             className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50"
@@ -538,7 +544,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                             title="Delete"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          </button>}
                         </div>
                       </td>
                     </tr>
@@ -624,16 +630,38 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                   borderColor: i.status === "sold" ? "#E2E8F0" : i.status === "defective" ? "#FECACA" : "#DCFCE7",
                 }}
               >
-                <span className="imei-box" style={{ background: "transparent", border: "none", padding: 0 }}>
-                  {i.imei}
-                </span>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-0.5">
+                  <span className="imei-box" style={{ background: "transparent", border: "none", padding: 0 }}>
+                    IMEI 1: {i.imei}
+                  </span>
+                  {i.imei2 && <span className="font-mono text-[11px] text-slate-500">IMEI 2: {i.imei2}</span>}
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   {i.color && (
                     <span
                       className="rounded-full px-2 py-0.5 text-[11px] font-medium"
                       style={{ background: "#F1F5F9", color: "#475569" }}
                     >
                       {i.color}
+                    </span>
+                  )}
+                  {i.pta_status && (
+                    <StatusBadge status={i.pta_status} />
+                  )}
+                  {i.storage && (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      style={{ background: "#EFF6FF", color: "#1D4ED8" }}
+                    >
+                      {i.storage}
+                    </span>
+                  )}
+                  {i.battery_health_pct != null && (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      style={{ background: "#F1F5F9", color: "#475569" }}
+                    >
+                      Battery {i.battery_health_pct}%
                     </span>
                   )}
                   <StatusBadge status={i.status === "in_stock" ? "in stock" : i.status} />

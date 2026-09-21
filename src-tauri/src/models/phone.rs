@@ -127,9 +127,17 @@ pub struct PhoneImei {
     pub id: i64,
     pub phone_id: i64,
     pub imei: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imei2: Option<String>,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pta_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery_health_pct: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sold_at: Option<String>,
     pub created_at: String,
@@ -140,7 +148,15 @@ pub struct AddPhoneImeiInput {
     pub phone_id: i64,
     pub imei: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imei2: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pta_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battery_health_pct: Option<i64>,
 }
 
 // ---- Phone Options (dynamic dropdown values) ----

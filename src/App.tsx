@@ -23,6 +23,7 @@ import { ActivityLogsPage } from "./pages/ActivityLogsPage";
 import { LicensePage } from "./pages/LicensePage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { BackupManagerPage } from "./pages/BackupManagerPage";
+import { AccountPage } from "./pages/AccountPage";
 import { Spinner } from "./components/Button";
 import { Toaster } from "./components/Toaster";
 import { LicenseGate } from "./components/LicenseGate";
@@ -32,11 +33,31 @@ import { can } from "./lib/permissions";
 import * as licenseService from "./services/licenseService";
 import type { LicenseStatus } from "./types/license";
 
-/** Redirects to / if the current user lacks the required permission. */
+const landingRoutes = Object.entries({
+  "/": "dashboard:view",
+  "/sales/new": "sales:create",
+  "/sales": "sales:view",
+  "/members": "members:view",
+  "/inventory": "phones:view",
+  "/accessories": "accessories:view",
+  "/purchases": "purchases:view",
+  "/suppliers": "suppliers:view",
+  "/reports": "reports:view",
+  "/staff": "staff:view",
+  "/settings": "settings:view",
+  "/users": "users:manage",
+});
+
 function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
   const permissions = useSessionStore((s) => s.user?.permissions ?? []);
   if (!can(permissions, permission)) {
-    return <Navigate to="/" replace />;
+    const fallback = landingRoutes.find(([, required]) => can(permissions, required))?.[0];
+    return fallback ? <Navigate to={fallback} replace /> : (
+      <div className="rounded-lg border border-red-200 bg-white p-8 text-center">
+        <h1 className="text-lg font-semibold text-slate-900">Access denied</h1>
+        <p className="mt-2 text-sm text-slate-500">Your role does not grant access to this page.</p>
+      </div>
+    );
   }
   return <>{children}</>;
 }
@@ -139,17 +160,17 @@ export default function App() {
           >
             <Route index element={<RequirePermission permission="dashboard:view"><DashboardPage /></RequirePermission>} />
             <Route path="members" element={<RequirePermission permission="members:view"><MembersPage /></RequirePermission>} />
-            <Route path="inventory" element={<RequirePermission permission="inventory:view"><InventoryPage /></RequirePermission>} />
+            <Route path="inventory" element={<RequirePermission permission="phones:view"><InventoryPage /></RequirePermission>} />
             <Route path="suppliers" element={<RequirePermission permission="suppliers:view"><SuppliersPage /></RequirePermission>} />
             <Route path="sales" element={<RequirePermission permission="sales:view"><SalesPage /></RequirePermission>} />
             <Route path="returns" element={<RequirePermission permission="returns:view"><ReturnsPage /></RequirePermission>} />
             <Route path="payments" element={<RequirePermission permission="payments:view"><PaymentsPage /></RequirePermission>} />
-            <Route path="online-payments" element={<RequirePermission permission="payments:view"><OnlinePaymentsPage /></RequirePermission>} />
+            <Route path="online-payments" element={<RequirePermission permission="online_payments:view"><OnlinePaymentsPage /></RequirePermission>} />
             <Route path="expenses" element={<RequirePermission permission="expenses:view"><ExpensesPage /></RequirePermission>} />
             <Route path="reports" element={<RequirePermission permission="reports:view"><ReportsPage /></RequirePermission>} />
             <Route path="settings" element={<RequirePermission permission="settings:view"><SettingsPage /></RequirePermission>} />
             <Route path="settings/receipt" element={<RequirePermission permission="settings:view"><ReceiptSettingsPage /></RequirePermission>} />
-            <Route path="license" element={<LicensePage />} />
+            <Route path="license" element={<RequirePermission permission="license:view"><LicensePage /></RequirePermission>} />
           </Route>
 
           {/* Placeholder routes for planned modules (built in later phases) */}
@@ -165,12 +186,14 @@ export default function App() {
             }
           >
             <Route path="sales/new" element={<RequirePermission permission="sales:create"><POSPage /></RequirePermission>} />
-            <Route path="accessories" element={<RequirePermission permission="inventory:view"><AccessoriesPage /></RequirePermission>} />
+            <Route path="accessories" element={<RequirePermission permission="accessories:view"><AccessoriesPage /></RequirePermission>} />
             <Route path="purchases" element={<RequirePermission permission="purchases:view"><PurchasesPage /></RequirePermission>} />
-            <Route path="supplier-dues" element={<RequirePermission permission="purchases:view"><SupplierDuesPage /></RequirePermission>} />
+            <Route path="supplier-dues" element={<RequirePermission permission="supplier_dues:view"><SupplierDuesPage /></RequirePermission>} />
             <Route path="users" element={<RequirePermission permission="users:manage"><UsersPage /></RequirePermission>} />
-            <Route path="activity" element={<RequirePermission permission="reports:view"><ActivityLogsPage /></RequirePermission>} />
+            <Route path="staff" element={<RequirePermission permission="staff:view"><UsersPage initialTab="staff" /></RequirePermission>} />
+            <Route path="activity" element={<RequirePermission permission="activity:view"><ActivityLogsPage /></RequirePermission>} />
             <Route path="notifications" element={<NotificationsPage />} />
+            <Route path="account" element={<AccountPage />} />
             <Route path="backups" element={<RequirePermission permission="backup:view"><BackupManagerPage /></RequirePermission>} />
           </Route>
 

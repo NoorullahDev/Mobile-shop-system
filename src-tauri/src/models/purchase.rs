@@ -16,10 +16,23 @@ pub struct PurchaseItemInput {
     pub condition: Option<String>,
     #[serde(default)]
     pub imeis: Vec<String>,
+    /// Optional second IMEI for the same physical handset, positionally
+    /// aligned with `imeis`. It never contributes to quantity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei2s: Vec<String>,
     /// Per-unit colour aligned positionally with `imeis` (same filtering as
     /// the IMEIs themselves). Left empty when the units have no colours.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imei_colors: Vec<String>,
+    /// Per-unit PTA status aligned positionally with `imeis`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_pta_statuses: Vec<String>,
+    /// Per-unit storage aligned positionally with `imeis`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_storages: Vec<String>,
+    /// Per-unit numeric battery health aligned positionally with `imeis`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_battery_healths: Vec<Option<i64>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -63,6 +76,14 @@ pub struct PurchaseItem {
     /// Unit colours aligned positionally with `serials` (phone item type only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imei_colors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei2s: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_pta_statuses: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_storages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_battery_healths: Vec<Option<i64>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -11,6 +11,7 @@ import { useReturnStore } from "../store/returns";
 import { NewReturnModal } from "./NewReturnModal";
 import type { ProductReturn, ReturnSummary } from "../types/return";
 import { useSessionStore } from "../store/session";
+import { can } from "../lib/permissions";
 
 function formatPKR(n: number) {
   return `Rs. ${n.toLocaleString("en-PK")}`;
@@ -32,7 +33,9 @@ function formatDate(s?: string | null) {
 export function ReturnsPage() {
   const { returns, loading, error, load, get, remove } = useReturnStore();
   const user = useSessionStore((state) => state.user);
-  const isAdmin = user?.role.toLowerCase() === "admin";
+  const canCreate = can(user?.permissions, "returns:create");
+  const canUpdate = can(user?.permissions, "returns:update");
+  const canDelete = can(user?.permissions, "returns:delete");
   const [search, setSearch] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [detail, setDetail] = useState<ProductReturn | null>(null);
@@ -78,14 +81,14 @@ export function ReturnsPage() {
         description="Process product returns, refunds and restocking charges"
         breadcrumb={[{ label: "Sales" }, { label: "Returns" }]}
         meta={`${returns.length} return${returns.length !== 1 ? "s" : ""}`}
-        actions={
+        actions={canCreate ? (
           <Button
             onClick={() => setNewOpen(true)}
             icon={<RotateCcw className="h-3.5 w-3.5" />}
           >
             New Return
           </Button>
-        }
+        ) : undefined}
       />
 
       {error && (
@@ -234,7 +237,7 @@ export function ReturnsPage() {
                     <td className="text-center">
                       <div className="flex justify-center gap-1">
                         <Button variant="ghost" size="sm" icon={<Eye className="h-3.5 w-3.5" />} onClick={() => openDetail(r)}>View</Button>
-                        <Button variant="ghost" size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(r)}>Edit</Button>
+                        {canUpdate && <Button variant="ghost" size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(r)}>Edit</Button>}
                       </div>
                     </td>
                   </tr>
@@ -329,8 +332,12 @@ export function ReturnsPage() {
                     <td>
                       <div style={{ color: "#0F172A", fontSize: "13px" }}>{it.product_name ?? "—"}</div>
                       <div className="text-[11px]" style={{ color: "#64748B" }}>
-                        {it.imei && <span className="font-mono">IMEI: {it.imei}</span>}
+                        {it.imei && <span className="font-mono">IMEI 1: {it.imei}</span>}
+                        {it.imei2 && <span className="font-mono"> IMEI 2: {it.imei2}</span>}
                         {it.color && <span> Colour: {it.color}</span>}
+                        {it.pta_status && <span> PTA: {it.pta_status}</span>}
+                        {it.storage && <span> Storage: {it.storage}</span>}
+                        {it.battery_health_pct != null && <span> Battery: {it.battery_health_pct}%</span>}
                         {it.serial_no && <span className="font-mono"> SN: {it.serial_no}</span>}
                         <span> · {it.condition}</span>
                       </div>
@@ -394,8 +401,8 @@ export function ReturnsPage() {
               </div>
             )}
             <div className="flex justify-end gap-2 border-t pt-3" style={{ borderColor: "#E2E8F0" }}>
-              {isAdmin && <Button variant="danger" size="sm" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setConfirmDelete(detail)}>Delete</Button>}
-              <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => { setDetail(null); setEditReturn(detail); }}>Edit Return</Button>
+              {canDelete && <Button variant="danger" size="sm" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setConfirmDelete(detail)}>Delete</Button>}
+              {canUpdate && <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => { setDetail(null); setEditReturn(detail); }}>Edit Return</Button>}
             </div>
           </div>
         ) : null}

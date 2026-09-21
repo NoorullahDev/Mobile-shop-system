@@ -47,7 +47,6 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
     low_stock_threshold: initial?.low_stock_threshold ?? 0,
     supplier_id: initial?.supplier_id ?? null,
   });
-  const [brandError, setBrandError] = useState<string | null>(null);
   const [typeError, setTypeError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,11 +101,6 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
       setTypeError("Category is required");
       return;
     }
-    if (!form.brand.trim()) {
-      setBrandError("Brand is required");
-      return;
-    }
-    setBrandError(null);
     setTypeError(null);
     setSaving(true);
     setError(null);
@@ -165,12 +159,10 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
           <Select
             name="brand"
             label="Brand"
-            required
             placeholder="— Select brand —"
             options={brandOptions}
             value={form.brand ?? ""}
             onChange={(e) => set("brand", e.target.value)}
-            error={brandError ?? undefined}
             disabled={saving}
           />
           <Input

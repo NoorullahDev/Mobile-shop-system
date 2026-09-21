@@ -18,10 +18,10 @@ use crate::models::payment::{
 };
 use crate::models::phone::{AddPhoneImeiInput, CreatePhoneInput, Phone, PhoneImei};
 use crate::models::product_category::{CreateProductCategoryInput, ProductCategory};
+use crate::models::product_return::{CreateReturnInput, ProductReturn, ReturnSummary};
 use crate::models::purchase::{
     CreatePurchaseInput, CreateSupplierPaymentInput, Purchase, SupplierBalance, SupplierPayment,
 };
-use crate::models::product_return::{CreateReturnInput, ProductReturn, ReturnSummary};
 use crate::models::report::{
     ActivityLog, DashboardSummary, MonthlyPoint, OnlinePaymentRecord, PaymentBreakdown,
     PeriodSummary, ProfitLoss, SalePoint, TopSeller,
@@ -62,45 +62,72 @@ fn current_user_id(session: &SessionState) -> Result<i64, AppError> {
         .ok_or_else(|| AppError::Authentication("Not signed in".into()))
 }
 
-fn require_permission(session: &SessionState, permission: &str) -> Result<i64, AppError> {
-    let guard = session
-        .0
-        .lock()
-        .map_err(|_| AppError::Internal("Session lock poisoned".into()))?;
-    let user = guard
-        .as_ref()
-        .ok_or_else(|| AppError::Authentication("Not signed in".into()))?;
-    if user.permissions.iter().any(|item| item == permission) {
-        Ok(user.id)
-    } else {
-        Err(AppError::PermissionDenied(format!(
-            "The current user does not have the {permission} permission"
-        )))
-    }
-}
-
-fn require_admin(session: &SessionState) -> Result<i64, AppError> {
-    let guard = session
-        .0
-        .lock()
-        .map_err(|_| AppError::Internal("Session lock poisoned".into()))?;
-    let user = guard
-        .as_ref()
-        .ok_or_else(|| AppError::Authentication("Not signed in".into()))?;
-    if user.role.eq_ignore_ascii_case("admin") {
-        Ok(user.id)
-    } else {
-        Err(AppError::PermissionDenied("Only an admin can delete this record".into()))
-    }
-}
-
 fn authorized_conn<'a>(
     db: &'a Database,
     session: &SessionState,
     permission: &str,
 ) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, AppError> {
-    require_permission(session, permission)?;
-    public_conn(db)
+    let user_id = current_user_id(session)?;
+    let guard = public_conn(db)?;
+    let Some(identity) = user_repository::find_active_identity_by_id(&guard, user_id)? else {
+        drop(guard);
+        if let Ok(mut current) = session.0.lock() {
+            *current = None;
+        }
+        return Err(AppError::Authentication(
+            "This account is disabled or no longer exists".into(),
+        ));
+    };
+    ensure_identity_permission(&guard, identity.role_id, permission)?;
+    Ok(guard)
+}
+
+fn authorized_any_conn<'a>(
+    db: &'a Database,
+    session: &SessionState,
+    permissions: &[&str],
+) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, AppError> {
+    let user_id = current_user_id(session)?;
+    let guard = public_conn(db)?;
+    let Some(identity) = user_repository::find_active_identity_by_id(&guard, user_id)? else {
+        drop(guard);
+        if let Ok(mut current) = session.0.lock() {
+            *current = None;
+        }
+        return Err(AppError::Authentication(
+            "This account is disabled or no longer exists".into(),
+        ));
+    };
+    let granted = user_repository::get_permissions(&guard, identity.role_id)?;
+    if granted
+        .iter()
+        .any(|item| item == "*" || permissions.iter().any(|required| item == required))
+    {
+        Ok(guard)
+    } else {
+        Err(AppError::PermissionDenied(format!(
+            "The current user does not have any required permission: {}",
+            permissions.join(", ")
+        )))
+    }
+}
+
+fn ensure_identity_permission(
+    conn: &rusqlite::Connection,
+    role_id: i64,
+    permission: &str,
+) -> Result<(), AppError> {
+    let permissions = user_repository::get_permissions(conn, role_id)?;
+    if permissions
+        .iter()
+        .any(|item| item == permission || item == "*")
+    {
+        Ok(())
+    } else {
+        Err(AppError::PermissionDenied(format!(
+            "The current user does not have the {permission} permission"
+        )))
+    }
 }
 
 /// Acquire a database connection only after proving there is a live backend
@@ -109,8 +136,18 @@ fn authenticated_conn<'a>(
     db: &'a Database,
     session: &SessionState,
 ) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, AppError> {
-    current_user_id(session)?;
-    public_conn(db)
+    let user_id = current_user_id(session)?;
+    let guard = public_conn(db)?;
+    if user_repository::find_active_identity_by_id(&guard, user_id)?.is_none() {
+        drop(guard);
+        if let Ok(mut current) = session.0.lock() {
+            *current = None;
+        }
+        return Err(AppError::Authentication(
+            "This account is disabled or no longer exists".into(),
+        ));
+    }
+    Ok(guard)
 }
 
 #[tauri::command]
@@ -156,15 +193,24 @@ pub fn get_current_user(
         return Ok(None);
     };
 
-    // The `default_password` flag must reflect the live database rather than
-    // the login-time snapshot, so the default-password warning disappears as
-    // soon as the signed-in user's password is actually changed.
     let guard = authenticated_conn(&db, &session)?;
+    let identity =
+        user_repository::find_active_identity_by_id(&guard, user.id)?.ok_or_else(|| {
+            AppError::Authentication("This account is disabled or no longer exists".into())
+        })?;
+    user.username = identity.username;
+    user.role = identity.role_name;
+    user.permissions = user_repository::get_permissions(&guard, identity.role_id)?;
     let password_hash = user_repository::get_password_hash(&guard, user.id)?;
     user.default_password = password_hash
         .map(|hash| crate::security::verify_password("admin123", &hash).unwrap_or(false))
         .unwrap_or(false);
 
+    drop(guard);
+    *session
+        .0
+        .lock()
+        .map_err(|_| AppError::Internal("Session lock poisoned".into()))? = Some(user.clone());
     Ok(Some(user))
 }
 
@@ -324,7 +370,12 @@ pub fn change_password(
 ) -> Result<(), AppError> {
     let user_id = current_user_id(&session)?;
     let guard = authenticated_conn(&db, &session)?;
-    let result = user_admin_service::change_password(&guard, user_id, &input.current_password, &input.new_password)?;
+    let result = user_admin_service::change_password(
+        &guard,
+        user_id,
+        &input.current_password,
+        &input.new_password,
+    )?;
     // After successful change, update session so default_password flag refreshes
     Ok(result)
 }
@@ -338,7 +389,7 @@ pub fn create_staff_member(
     _actor: Option<i64>,
     input: StaffInput,
 ) -> Result<StaffMember, AppError> {
-    let guard = authorized_conn(&db, &session, "users:manage")?;
+    let guard = authorized_conn(&db, &session, "staff:create")?;
     staff_service::create_staff(&guard, input, Some(current_user_id(&session)?))
 }
 
@@ -349,7 +400,7 @@ pub fn list_staff_members(
     search: Option<String>,
     status: Option<String>,
 ) -> Result<Vec<StaffMember>, AppError> {
-    let guard = authorized_conn(&db, &session, "users:manage")?;
+    let guard = authorized_conn(&db, &session, "staff:view")?;
     staff_service::list_staff(&guard, search, status)
 }
 
@@ -361,7 +412,7 @@ pub fn update_staff_member(
     id: i64,
     input: StaffInput,
 ) -> Result<StaffMember, AppError> {
-    let guard = authorized_conn(&db, &session, "users:manage")?;
+    let guard = authorized_conn(&db, &session, "staff:update")?;
     staff_service::update_staff(&guard, id, input, Some(current_user_id(&session)?))
 }
 
@@ -372,7 +423,7 @@ pub fn delete_staff_member(
     _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "users:manage")?;
+    let guard = authorized_conn(&db, &session, "staff:delete")?;
     staff_service::delete_staff(&guard, id, Some(current_user_id(&session)?))
 }
 
@@ -383,7 +434,7 @@ pub fn create_salary_record(
     _actor: Option<i64>,
     input: SalaryInput,
 ) -> Result<SalaryRecord, AppError> {
-    let guard = authorized_conn(&db, &session, "users:manage")?;
+    let guard = authorized_conn(&db, &session, "staff:create")?;
     staff_service::create_salary(&guard, input, Some(current_user_id(&session)?))
 }
 
@@ -396,7 +447,7 @@ pub fn list_salary_records(
     status: Option<String>,
     staff_id: Option<i64>,
 ) -> Result<Vec<SalaryRecord>, AppError> {
-    let guard = authorized_conn(&db, &session, "users:manage")?;
+    let guard = authorized_conn(&db, &session, "staff:view")?;
     staff_service::list_salaries(&guard, search, month, status, staff_id)
 }
 
@@ -408,7 +459,7 @@ pub fn update_salary_record(
     id: i64,
     input: SalaryInput,
 ) -> Result<SalaryRecord, AppError> {
-    let guard = authorized_conn(&db, &session, "users:manage")?;
+    let guard = authorized_conn(&db, &session, "staff:update")?;
     staff_service::update_salary(&guard, id, input, Some(current_user_id(&session)?))
 }
 
@@ -419,7 +470,7 @@ pub fn delete_salary_record(
     _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "users:manage")?;
+    let guard = authorized_conn(&db, &session, "staff:delete")?;
     staff_service::delete_salary(&guard, id, Some(current_user_id(&session)?))
 }
 
@@ -439,7 +490,7 @@ pub fn list_members(
     session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Member>, AppError> {
-    let guard = authorized_conn(&db, &session, "members:view")?;
+    let guard = authorized_any_conn(&db, &session, &["members:view", "reports:view"])?;
     member_service::list(&guard, search)
 }
 
@@ -496,7 +547,7 @@ pub fn update_payment(
     input: CreatePaymentInput,
     _actor: Option<i64>,
 ) -> Result<Payment, AppError> {
-    let guard = authorized_conn(&db, &session, "payments:create")?;
+    let guard = authorized_conn(&db, &session, "payments:update")?;
     payment_service::update(&guard, id, input, Some(current_user_id(&session)?))
 }
 
@@ -537,8 +588,7 @@ pub fn delete_payment(
     id: i64,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    require_admin(&session)?;
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "payments:delete")?;
     payment_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
 
@@ -562,7 +612,7 @@ pub fn edit_payment_details(
     input: EditPaymentDetailsInput,
     _actor: Option<i64>,
 ) -> Result<Payment, AppError> {
-    let guard = authorized_conn(&db, &session, "payments:create")?;
+    let guard = authorized_conn(&db, &session, "payments:update")?;
     payment_service::edit_payment_details(
         &guard,
         id,
@@ -597,7 +647,7 @@ pub fn edit_sale_payment_details(
     input: EditPaymentDetailsInput,
     _actor: Option<i64>,
 ) -> Result<SalePayment, AppError> {
-    let guard = authorized_conn(&db, &session, "payments:create")?;
+    let guard = authorized_conn(&db, &session, "payments:update")?;
     sale_payment_service::edit_sale_payment_details(
         &guard,
         id,
@@ -623,7 +673,7 @@ pub fn list_member_balances(
     session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<MemberBalance>, AppError> {
-    let guard = authorized_conn(&db, &session, "payments:view")?;
+    let guard = authorized_any_conn(&db, &session, &["payments:view", "reports:view"])?;
     payment_service::list_balances(&guard, search)
 }
 
@@ -633,7 +683,7 @@ pub fn list_customer_dues(
     session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<MemberBalance>, AppError> {
-    let guard = authorized_conn(&db, &session, "payments:view")?;
+    let guard = authorized_any_conn(&db, &session, &["payments:view", "reports:view"])?;
     payment_service::list_customer_dues(&guard, search)
 }
 
@@ -684,7 +734,16 @@ pub fn list_suppliers(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<Vec<Supplier>, AppError> {
-    let guard = authorized_conn(&db, &session, "suppliers:view")?;
+    let guard = authorized_any_conn(
+        &db,
+        &session,
+        &[
+            "suppliers:view",
+            "purchases:view",
+            "supplier_dues:view",
+            "reports:view",
+        ],
+    )?;
     supplier_service::list(&guard)
 }
 
@@ -715,13 +774,18 @@ pub fn delete_supplier(
 #[tauri::command]
 pub fn save_product_image(
     app: tauri::AppHandle,
+    db: State<Database>,
     session: State<SessionState>,
     bytes: Vec<u8>,
     extension: String,
 ) -> Result<String, AppError> {
     use rand_core::{OsRng, RngCore};
     use tauri::Manager;
-    require_permission(&session, "inventory:create")?;
+    drop(authorized_any_conn(
+        &db,
+        &session,
+        &["phones:create", "accessories:create"],
+    )?);
     if bytes.is_empty() || bytes.len() > 10 * 1024 * 1024 {
         return Err(AppError::validation(
             "Product image must be between 1 byte and 10 MB",
@@ -773,12 +837,17 @@ pub fn save_product_image(
 #[tauri::command]
 pub fn read_product_image(
     app: tauri::AppHandle,
+    db: State<Database>,
     session: State<SessionState>,
     relative_path: String,
 ) -> Result<String, AppError> {
     use base64::Engine;
     use tauri::Manager;
-    require_permission(&session, "inventory:view")?;
+    drop(authorized_any_conn(
+        &db,
+        &session,
+        &["phones:view", "accessories:view", "sales:create"],
+    )?);
     if relative_path.contains("..")
         || !relative_path
             .replace('\\', "/")
@@ -812,7 +881,7 @@ pub fn create_phone(
     session: State<SessionState>,
     input: CreatePhoneInput,
 ) -> Result<Phone, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:create")?;
+    let guard = authorized_conn(&db, &session, "phones:create")?;
     phone_service::create(&guard, input)
 }
 
@@ -822,7 +891,16 @@ pub fn list_phones(
     session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Phone>, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:view")?;
+    let guard = authorized_any_conn(
+        &db,
+        &session,
+        &[
+            "phones:view",
+            "sales:create",
+            "purchases:view",
+            "reports:view",
+        ],
+    )?;
     phone_service::list(&guard, search)
 }
 
@@ -832,7 +910,7 @@ pub fn get_phone(
     session: State<SessionState>,
     id: i64,
 ) -> Result<Phone, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:view")?;
+    let guard = authorized_any_conn(&db, &session, &["phones:view", "sales:create"])?;
     phone_service::get(&guard, id)
 }
 
@@ -843,7 +921,7 @@ pub fn update_phone(
     id: i64,
     input: CreatePhoneInput,
 ) -> Result<Phone, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:update")?;
+    let guard = authorized_conn(&db, &session, "phones:update")?;
     phone_service::update(&guard, id, input)
 }
 
@@ -854,7 +932,7 @@ pub fn delete_phone(
     id: i64,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:delete")?;
+    let guard = authorized_conn(&db, &session, "phones:delete")?;
     phone_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
 
@@ -868,7 +946,7 @@ pub fn restock_phone(
     imei_colors: Vec<String>,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:create")?;
+    let guard = authorized_conn(&db, &session, "phones:create")?;
     phone_service::restock(
         &guard,
         id,
@@ -885,7 +963,7 @@ pub fn add_phone_imei(
     session: State<SessionState>,
     input: AddPhoneImeiInput,
 ) -> Result<PhoneImei, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:create")?;
+    let guard = authorized_conn(&db, &session, "phones:create")?;
     phone_service::add_imei(&guard, input)
 }
 
@@ -895,7 +973,7 @@ pub fn list_phone_imeis(
     session: State<SessionState>,
     phone_id: i64,
 ) -> Result<Vec<PhoneImei>, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:view")?;
+    let guard = authorized_any_conn(&db, &session, &["phones:view", "sales:create"])?;
     phone_service::list_imei(&guard, phone_id)
 }
 
@@ -907,7 +985,7 @@ pub fn create_accessory(
     session: State<SessionState>,
     input: CreateAccessoryInput,
 ) -> Result<Accessory, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:create")?;
+    let guard = authorized_conn(&db, &session, "accessories:create")?;
     accessory_service::create(&guard, input)
 }
 
@@ -917,7 +995,16 @@ pub fn list_accessories(
     session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<Accessory>, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:view")?;
+    let guard = authorized_any_conn(
+        &db,
+        &session,
+        &[
+            "accessories:view",
+            "sales:create",
+            "purchases:view",
+            "reports:view",
+        ],
+    )?;
     accessory_service::list(&guard, search)
 }
 
@@ -927,7 +1014,7 @@ pub fn get_accessory(
     session: State<SessionState>,
     id: i64,
 ) -> Result<Accessory, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:view")?;
+    let guard = authorized_any_conn(&db, &session, &["accessories:view", "sales:create"])?;
     accessory_service::get(&guard, id)
 }
 
@@ -938,7 +1025,7 @@ pub fn update_accessory(
     id: i64,
     input: CreateAccessoryInput,
 ) -> Result<Accessory, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:update")?;
+    let guard = authorized_conn(&db, &session, "accessories:update")?;
     accessory_service::update(&guard, id, input)
 }
 
@@ -949,7 +1036,7 @@ pub fn delete_accessory(
     id: i64,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:delete")?;
+    let guard = authorized_conn(&db, &session, "accessories:delete")?;
     accessory_service::soft_delete(&guard, id, Some(current_user_id(&session)?))
 }
 
@@ -961,7 +1048,7 @@ pub fn restock_accessory(
     quantity: i64,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:create")?;
+    let guard = authorized_conn(&db, &session, "accessories:create")?;
     accessory_service::restock(&guard, id, quantity, Some(current_user_id(&session)?))
 }
 
@@ -975,6 +1062,14 @@ pub fn create_sale(
     _actor: Option<i64>,
 ) -> Result<Sale, AppError> {
     let guard = authorized_conn(&db, &session, "sales:create")?;
+    if input.discount > 0.0 {
+        let identity =
+            user_repository::find_active_identity_by_id(&guard, current_user_id(&session)?)?
+                .ok_or_else(|| {
+                    AppError::Authentication("This account is disabled or no longer exists".into())
+                })?;
+        ensure_identity_permission(&guard, identity.role_id, "sales:apply_discount")?;
+    }
     sale_service::create(&guard, input, Some(current_user_id(&session)?))
 }
 
@@ -995,7 +1090,7 @@ pub fn list_sales_for_period(
     from: String,
     to: String,
 ) -> Result<Vec<Sale>, AppError> {
-    let guard = authorized_conn(&db, &session, "sales:view")?;
+    let guard = authorized_any_conn(&db, &session, &["sales:view", "reports:view"])?;
     sale_service::list_for_period(&guard, &from, &to)
 }
 
@@ -1017,7 +1112,22 @@ pub fn update_sale(
     input: CreateSaleInput,
     _actor: Option<i64>,
 ) -> Result<Sale, AppError> {
-    let guard = authorized_conn(&db, &session, "sales:create")?;
+    let guard = authorized_conn(&db, &session, "sales:update")?;
+    let existing_discount: f64 = guard
+        .query_row(
+            "SELECT discount FROM sales WHERE id = ?1 AND is_deleted = 0",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::validation("Sale not found"))?;
+    if (input.discount - existing_discount).abs() > 0.005 {
+        let identity =
+            user_repository::find_active_identity_by_id(&guard, current_user_id(&session)?)?
+                .ok_or_else(|| {
+                    AppError::Authentication("This account is disabled or no longer exists".into())
+                })?;
+        ensure_identity_permission(&guard, identity.role_id, "sales:apply_discount")?;
+    }
     sale_service::update(&guard, id, input, Some(current_user_id(&session)?))
 }
 
@@ -1028,7 +1138,6 @@ pub fn delete_sale(
     id: i64,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    require_admin(&session)?;
     let guard = authorized_conn(&db, &session, "sales:delete")?;
     sale_service::delete(&guard, id, Some(current_user_id(&session)?))
 }
@@ -1063,7 +1172,7 @@ pub fn list_returns_for_period(
     from: String,
     to: String,
 ) -> Result<Vec<ReturnSummary>, AppError> {
-    let guard = authorized_conn(&db, &session, "returns:view")?;
+    let guard = authorized_any_conn(&db, &session, &["returns:view", "reports:view"])?;
     product_return_service::list_for_period(&guard, &from, &to)
 }
 
@@ -1085,7 +1194,7 @@ pub fn update_return(
     input: CreateReturnInput,
     _actor: Option<i64>,
 ) -> Result<ProductReturn, AppError> {
-    let guard = authorized_conn(&db, &session, "returns:create")?;
+    let guard = authorized_conn(&db, &session, "returns:update")?;
     product_return_service::update(&guard, id, input, Some(current_user_id(&session)?))
 }
 
@@ -1096,7 +1205,6 @@ pub fn delete_return(
     id: i64,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    require_admin(&session)?;
     let guard = authorized_conn(&db, &session, "returns:delete")?;
     product_return_service::delete(&guard, id, Some(current_user_id(&session)?))
 }
@@ -1159,7 +1267,7 @@ pub fn create_product_category(
     input: CreateProductCategoryInput,
     _actor: Option<i64>,
 ) -> Result<ProductCategory, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:create")?;
+    let guard = authorized_any_conn(&db, &session, &["phones:create", "accessories:create"])?;
     let id = product_category_service::create_category(
         &guard,
         &input,
@@ -1176,7 +1284,11 @@ pub fn list_product_categories(
     db: State<Database>,
     session: State<SessionState>,
 ) -> Result<Vec<ProductCategory>, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:view")?;
+    let guard = authorized_any_conn(
+        &db,
+        &session,
+        &["phones:view", "accessories:view", "purchases:view"],
+    )?;
     product_category_service::list_categories(&guard)
 }
 
@@ -1188,7 +1300,7 @@ pub fn update_product_category(
     input: CreateProductCategoryInput,
     _actor: Option<i64>,
 ) -> Result<ProductCategory, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:update")?;
+    let guard = authorized_any_conn(&db, &session, &["phones:update", "accessories:update"])?;
     product_category_service::update_category(&guard, id, &input, Some(current_user_id(&session)?))
 }
 
@@ -1199,7 +1311,7 @@ pub fn delete_product_category(
     id: i64,
     _actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:delete")?;
+    let guard = authorized_any_conn(&db, &session, &["phones:delete", "accessories:delete"])?;
     product_category_service::delete_category(&guard, id, Some(current_user_id(&session)?))
 }
 
@@ -1223,7 +1335,7 @@ pub fn list_expenses(
     from: Option<String>,
     to: Option<String>,
 ) -> Result<Vec<Expense>, AppError> {
-    let guard = authorized_conn(&db, &session, "expenses:view")?;
+    let guard = authorized_any_conn(&db, &session, &["expenses:view", "reports:view"])?;
     expense_service::list_expenses(&guard, category_id, from, to)
 }
 
@@ -1255,7 +1367,7 @@ pub fn expense_category_totals(
     from: String,
     to: String,
 ) -> Result<Vec<CategoryTotal>, AppError> {
-    let guard = authorized_conn(&db, &session, "expenses:view")?;
+    let guard = authorized_any_conn(&db, &session, &["expenses:view", "reports:view"])?;
     expense_service::category_expense_totals(&guard, &from, &to)
 }
 
@@ -1280,9 +1392,7 @@ pub fn get_dashboard_summary(
     today: Option<String>,
 ) -> Result<DashboardSummary, AppError> {
     let guard = authorized_conn(&db, &session, "dashboard:view")?;
-    let today_str = today.unwrap_or_else(|| {
-        chrono::Utc::now().format("%Y-%m-%d").to_string()
-    });
+    let today_str = today.unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
     report_service::dashboard(&guard, months.unwrap_or(12), &today_str)
 }
 
@@ -1368,7 +1478,7 @@ pub fn get_online_payment_records(
     from: String,
     to: String,
 ) -> Result<Vec<OnlinePaymentRecord>, AppError> {
-    let guard = authorized_conn(&db, &session, "reports:view")?;
+    let guard = authorized_any_conn(&db, &session, &["online_payments:view", "reports:view"])?;
     report_service::online_payment_records(&guard, &from, &to)
 }
 
@@ -1434,7 +1544,7 @@ pub fn deactivate_license(
     session: State<SessionState>,
     _actor: Option<i64>,
 ) -> Result<LicenseStatus, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "license:update")?;
     license_service::deactivate(&guard, Some(current_user_id(&session)?))
 }
 
@@ -1452,7 +1562,7 @@ pub fn create_notification(
     session: State<SessionState>,
     input: CreateNotificationInput,
 ) -> Result<AppNotification, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "users:manage")?;
     notification_service::create(&guard, input)
 }
 
@@ -1531,7 +1641,7 @@ pub fn list_activity_logs(
     session: State<SessionState>,
     limit: Option<i64>,
 ) -> Result<Vec<ActivityLog>, AppError> {
-    let guard = authorized_conn(&db, &session, "reports:view")?;
+    let guard = authorized_conn(&db, &session, "activity:view")?;
     report_service::recent_activity(&guard, limit.unwrap_or(100))
 }
 
@@ -1555,9 +1665,10 @@ pub fn create_backup(
 
 #[tauri::command]
 pub fn list_backup_modules(
+    db: State<Database>,
     session: State<SessionState>,
 ) -> Result<Vec<crate::models::backup::BackupModule>, AppError> {
-    require_permission(&session, "backup:view")?;
+    drop(authorized_conn(&db, &session, "backup:view")?);
     Ok(backup_service::available_modules())
 }
 
@@ -1622,8 +1733,12 @@ pub fn inspect_backup(
 }
 
 #[tauri::command]
-pub fn open_backup_folder(path: String, session: State<SessionState>) -> Result<(), AppError> {
-    require_permission(&session, "backup:view")?;
+pub fn open_backup_folder(
+    path: String,
+    db: State<Database>,
+    session: State<SessionState>,
+) -> Result<(), AppError> {
+    drop(authorized_conn(&db, &session, "backup:view")?);
     let target = std::path::PathBuf::from(path);
     let folder = if target.is_dir() {
         target
@@ -1704,11 +1819,12 @@ pub fn restore_backup(
 #[tauri::command]
 pub fn pick_backup_file(
     app: tauri::AppHandle,
+    db: State<Database>,
     session: State<SessionState>,
 ) -> Result<Option<String>, AppError> {
     use tauri_plugin_dialog::DialogExt;
 
-    require_permission(&session, "backup:view")?;
+    drop(authorized_conn(&db, &session, "backup:view")?);
 
     let folder = backup_service::desktop_folder().unwrap_or_else(|_| std::env::temp_dir());
     let picked = app
@@ -1839,7 +1955,7 @@ pub fn list_purchases_for_period(
     from: String,
     to: String,
 ) -> Result<Vec<Purchase>, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:view")?;
+    let guard = authorized_any_conn(&db, &session, &["purchases:view", "reports:view"])?;
     purchase_service::list_for_period(&guard, &from, &to)
 }
 
@@ -1860,7 +1976,7 @@ pub fn update_purchase(
     id: i64,
     input: CreatePurchaseInput,
 ) -> Result<Purchase, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:create")?;
+    let guard = authorized_conn(&db, &session, "purchases:update")?;
     purchase_service::update_purchase(&guard, id, input, Some(current_user_id(&session)?))
 }
 
@@ -1885,7 +2001,7 @@ pub fn create_supplier_payment(
     _actor: Option<i64>,
     input: CreateSupplierPaymentInput,
 ) -> Result<SupplierPayment, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:create")?;
+    let guard = authorized_conn(&db, &session, "supplier_dues:create")?;
     purchase_service::create_supplier_payment(&guard, input, Some(current_user_id(&session)?))
 }
 
@@ -1897,7 +2013,7 @@ pub fn update_supplier_payment(
     id: i64,
     input: CreateSupplierPaymentInput,
 ) -> Result<SupplierPayment, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:create")?;
+    let guard = authorized_conn(&db, &session, "supplier_dues:update")?;
     purchase_service::update_supplier_payment(&guard, id, input, Some(current_user_id(&session)?))
 }
 
@@ -1907,7 +2023,7 @@ pub fn list_supplier_payments(
     session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<SupplierPayment>, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:view")?;
+    let guard = authorized_conn(&db, &session, "supplier_dues:view")?;
     purchase_service::list_supplier_payments(&guard, search)
 }
 
@@ -1917,7 +2033,7 @@ pub fn list_supplier_payments_by_supplier(
     session: State<SessionState>,
     supplier_id: i64,
 ) -> Result<Vec<SupplierPayment>, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:view")?;
+    let guard = authorized_conn(&db, &session, "supplier_dues:view")?;
     purchase_service::list_supplier_payments_by_supplier(&guard, supplier_id)
 }
 
@@ -1928,8 +2044,7 @@ pub fn delete_supplier_payment(
     _actor: Option<i64>,
     id: i64,
 ) -> Result<(), AppError> {
-    require_admin(&session)?;
-    let guard = authorized_conn(&db, &session, "purchases:delete")?;
+    let guard = authorized_conn(&db, &session, "supplier_dues:delete")?;
     purchase_service::delete_supplier_payment(&guard, id, Some(current_user_id(&session)?))
 }
 
@@ -1939,7 +2054,7 @@ pub fn get_supplier_balance(
     session: State<SessionState>,
     supplier_id: i64,
 ) -> Result<SupplierBalance, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:view")?;
+    let guard = authorized_conn(&db, &session, "supplier_dues:view")?;
     purchase_service::supplier_balance(&guard, supplier_id)
 }
 
@@ -1949,7 +2064,7 @@ pub fn list_supplier_balances(
     session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<SupplierBalance>, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:view")?;
+    let guard = authorized_any_conn(&db, &session, &["supplier_dues:view", "reports:view"])?;
     purchase_service::list_supplier_balances(&guard, search)
 }
 
@@ -1959,7 +2074,7 @@ pub fn list_supplier_dues(
     session: State<SessionState>,
     search: Option<String>,
 ) -> Result<Vec<SupplierBalance>, AppError> {
-    let guard = authorized_conn(&db, &session, "purchases:view")?;
+    let guard = authorized_any_conn(&db, &session, &["supplier_dues:view", "reports:view"])?;
     purchase_service::list_supplier_dues(&guard, search)
 }
 
@@ -1971,7 +2086,7 @@ pub fn list_phone_options(
     session: State<SessionState>,
     option_type: Option<String>,
 ) -> Result<Vec<crate::models::phone::PhoneOption>, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "phones:view")?;
     if let Some(t) = option_type {
         crate::services::phone_option_service::list_by_type(&guard, &t)
     } else {
@@ -1986,7 +2101,7 @@ pub fn create_phone_option(
     input: crate::models::phone::CreatePhoneOptionInput,
     __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:create")?;
+    let guard = authorized_conn(&db, &session, "phones:create")?;
     crate::services::phone_option_service::create(&guard, input)
 }
 
@@ -1998,7 +2113,7 @@ pub fn update_phone_option(
     input: crate::models::phone::CreatePhoneOptionInput,
     __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:update")?;
+    let guard = authorized_conn(&db, &session, "phones:update")?;
     crate::services::phone_option_service::update(&guard, id, input)
 }
 
@@ -2009,7 +2124,7 @@ pub fn delete_phone_option(
     id: i64,
     __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:delete")?;
+    let guard = authorized_conn(&db, &session, "phones:delete")?;
     crate::services::phone_option_service::delete(&guard, id)
 }
 
@@ -2021,7 +2136,7 @@ pub fn set_phone_option_active(
     is_active: bool,
     __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:update")?;
+    let guard = authorized_conn(&db, &session, "phones:update")?;
     crate::services::phone_option_service::set_active(&guard, id, is_active)
 }
 
@@ -2033,7 +2148,7 @@ pub fn list_accessory_options(
     session: State<SessionState>,
     option_type: Option<String>,
 ) -> Result<Vec<crate::models::phone::PhoneOption>, AppError> {
-    let guard = authenticated_conn(&db, &session)?;
+    let guard = authorized_conn(&db, &session, "accessories:view")?;
     if let Some(t) = option_type {
         crate::services::phone_option_service::list_by_type(&guard, &t)
     } else {
@@ -2048,7 +2163,7 @@ pub fn create_accessory_option(
     input: crate::models::phone::CreatePhoneOptionInput,
     __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:create")?;
+    let guard = authorized_conn(&db, &session, "accessories:create")?;
     crate::services::phone_option_service::create(&guard, input)
 }
 
@@ -2060,7 +2175,7 @@ pub fn update_accessory_option(
     input: crate::models::phone::CreatePhoneOptionInput,
     __actor: Option<i64>,
 ) -> Result<crate::models::phone::PhoneOption, AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:update")?;
+    let guard = authorized_conn(&db, &session, "accessories:update")?;
     crate::services::phone_option_service::update(&guard, id, input)
 }
 
@@ -2071,7 +2186,7 @@ pub fn delete_accessory_option(
     id: i64,
     __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:delete")?;
+    let guard = authorized_conn(&db, &session, "accessories:delete")?;
     crate::services::phone_option_service::delete(&guard, id)
 }
 
@@ -2083,6 +2198,71 @@ pub fn set_accessory_option_active(
     is_active: bool,
     __actor: Option<i64>,
 ) -> Result<(), AppError> {
-    let guard = authorized_conn(&db, &session, "inventory:update")?;
+    let guard = authorized_conn(&db, &session, "accessories:update")?;
     crate::services::phone_option_service::set_active(&guard, id, is_active)
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use crate::services::test_utils::in_memory_conn;
+
+    #[test]
+    fn restricted_salesman_is_denied_missing_backend_permissions() {
+        let conn = in_memory_conn();
+        conn.execute("INSERT INTO roles (name) VALUES ('Salesman')", [])
+            .unwrap();
+        let role_id = conn.last_insert_rowid();
+        for permission in [
+            "dashboard:view",
+            "sales:create",
+            "sales:view",
+            "members:view",
+        ] {
+            conn.execute("INSERT INTO permissions (name) VALUES (?1)", [permission])
+                .unwrap();
+            let permission_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO role_permissions (role_id, permission_id) VALUES (?1, ?2)",
+                rusqlite::params![role_id, permission_id],
+            )
+            .unwrap();
+        }
+
+        assert!(ensure_identity_permission(&conn, role_id, "sales:create").is_ok());
+        assert!(ensure_identity_permission(&conn, role_id, "members:view").is_ok());
+        for denied in [
+            "purchases:view",
+            "suppliers:view",
+            "reports:view",
+            "settings:view",
+            "backup:view",
+            "users:manage",
+            "sales:delete",
+        ] {
+            assert!(matches!(
+                ensure_identity_permission(&conn, role_id, denied),
+                Err(AppError::PermissionDenied(_))
+            ));
+        }
+
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role_id, status)
+             VALUES ('ali', 'not-used-by-this-test', ?1, 'active')",
+            [role_id],
+        )
+        .unwrap();
+        let user_id = conn.last_insert_rowid();
+        assert!(user_repository::find_active_identity_by_id(&conn, user_id)
+            .unwrap()
+            .is_some());
+        conn.execute(
+            "UPDATE users SET status = 'disabled' WHERE id = ?1",
+            [user_id],
+        )
+        .unwrap();
+        assert!(user_repository::find_active_identity_by_id(&conn, user_id)
+            .unwrap()
+            .is_none());
+    }
 }

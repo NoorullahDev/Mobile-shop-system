@@ -58,6 +58,8 @@ import type { Purchase, SupplierBalance } from "../types/purchase";
 import type { OnlinePaymentRecord, PaymentBreakdown, PeriodSummary, ProfitLoss, ReportType, TopSeller } from "../types/report";
 import type { ReturnSummary } from "../types/return";
 import type { Sale } from "../types/sale";
+import { useSessionStore } from "../store/session";
+import { can } from "../lib/permissions";
 
 const reportOptions: { value: ReportType; label: string }[] = [
   { value: "all", label: "All Reports" },
@@ -126,6 +128,7 @@ interface ProductRow {
 }
 
 export function ReportsPage() {
+  const canPrint = can(useSessionStore((s) => s.user?.permissions), "reports:print");
   const today = toInputDate(new Date());
   const [reportType, setReportType] = useState<ReportType>("all");
   const [from, setFrom] = useState(`${today.slice(0, 8)}01`);
@@ -386,13 +389,13 @@ export function ReportsPage() {
     URL.revokeObjectURL(url);
   };
 
-  const reportActions = (
+  const reportActions = canPrint ? (
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="secondary" size="sm" onClick={handleExportCsv} icon={<Download className="h-3.5 w-3.5" />}>Export CSV</Button>
       <Button variant="secondary" size="sm" onClick={handlePrint} icon={<FileText className="h-3.5 w-3.5" />}>Export PDF</Button>
       <Button size="sm" onClick={handlePrint} icon={<Printer className="h-3.5 w-3.5" />}>Print Report</Button>
     </div>
-  );
+  ) : undefined;
 
   const reportTable = (rows: ProductRow[], inventoryMode: boolean) => (
     <Card title={inventoryMode ? "Inventory" : "Product Catalog"} subtitle={inventoryMode ? "Current stock levels and valuation" : "Mobile phones and accessories"} noPadding>

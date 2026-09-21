@@ -28,11 +28,14 @@ import { formatMoney, formatDate, methodLabels } from "../lib/format";
 import type { SupplierBalance, SupplierPayment } from "../types/purchase";
 import { SUPPLIER_PAYMENT_STATUSES, PURCHASE_PAYMENT_METHODS } from "../types/purchase";
 import type { Supplier } from "../types/inventory";
+import { can } from "../lib/permissions";
 
 export function SupplierDuesPage() {
   const { suppliers, load: loadSuppliers } = useSupplierStore();
   const user = useSessionStore((s) => s.user);
-  const isAdmin = user?.role.toLowerCase() === "admin";
+  const canCreate = can(user?.permissions, "supplier_dues:create");
+  const canUpdate = can(user?.permissions, "supplier_dues:update");
+  const canDelete = can(user?.permissions, "supplier_dues:delete");
 
   const [dues, setDues] = useState<SupplierBalance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -309,7 +312,7 @@ export function SupplierDuesPage() {
                       </td>
                       <td>
                         <div className="flex items-center justify-end gap-1">
-                          {supplier && (
+                          {supplier && canCreate && (
                             <button
                               type="button"
                               onClick={() => setPayFor(supplier)}
@@ -444,8 +447,8 @@ export function SupplierDuesPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusBadge status={p.status} />
-                      <button type="button" onClick={() => { setHistoryFor(null); setEditPayment(p); }} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit payment"><Pencil className="h-3.5 w-3.5" /></button>
-                      {isAdmin && historyBalance && historyBalance.balance <= 0.001 && (
+                      {canUpdate && <button type="button" onClick={() => { setHistoryFor(null); setEditPayment(p); }} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-blue-50" style={{ color: "#3B6FD4" }} title="Edit payment"><Pencil className="h-3.5 w-3.5" /></button>}
+                      {canDelete && historyBalance && historyBalance.balance <= 0.001 && (
                         <button type="button" onClick={() => setConfirmDelete(p.id)} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-red-50" style={{ color: "#DC2626" }} title="Delete cleared payment"><Trash2 className="h-3.5 w-3.5" /></button>
                       )}
                     </div>

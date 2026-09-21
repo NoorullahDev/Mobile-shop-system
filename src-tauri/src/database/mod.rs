@@ -74,6 +74,27 @@ mod tests {
         assert_ne!(hash, "admin123");
         assert!(crate::security::verify_password("admin123", &hash).unwrap());
 
+        let (permission_count, admin_permission_count): (i64, i64) = conn
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM permissions),
+                    (SELECT COUNT(*) FROM role_permissions rp
+                     JOIN roles r ON r.id = rp.role_id
+                     WHERE lower(r.name) = 'admin')",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(admin_permission_count, permission_count);
+        let legacy_inventory_permissions: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM permissions WHERE name LIKE 'inventory:%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_inventory_permissions, 0);
+
         // key tables created
         for table in [
             "users",
@@ -142,11 +163,7 @@ mod tests {
             ("members", "member"),
         ] {
             let count: i64 = conn
-                .query_row(
-                    &format!("SELECT COUNT(*) FROM {table}"),
-                    [],
-                    |r| r.get(0),
-                )
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
                 .unwrap();
             assert_eq!(count, 0, "fresh install must not contain a seeded {label}");
         }

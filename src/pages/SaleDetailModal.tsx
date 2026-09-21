@@ -253,9 +253,22 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                     <tr key={it.id}>
                       <td>
                         <div style={{ color: "#0F172A", fontSize: "13px" }}>{it.product_name ?? "—"}</div>
+                        {(it.color || it.storage || it.battery_health_pct != null || it.pta_status) && (
+                          <div className="flex flex-wrap gap-x-2 text-[11px]" style={{ color: "#64748B" }}>
+                            {it.color && <span>Color: {it.color}</span>}
+                            {it.storage && <span>Storage: {it.storage}</span>}
+                            {it.battery_health_pct != null && <span>Battery: {it.battery_health_pct}%</span>}
+                            {it.pta_status && <span>PTA: {it.pta_status}</span>}
+                          </div>
+                        )}
                         {it.imei && (
                           <div className="font-mono text-[11px]" style={{ color: "#64748B" }}>
-                            IMEI: {it.imei}
+                            IMEI 1: {it.imei}
+                          </div>
+                        )}
+                        {it.imei2 && (
+                          <div className="font-mono text-[11px]" style={{ color: "#64748B" }}>
+                            IMEI 2: {it.imei2}
                           </div>
                         )}
                         {it.variant && (
@@ -408,8 +421,12 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
 function ReturnItemMeta({ it }: { it: ReturnItem }) {
   return (
     <div className="text-[11px]" style={{ color: "#64748B" }}>
-      {it.imei && <span className="font-mono">IMEI: {it.imei}</span>}
+      {it.imei && <span className="font-mono">IMEI 1: {it.imei}</span>}
+      {it.imei2 && <span className="font-mono"> IMEI 2: {it.imei2}</span>}
       {it.color && <span> Colour: {it.color}</span>}
+      {it.pta_status && <span> PTA: {it.pta_status}</span>}
+      {it.storage && <span> Storage: {it.storage}</span>}
+      {it.battery_health_pct != null && <span> Battery: {it.battery_health_pct}%</span>}
       {it.serial_no && <span className="font-mono"> SN: {it.serial_no}</span>}
       <span className="capitalize"> · {it.condition}</span>
       {it.reason && (

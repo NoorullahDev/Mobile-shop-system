@@ -38,8 +38,12 @@ export interface ReturnItem {
   imei_id?: number | null;
   product_name?: string | null;
   imei?: string | null;
+  imei2?: string | null;
   serial_no?: string | null;
   color?: string | null;
+  pta_status?: string | null;
+  storage?: string | null;
+  battery_health_pct?: number | null;
   quantity: number;
   unit_price: number;
   line_total: number;

@@ -26,7 +26,7 @@ interface PurchaseFormProps {
   suppliers: Supplier[];
   phones: Phone[];
   accessories: Accessory[];
-  addPhone: (input: CreatePhoneInput) => Promise<void>;
+  addPhone: (input: CreatePhoneInput) => Promise<Phone>;
   addAccessory: (input: CreateAccessoryInput) => Promise<void>;
 }
 
@@ -36,11 +36,29 @@ interface PhoneDraftLine {
   quantity: string;
   unitCost: string;
   sellingPrice: string;
-  warranty: string;
-  condition: string;
+  legacyWarranty: string;
+  legacyCondition: string;
   imeis: string[];
+  imei2s: string[];
   imeiColors: string[];
+  imeiPtaStatuses: string[];
+  imeiStorages: string[];
+  imeiBatteryHealths: string[];
 }
+
+const CUSTOM_PTA_STATUS = "__custom__";
+const PTA_STATUS_OPTIONS = [
+  { value: "PTA Approved", label: "PTA Approved" },
+  { value: "Non-PTA", label: "Non-PTA" },
+  { value: "JV", label: "JV" },
+  { value: "Dual SIM", label: "Dual SIM" },
+  { value: CUSTOM_PTA_STATUS, label: "Other / Custom" },
+];
+const DEFAULT_PTA_STATUSES = new Set(
+  PTA_STATUS_OPTIONS
+    .filter((option) => option.value !== CUSTOM_PTA_STATUS)
+    .map((option) => option.value),
+);
 
 interface AccessoryDraftLine {
   key: number;
@@ -60,10 +78,14 @@ function newPhoneLine(quantity = 1): PhoneDraftLine {
     quantity: String(quantity),
     unitCost: "",
     sellingPrice: "",
-    warranty: "",
-    condition: "",
+    legacyWarranty: "",
+    legacyCondition: "",
     imeis: Array.from({ length: quantity }, () => ""),
+    imei2s: Array.from({ length: quantity }, () => ""),
     imeiColors: Array.from({ length: quantity }, () => ""),
+    imeiPtaStatuses: Array.from({ length: quantity }, () => "PTA Approved"),
+    imeiStorages: Array.from({ length: quantity }, () => ""),
+    imeiBatteryHealths: Array.from({ length: quantity }, () => ""),
   };
 }
 
@@ -79,7 +101,7 @@ function newAccessoryLine(): AccessoryDraftLine {
 }
 
 function phoneDisplay(p: Phone) {
-  return `${p.brand} ${p.model}${p.storage ? ` (${p.storage})` : ""}`;
+  return `${p.brand ? `${p.brand} ` : ""}${p.model}${p.storage ? ` (${p.storage})` : ""}`;
 }
 
 function accessoryDisplay(a: Accessory) {
@@ -108,12 +130,31 @@ export function PurchaseForm({
         quantity: String(i.quantity),
         unitCost: String(i.unit_cost || 0),
         sellingPrice: i.selling_price ? String(i.selling_price) : "",
-        warranty: i.warranty || "",
-        condition: i.condition || "",
+        legacyWarranty: i.warranty || "",
+        legacyCondition: i.condition || "",
         imeis: i.serials || [],
+        imei2s: Array.from(
+          { length: i.serials?.length ?? 0 },
+          (_, k) => i.imei2s?.[k] ?? "",
+        ),
         imeiColors: Array.from(
           { length: i.serials?.length ?? 0 },
           (_, k) => i.imei_colors?.[k] ?? "",
+        ),
+        imeiPtaStatuses: Array.from(
+          { length: i.serials?.length ?? 0 },
+          (_, k) => i.imei_pta_statuses?.[k]?.trim() || "PTA Approved",
+        ),
+        imeiStorages: Array.from(
+          { length: i.serials?.length ?? 0 },
+          (_, k) => i.imei_storages?.[k] ?? "",
+        ),
+        imeiBatteryHealths: Array.from(
+          { length: i.serials?.length ?? 0 },
+          (_, k) => {
+            const value = i.imei_battery_healths?.[k];
+            return value == null ? "" : String(value);
+          },
         ),
       }));
   }, [initial]);
@@ -201,10 +242,20 @@ export function PurchaseForm({
         if (l.key !== key) return l;
         const n = Math.max(1, quantity);
         const imeis = Array.from({ length: n }, (_, i) => l.imeis[i] ?? "");
+        const imei2s = Array.from({ length: n }, (_, i) => l.imei2s[i] ?? "");
         const imeiColors = Array.from({ length: n }, (_, i) => l.imeiColors[i] ?? "");
-        return { ...l, quantity: String(n), imeis, imeiColors };
+        const imeiPtaStatuses = Array.from({ length: n }, (_, i) => l.imeiPtaStatuses[i] ?? "PTA Approved");
+        const imeiStorages = Array.from({ length: n }, (_, i) => l.imeiStorages[i] ?? "");
+        const imeiBatteryHealths = Array.from({ length: n }, (_, i) => l.imeiBatteryHealths[i] ?? "");
+        return { ...l, quantity: String(n), imeis, imei2s, imeiColors, imeiPtaStatuses, imeiStorages, imeiBatteryHealths };
       }),
     );
+  };
+
+  const setPhoneImei2 = (key: number, index: number, value: string) => {
+    setPhoneLines((ls) => ls.map((l) =>
+      l.key === key ? { ...l, imei2s: l.imei2s.map((v, i) => (i === index ? value : v)) } : l,
+    ));
   };
 
   const setPhoneImei = (key: number, index: number, value: string) => {
@@ -217,6 +268,12 @@ export function PurchaseForm({
     );
   };
 
+  const setPhonePtaStatus = (key: number, index: number, value: string) => {
+    setPhoneLines((ls) => ls.map((l) =>
+      l.key === key ? { ...l, imeiPtaStatuses: l.imeiPtaStatuses.map((v, i) => (i === index ? value : v)) } : l,
+    ));
+  };
+
   const setPhoneColor = (key: number, index: number, value: string) => {
     setPhoneLines((ls) =>
       ls.map((l) =>
@@ -227,37 +284,34 @@ export function PurchaseForm({
     );
   };
 
-  const setPhoneBulkImeis = (key: number, text: string) => {
-    const lines = text.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
+  const setPhoneStorage = (key: number, index: number, value: string) => {
     setPhoneLines((ls) =>
-      ls.map((l) => {
-        if (l.key !== key) return l;
-        const qty = Number(l.quantity) || 0;
-        const imeis = Array.from({ length: qty }, (_, i) => lines[i] ?? l.imeis[i] ?? "");
-        const imeiColors = Array.from({ length: qty }, (_, i) => l.imeiColors[i] ?? "");
-        return { ...l, imeis, imeiColors };
-      }),
+      ls.map((l) =>
+        l.key === key
+          ? { ...l, imeiStorages: l.imeiStorages.map((v, i) => (i === index ? value : v)) }
+          : l,
+      ),
     );
   };
 
-  const setPhoneBulkColors = (key: number, text: string) => {
-    const lines = text.split(/\r?\n/).map((s) => s.trim());
+  const setPhoneBatteryHealth = (key: number, index: number, value: string) => {
     setPhoneLines((ls) =>
-      ls.map((l) => {
-        if (l.key !== key) return l;
-        const qty = l.imeis.length;
-        const imeiColors = Array.from({ length: qty }, (_, i) => {
-          const v = lines[i] ?? "";
-          return v !== "" ? v : l.imeiColors[i] ?? "";
-        });
-        return { ...l, imeiColors };
-      }),
+      ls.map((l) =>
+        l.key === key
+          ? { ...l, imeiBatteryHealths: l.imeiBatteryHealths.map((v, i) => (i === index ? value : v)) }
+          : l,
+      ),
     );
   };
 
   const addPhoneById = (id: number) => {
     const line = newPhoneLine();
     line.productId = String(id);
+    const phone = phones.find((p) => p.id === id);
+    if (phone) {
+      line.unitCost = String(phone.cost_price || "");
+      line.sellingPrice = String(phone.sale_price || "");
+    }
     setPhoneLines((ls) => [...ls, line]);
     setPhoneSearch("");
     setPhoneDropOpen(false);
@@ -274,7 +328,12 @@ export function PurchaseForm({
   const handleAddPhone = async (input: CreatePhoneInput) => {
     setAddError(null);
     try {
-      await addPhone(input);
+      const created = await addPhone(input);
+      const line = newPhoneLine();
+      line.productId = String(created.id);
+      line.unitCost = created.cost_price ? String(created.cost_price) : "";
+      line.sellingPrice = created.sale_price ? String(created.sale_price) : "";
+      setPhoneLines((ls) => [...ls, line]);
       setShowAddPhone(false);
     } catch (e) {
       setAddError(String(e));
@@ -331,8 +390,15 @@ export function PurchaseForm({
         errs.push("Phone cost cannot be negative.");
         continue;
       }
-        const units = l.imeis
-        .map((s, i) => ({ imei: s.trim(), color: (l.imeiColors[i] ?? "").trim() }))
+      const units = l.imeis
+        .map((s, i) => ({
+          imei: s.trim(),
+          imei2: (l.imei2s[i] ?? "").trim(),
+          color: (l.imeiColors[i] ?? "").trim(),
+          ptaStatus: (l.imeiPtaStatuses[i] ?? "PTA Approved").trim(),
+          storage: (l.imeiStorages[i] ?? "").trim(),
+          batteryHealth: (l.imeiBatteryHealths[i] ?? "").trim(),
+        }))
         .filter((u) => u.imei.length > 0);
       const imeis = units.map((u) => u.imei);
       if (imeis.length !== qty) {
@@ -346,16 +412,48 @@ export function PurchaseForm({
         errs.push("Duplicate IMEIs are not allowed for a phone.");
         continue;
       }
+      const allIdentifiers = units.flatMap((u) => [u.imei, u.imei2].filter(Boolean));
+      if (new Set(allIdentifiers.map((v) => v.toUpperCase())).size !== allIdentifiers.length) {
+        errs.push("IMEI 1 and IMEI 2 values must be unique across all physical units.");
+        continue;
+      }
+      if (units.some((u) => !u.ptaStatus || u.ptaStatus === CUSTOM_PTA_STATUS)) {
+        errs.push("Enter a custom PTA status for every unit using Other / Custom.");
+        continue;
+      }
+      if (units.some((u) => !u.color)) {
+        errs.push("Enter a color for every physical phone unit.");
+        continue;
+      }
+      if (units.some((u) => !u.storage)) {
+        errs.push("Enter storage for every physical phone unit.");
+        continue;
+      }
+      if (
+        units.some((u) => {
+          const value = Number(u.batteryHealth);
+          return u.batteryHealth === "" || !Number.isInteger(value) || value < 0 || value > 100;
+        })
+      ) {
+        errs.push("Battery health must be a whole number from 0 to 100 for every unit.");
+        continue;
+      }
       items.push({
         item_type: "phone",
         item_id: Number(l.productId),
         quantity: qty,
         unit_cost: cost > 0 ? roundMoney(cost) : null,
         selling_price: l.sellingPrice !== "" ? roundMoney(Number(l.sellingPrice) || 0) : null,
-        warranty: l.warranty.trim() || null,
-        condition: l.condition.trim() || null,
+        // Hidden compatibility values: the phone purchase UI no longer owns
+        // these fields, but editing an old purchase must not erase its history.
+        warranty: l.legacyWarranty || null,
+        condition: l.legacyCondition || null,
         imeis,
+        imei2s: units.map((u) => u.imei2),
         imei_colors: units.map((u) => u.color),
+        imei_pta_statuses: units.map((u) => u.ptaStatus),
+        imei_storages: units.map((u) => u.storage),
+        imei_battery_healths: units.map((u) => Number(u.batteryHealth)),
       });
     }
 
@@ -580,80 +678,113 @@ export function PurchaseForm({
                       </div>
                     </div>
                   </div>
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <Input
-                      label="Warranty"
-                      value={l.warranty}
-                      placeholder="e.g. 12 months"
-                      disabled={saving}
-                      onChange={(e) => updatePhoneLine(l.key, { warranty: e.target.value })}
-                    />
-                    <Input
-                      label="Condition"
-                      value={l.condition}
-                      placeholder="e.g. New / Used"
-                      disabled={saving}
-                      onChange={(e) => updatePhoneLine(l.key, { condition: e.target.value })}
-                    />
-                  </div>
                   <div className="mt-3">
                     <div className="mb-1 text-[12px] font-medium text-slate-500">
-                      IMEIs{" "}
+                      Physical Phone Units{" "}
                       <span className="text-red-600">
-                        (required — exactly {Number(l.quantity) || 0})
+                        (IMEI 1 required — exactly {Number(l.quantity) || 0})
                       </span>
                     </div>
-                    {(Number(l.quantity) || 0) > 10 ? (
-                      <div>
-                        <p className="mb-1 text-[11px] text-slate-400">
-                          One IMEI per line or separated by comma/semicolon.
-                        </p>
-                        <textarea
-                          className="w-full rounded border border-[#CBD5E1] bg-white px-3 py-2 font-mono text-[13px] outline-none transition-all"
-                          rows={Math.min(8, Number(l.quantity) || 1)}
-                          value={l.imeis.filter(Boolean).join("\n")}
-                          disabled={saving}
-                          placeholder={`Paste ${l.quantity} IMEIs here...`}
-                          onChange={(e) => setPhoneBulkImeis(l.key, e.target.value)}
-                        />
-                        <div className="mt-1 flex items-center gap-2 text-[11px]">
-                          <span className={l.imeis.filter((s) => s.trim()).length === Number(l.quantity) ? "text-emerald-600 font-semibold" : "text-amber-600"}>
-                            {l.imeis.filter((s) => s.trim()).length} / {l.quantity} entered
-                          </span>
-                        </div>
-                        <p className="mb-1 mt-2 text-[11px] text-slate-400">
-                          Colours (optional — one per line, same order as the IMEIs above).
-                        </p>
-                        <textarea
-                          className="w-full rounded border border-[#CBD5E1] bg-white px-3 py-2 text-[13px] outline-none transition-all"
-                          rows={Math.min(5, Number(l.quantity) || 1)}
-                          value={l.imeiColors.join("\n")}
-                          disabled={saving}
-                          placeholder={"e.g.\nGreen\nBlue\nNatural Titanium"}
-                          onChange={(e) => setPhoneBulkColors(l.key, e.target.value)}
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {l.imeis.map((imei, i) => (
-                          <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                            <Input
-                              placeholder={`IMEI ${i + 1}`}
-                              value={imei}
-                              disabled={saving}
-                              mono
-                              onChange={(e) => setPhoneImei(l.key, i, e.target.value)}
-                            />
-                            <Input
-                              placeholder={`Colour ${i + 1}`}
-                              value={l.imeiColors[i] ?? ""}
-                              disabled={saving}
-                              onChange={(e) => setPhoneColor(l.key, i, e.target.value)}
-                            />
+                    <div className="flex flex-col gap-2">
+                      {l.imeis.map((imei, i) => (
+                        <div key={i} className="rounded-md border border-slate-200 bg-white p-2">
+                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Unit {i + 1}
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="min-w-0">
+                              <Input
+                                label="IMEI 1"
+                                placeholder="Enter IMEI 1"
+                                value={imei}
+                                disabled={saving}
+                                mono
+                                onChange={(e) => setPhoneImei(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <Input
+                                label="IMEI 2 (Optional)"
+                                placeholder="Enter IMEI 2"
+                                value={l.imei2s[i] ?? ""}
+                                disabled={saving}
+                                mono
+                                onChange={(e) => setPhoneImei2(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <Input
+                                label="Color"
+                                placeholder="Color"
+                                value={l.imeiColors[i] ?? ""}
+                                disabled={saving}
+                                onChange={(e) => setPhoneColor(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <Select
+                                label="PTA Status"
+                                name={`pta-${l.key}-${i}`}
+                                options={PTA_STATUS_OPTIONS}
+                                value={
+                                  DEFAULT_PTA_STATUSES.has(l.imeiPtaStatuses[i] ?? "PTA Approved")
+                                    ? (l.imeiPtaStatuses[i] ?? "PTA Approved")
+                                    : CUSTOM_PTA_STATUS
+                                }
+                                disabled={saving}
+                                onChange={(e) => setPhonePtaStatus(l.key, i, e.target.value)}
+                              />
+                              {!DEFAULT_PTA_STATUSES.has(l.imeiPtaStatuses[i] ?? "PTA Approved") && (
+                                <div className="mt-2">
+                                  <Input
+                                    label="Custom Status"
+                                    placeholder="e.g. Factory Unlocked"
+                                    value={
+                                      l.imeiPtaStatuses[i] === CUSTOM_PTA_STATUS
+                                        ? ""
+                                        : (l.imeiPtaStatuses[i] ?? "")
+                                    }
+                                    disabled={saving}
+                                    onChange={(e) => setPhonePtaStatus(l.key, i, e.target.value)}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <Input
+                                label="Battery Health %"
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="1"
+                                placeholder="e.g. 100"
+                                suffix="%"
+                                value={l.imeiBatteryHealths[i] ?? ""}
+                                disabled={saving}
+                                onChange={(e) => setPhoneBatteryHealth(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <Input
+                                label="Storage"
+                                list={`phone-unit-storage-suggestions-${l.key}`}
+                                placeholder="e.g. 256GB"
+                                value={l.imeiStorages[i] ?? ""}
+                                disabled={saving}
+                                onChange={(e) => setPhoneStorage(l.key, i, e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <datalist id={`phone-unit-storage-suggestions-${l.key}`}>
+                      <option value="64GB" />
+                      <option value="128GB" />
+                      <option value="256GB" />
+                      <option value="512GB" />
+                      <option value="1TB" />
+                    </datalist>
                   </div>
                 </div>
               );

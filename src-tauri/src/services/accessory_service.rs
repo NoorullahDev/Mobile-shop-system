@@ -8,9 +8,6 @@ use crate::services::product_category_service;
 
 fn normalize(input: CreateAccessoryInput) -> Result<CreateAccessoryInput, AppError> {
     let brand = input.brand.trim().to_string();
-    if brand.is_empty() {
-        return Err(AppError::validation("Brand is required"));
-    }
     let product_name = input.product_name.trim().to_string();
     if product_name.is_empty() {
         return Err(AppError::validation("Product name is required"));
@@ -121,7 +118,9 @@ pub fn restock(
     actor: Option<i64>,
 ) -> Result<(), AppError> {
     if quantity <= 0 {
-        return Err(AppError::validation("Restock quantity must be greater than zero"));
+        return Err(AppError::validation(
+            "Restock quantity must be greater than zero",
+        ));
     }
     if !accessory_repository::add_quantity(conn, id, quantity)? {
         return Err(AppError::validation("Accessory not found"));
@@ -163,20 +162,26 @@ mod tests {
         seed_product_categories(&conn);
         let a = create(&conn, sample()).unwrap();
         let got = get(&conn, a.id).unwrap();
+        assert_eq!(got.brand, "Spigen");
         assert_eq!(got.product_name, "Fast Charger");
         assert_eq!(got.accessory_type, "Charger");
     }
 
     #[test]
-    fn requires_brand_product_and_type() {
+    fn accepts_empty_brand() {
         let conn = in_memory_conn();
         seed_product_categories(&conn);
         let mut i = sample();
         i.brand = "  ".into();
-        assert!(matches!(
-            create(&conn, i).unwrap_err(),
-            AppError::Validation(_)
-        ));
+        let accessory = create(&conn, i).unwrap();
+        assert_eq!(accessory.brand, "");
+        assert_eq!(accessory.product_name, "Fast Charger");
+    }
+
+    #[test]
+    fn requires_product_and_type() {
+        let conn = in_memory_conn();
+        seed_product_categories(&conn);
         let mut i = sample();
         i.product_name = "".into();
         assert!(matches!(

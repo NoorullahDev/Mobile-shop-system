@@ -69,6 +69,7 @@ export function OnlinePaymentsPage() {
   const reqRef = useRef(0);
 
   const user = useSessionStore((s) => s.user);
+  const canUpdate = can(user?.permissions, "payments:update");
   const canDelete = can(user?.permissions, "payments:delete");
 
   // --- Modal / action state ---
@@ -426,7 +427,7 @@ export function OnlinePaymentsPage() {
                                 >
                                   <Eye className="h-3.5 w-3.5" /> View
                                 </button>
-                                {!r.is_voided && (
+                                {canUpdate && !r.is_voided && (
                                   <button
                                     type="button"
                                     className="flex w-full items-center gap-2 px-3 py-2 text-[13px] transition-colors hover:bg-slate-50"

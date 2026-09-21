@@ -33,6 +33,7 @@ import { useSessionStore } from "../store/session";
 import { useSettingsStore } from "../store/settings";
 import { useToast } from "../components/Toaster";
 import * as userService from "../services/userService";
+import { can } from "../lib/permissions";
 import type { LucideIcon } from "lucide-react";
 
 type SettingsTab =
@@ -50,18 +51,19 @@ interface NavSection {
   id: SettingsTab;
   label: string;
   icon: LucideIcon;
+  permission: string;
 }
 
 const NAV: NavSection[] = [
-  { id: "business", label: "Business", icon: Store },
-  { id: "receipt", label: "Receipt", icon: Printer },
-  { id: "whatsapp", label: "WhatsApp Reminder", icon: MessageCircle },
-  { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
-  { id: "users", label: "Users & Roles", icon: UserCog },
-  { id: "activity", label: "Activity Logs", icon: ClipboardList },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "license", label: "License", icon: Shield },
-  { id: "system", label: "System", icon: Cpu },
+  { id: "business", label: "Business", icon: Store, permission: "settings:view" },
+  { id: "receipt", label: "Receipt", icon: Printer, permission: "settings:view" },
+  { id: "whatsapp", label: "WhatsApp Reminder", icon: MessageCircle, permission: "settings:view" },
+  { id: "backup", label: "Backup & Restore", icon: DatabaseBackup, permission: "backup:view" },
+  { id: "users", label: "Users & Roles", icon: UserCog, permission: "users:manage" },
+  { id: "activity", label: "Activity Logs", icon: ClipboardList, permission: "activity:view" },
+  { id: "notifications", label: "Notifications", icon: Bell, permission: "settings:view" },
+  { id: "license", label: "License", icon: Shield, permission: "license:view" },
+  { id: "system", label: "System", icon: Cpu, permission: "settings:view" },
 ];
 
 function resizeLogo(file: File): Promise<string> {
@@ -102,6 +104,9 @@ function resizeLogo(file: File): Promise<string> {
 export function SettingsPage() {
   const user = useSessionStore((s) => s.user);
   const actor = user?.id ?? null;
+  const permissions = user?.permissions ?? [];
+  const canUpdateSettings = can(permissions, "settings:update");
+  const visibleNav = NAV.filter((item) => can(permissions, item.permission));
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("business");
 
@@ -210,7 +215,7 @@ export function SettingsPage() {
           style={{ border: "1px solid #E2E8F0", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}
         >
           <nav className="flex flex-col gap-0.5">
-            {NAV.map(({ id, label, icon: Icon }) => {
+            {visibleNav.map(({ id, label, icon: Icon }) => {
               const active = activeTab === id;
               return (
                 <button
@@ -254,7 +259,7 @@ export function SettingsPage() {
                 <Card
                   title="General"
                   subtitle="Showroom identity used by the application and newly generated documents."
-                  actions={
+                  actions={canUpdateSettings ? (
                     <Button
                       size="sm"
                       onClick={handleSave}
@@ -263,7 +268,7 @@ export function SettingsPage() {
                     >
                       {saving ? "Saving..." : "Save Changes"}
                     </Button>
-                  }
+                  ) : undefined}
                 >
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <Input
@@ -318,7 +323,7 @@ export function SettingsPage() {
                       )}
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center gap-2">
+                      {canUpdateSettings && <div className="flex items-center gap-2">
                         <input
                           ref={logoInputRef}
                           type="file"
@@ -344,7 +349,7 @@ export function SettingsPage() {
                             Remove
                           </Button>
                         )}
-                      </div>
+                      </div>}
                       {logoError && <span className="text-[11px]" style={{ color: "#DC2626" }}>{logoError}</span>}
                     </div>
                   </div>
@@ -393,8 +398,9 @@ export function SettingsPage() {
   );
 }
 
-function ChangePasswordCard() {
+export function ChangePasswordCard() {
   const { toast } = useToast();
+  const currentUserId = useSessionStore((s) => s.user?.id);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -412,6 +418,7 @@ function ChangePasswordCard() {
     setSaving(true);
     try {
       await userService.changePassword(currentPassword, newPassword);
+      if (currentUserId != null) useSessionStore.getState().clearDefaultPassword(currentUserId);
       setSuccess(true);
       setCurrentPassword("");
       setNewPassword("");

@@ -7,7 +7,11 @@ export interface PurchaseItemInput {
   warranty?: string | null;
   condition?: string | null;
   imeis: string[];
+  imei2s?: string[];
   imei_colors?: string[];
+  imei_pta_statuses?: string[];
+  imei_storages?: string[];
+  imei_battery_healths?: Array<number | null>;
 }
 
 export interface CreatePurchaseInput {
@@ -35,6 +39,10 @@ export interface PurchaseItem {
   line_total: number;
   serials?: string[];
   imei_colors?: string[];
+  imei2s?: string[];
+  imei_pta_statuses?: string[];
+  imei_storages?: string[];
+  imei_battery_healths?: Array<number | null>;
 }
 
 export interface Purchase {

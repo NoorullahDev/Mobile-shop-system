@@ -150,7 +150,7 @@ CREATE TABLE accessories (
 CREATE TABLE phone_imeis (
     id INTEGER PRIMARY KEY AUTOINCREMENT, phone_id INTEGER NOT NULL,
     imei TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'in_stock', sold_at DATETIME,
-    color TEXT,
+    color TEXT, imei2 TEXT UNIQUE, pta_status TEXT, storage TEXT, battery_health_pct INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE sales (
@@ -164,7 +164,9 @@ CREATE TABLE sale_items (
     phone_id INTEGER, accessory_id INTEGER,
     imei_id INTEGER, quantity INTEGER NOT NULL DEFAULT 1, unit_price REAL NOT NULL DEFAULT 0,
     cost_price REAL NOT NULL DEFAULT 0,
-    warranty TEXT, warranty_expiry TEXT, color TEXT, imei_snapshot TEXT
+    warranty TEXT, warranty_expiry TEXT, color TEXT, imei_snapshot TEXT,
+    imei2_snapshot TEXT, pta_status TEXT, product_name_snapshot TEXT, variant_snapshot TEXT,
+    storage TEXT, battery_health_pct INTEGER
 );
 CREATE TABLE purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_no TEXT NOT NULL UNIQUE, supplier_id INTEGER,
@@ -210,12 +212,12 @@ CREATE TABLE return_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT, return_id INTEGER NOT NULL,
     sale_item_id INTEGER NOT NULL, item_type TEXT NOT NULL,
     phone_id INTEGER, accessory_id INTEGER, imei_id INTEGER,
-    product_name TEXT, imei TEXT, serial_no TEXT,
+    product_name TEXT, imei TEXT, imei2 TEXT, serial_no TEXT,
     quantity INTEGER NOT NULL DEFAULT 1, unit_price REAL NOT NULL DEFAULT 0,
     line_total REAL NOT NULL DEFAULT 0, deduction_amount REAL NOT NULL DEFAULT 0,
     refund_amount REAL NOT NULL DEFAULT 0, reason TEXT,
     condition TEXT NOT NULL DEFAULT 'sellable', restocked INTEGER NOT NULL DEFAULT 0,
-    color TEXT,
+    color TEXT, pta_status TEXT, storage TEXT, battery_health_pct INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE backups (

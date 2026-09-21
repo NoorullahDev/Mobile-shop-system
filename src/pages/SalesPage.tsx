@@ -26,6 +26,7 @@ import { useInventoryStore } from "../store/inventory";
 import { useMemberStore } from "../store/members";
 import { useSessionStore } from "../store/session";
 import type { Sale } from "../types/sale";
+import { can } from "../lib/permissions";
 
 function formatPKR(n: number) {
   return `Rs. ${n.toLocaleString("en-PK")}`;
@@ -42,7 +43,10 @@ export function SalesPage() {
   const { products, load: loadInventory } = useInventoryStore();
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
-  const isAdmin = user?.role.toLowerCase() === "admin";
+  const canCreate = can(user?.permissions, "sales:create");
+  const canUpdate = can(user?.permissions, "sales:update");
+  const canDelete = can(user?.permissions, "sales:delete");
+  const canPrint = can(user?.permissions, "sales:print");
   const [search, setSearch] = useState("");
   const [saleOpen, setSaleOpen] = useState(false);
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
@@ -93,14 +97,14 @@ export function SalesPage() {
         description="View all sales transactions and receipts"
         breadcrumb={[{ label: "Sales" }, { label: "History" }]}
         meta={`${sales.length} sales`}
-        actions={
+        actions={canCreate ? (
           <Button
             onClick={() => setSaleOpen(true)}
             icon={<ShoppingCart className="h-3.5 w-3.5" />}
           >
             New Sale
           </Button>
-        }
+        ) : undefined}
       />
 
       {error && (
@@ -278,7 +282,7 @@ export function SalesPage() {
                     {/* Actions */}
                     <td className="text-center">
                       <div className="flex items-center justify-center gap-1">
-                        <Button
+                        {canPrint && <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => setViewSale(s)}
@@ -286,8 +290,8 @@ export function SalesPage() {
                           title={`View details for ${s.receipt_no}`}
                         >
                           View
-                        </Button>
-                        <Button
+                        </Button>}
+                        {canUpdate && <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => setReceiptSale(s)}
@@ -295,7 +299,7 @@ export function SalesPage() {
                           title={`View & print receipt for ${s.receipt_no}`}
                         >
                           Print
-                        </Button>
+                        </Button>}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -348,7 +352,7 @@ export function SalesPage() {
               products={products}
               members={members}
             />
-            {isAdmin && <div className="border-t pt-3" style={{ borderColor: "#E2E8F0" }}>
+            {canDelete && <div className="border-t pt-3" style={{ borderColor: "#E2E8F0" }}>
               <Button variant="danger" size="sm" onClick={() => setConfirmDelete(editSale)} icon={<Trash2 className="h-3.5 w-3.5" />}>
                 Delete Sale
               </Button>
@@ -369,8 +373,8 @@ export function SalesPage() {
         open={viewSale != null}
         saleId={viewSale?.id ?? null}
         onClose={() => setViewSale(null)}
-        onEdit={(sale) => { setViewSale(null); setEditSale(sale); }}
-        onDelete={isAdmin ? (sale) => setConfirmDelete(sale) : undefined}
+        onEdit={canUpdate ? (sale) => { setViewSale(null); setEditSale(sale); } : undefined}
+        onDelete={canDelete ? (sale) => setConfirmDelete(sale) : undefined}
       />
 
       <Modal

@@ -6,6 +6,7 @@ import { Alert } from "../components/Alert";
 import * as settingsService from "../services/settingsService";
 import { useSessionStore } from "../store/session";
 import { useSettingsStore } from "../store/settings";
+import { can } from "../lib/permissions";
 
 const PLACEHOLDERS = [
   { key: "{customer_name}", desc: "Customer's name" },
@@ -15,6 +16,7 @@ const PLACEHOLDERS = [
 
 export function WhatsAppReminderSettings() {
   const actor = useSessionStore((s) => s.user?.id ?? null);
+  const canUpdate = can(useSessionStore((s) => s.user?.permissions), "settings:update");
   const { whatsappTemplate, applyChanges } = useSettingsStore();
   const [template, setTemplate] = useState(whatsappTemplate);
   const [saving, setSaving] = useState(false);
@@ -53,7 +55,7 @@ export function WhatsAppReminderSettings() {
       <Card
         title="WhatsApp Dues Reminder Template"
         subtitle="Customize the message sent when you click the WhatsApp icon beside a customer with outstanding dues."
-        actions={
+        actions={canUpdate ? (
           <Button
             size="sm"
             onClick={handleSave}
@@ -62,7 +64,7 @@ export function WhatsAppReminderSettings() {
           >
             {saving ? "Saving..." : "Save Template"}
           </Button>
-        }
+        ) : undefined}
       >
         <div className="space-y-4">
           <div>

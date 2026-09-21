@@ -11,6 +11,15 @@ pub struct StoredUser {
     pub status: String,
 }
 
+/// Live authorization data loaded for every protected command. Keeping this
+/// separate from the renderer/session snapshot means a disabled user or a
+/// changed role takes effect immediately.
+pub struct StoredIdentity {
+    pub username: String,
+    pub role_id: i64,
+    pub role_name: String,
+}
+
 pub fn find_by_username(conn: &Connection, username: &str) -> Result<Option<StoredUser>, AppError> {
     let row = conn
         .query_row(
@@ -24,6 +33,29 @@ pub fn find_by_username(conn: &Connection, username: &str) -> Result<Option<Stor
                     password_hash: r.get(2)?,
                     role_id: r.get(3)?,
                     status: r.get(4)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(row)
+}
+
+pub fn find_active_identity_by_id(
+    conn: &Connection,
+    id: i64,
+) -> Result<Option<StoredIdentity>, AppError> {
+    let row = conn
+        .query_row(
+            "SELECT u.username, u.role_id, r.name
+             FROM users u
+             JOIN roles r ON r.id = u.role_id
+             WHERE u.id = ?1 AND u.is_deleted = 0 AND u.status = 'active'",
+            [id],
+            |r| {
+                Ok(StoredIdentity {
+                    username: r.get(0)?,
+                    role_id: r.get(1)?,
+                    role_name: r.get(2)?,
                 })
             },
         )

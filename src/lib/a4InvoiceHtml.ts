@@ -15,8 +15,12 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
           ${esc(it.name)}
           ${it.variant ? `<br><span style="font-size:11px;color:#6B7280">Variant: ${esc(it.variant)}</span>` : ""}
           ${it.color ? `<br><span style="font-size:11px;color:#6B7280">Color: ${esc(it.color)}</span>` : ""}
+          ${it.storage ? `<br><span style="font-size:11px;color:#6B7280">Storage: ${esc(it.storage)}</span>` : ""}
+          ${it.battery_health_pct != null ? `<br><span style="font-size:11px;color:#6B7280">Battery Health: ${it.battery_health_pct}%</span>` : ""}
+          ${it.pta_status ? `<br><span style="font-size:11px;color:#6B7280">PTA Status: ${esc(it.pta_status)}</span>` : ""}
           ${it.serial ? `<br><span style="font-size:11px;color:#6B7280">Serial: ${esc(it.serial)}</span>` : ""}
-          ${it.imei ? `<br><span style="font-size:11px;color:#6B7280">IMEI: ${esc(it.imei)}</span>` : ""}
+          ${it.imei ? `<br><span style="font-size:11px;color:#6B7280">IMEI 1: ${esc(it.imei)}</span>` : ""}
+          ${it.imei2 ? `<br><span style="font-size:11px;color:#6B7280">IMEI 2: ${esc(it.imei2)}</span>` : ""}
           ${it.warranty ? `<br><span style="font-size:11px;color:#1D4ED8;font-weight:500">Warranty: ${esc(it.warranty)}${it.warranty_expiry ? ` (till ${esc(it.warranty_expiry)})` : ""}</span>` : ""}
         </td>
         <td style="padding:8px 12px;border-bottom:1px solid #E5E7EB;font-size:13px;color:#1F2937;text-align:center">${it.qty}</td>

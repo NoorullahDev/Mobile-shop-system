@@ -10,6 +10,7 @@ import { useReceiptSettingsStore } from "../store/receiptSettings";
 import { useSettingsStore } from "../store/settings";
 import { useSessionStore } from "../store/session";
 import { buildReceiptData } from "../lib/receiptLayout";
+import { can } from "../lib/permissions";
 import { ReceiptView } from "../components/receipt/ReceiptView";
 import { FONT_SIZES, PAPER_WIDTHS } from "../types/receipt";
 import type { ReceiptPaperWidth, ReceiptSettings } from "../types/receipt";
@@ -107,6 +108,7 @@ export function ReceiptSettingsPage() {
   const rs = useReceiptSettingsStore();
   const business = useSettingsStore();
   const user = useSessionStore((s) => s.user);
+  const canUpdate = can(user?.permissions, "settings:update");
 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -161,7 +163,7 @@ export function ReceiptSettingsPage() {
         title="Receipt Settings"
         description="Configure thermal receipt printing: paper size, printer destination and visible fields"
         breadcrumb={[{ label: "System" }, { label: "Settings" }, { label: "Receipt" }]}
-        actions={
+        actions={canUpdate ? (
           <Button
             size="sm"
             onClick={handleSave}
@@ -170,7 +172,7 @@ export function ReceiptSettingsPage() {
           >
             {saving ? "Saving..." : "Save Changes"}
           </Button>
-        }
+        ) : undefined}
       />
 
       {error && <div className="mb-4"><Alert message={error} variant="error" /></div>}

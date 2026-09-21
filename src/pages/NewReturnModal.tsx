@@ -723,7 +723,16 @@ export function NewReturnModal({ open, onClose, onCreated, initialReturn, onSave
                             <Select
                               label="Select Phone Unit (IMEI)"
                               name="exchange-imei"
-                              options={exchangeImeis.map(i => ({ value: String(i.id), label: i.imei }))}
+                              options={exchangeImeis.map(i => ({
+                                value: String(i.id),
+                                label: [
+                                  i.imei,
+                                  i.color,
+                                  i.storage,
+                                  i.pta_status,
+                                  i.battery_health_pct != null ? `${i.battery_health_pct}% battery` : null,
+                                ].filter(Boolean).join(" · "),
+                              }))}
                               value={exchangeImeiId ? String(exchangeImeiId) : ""}
                               onChange={(e) => setExchangeImeiId(Number(e.target.value))}
                             />

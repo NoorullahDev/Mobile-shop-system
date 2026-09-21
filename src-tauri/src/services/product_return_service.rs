@@ -12,14 +12,7 @@ use crate::utils;
 /// Return conditions that keep the item sellable, so its stock (and phone
 /// IMEI) is automatically restored to inventory.
 const SELLABLE_CONDITIONS: &[&str] = &[
-    "sellable",
-    "like new",
-    "like_new",
-    "working",
-    "good",
-    "used",
-    "open box",
-    "open_box",
+    "sellable", "like new", "like_new", "working", "good", "used", "open box", "open_box",
 ];
 
 fn is_sellable_condition(cond: &str) -> bool {
@@ -45,6 +38,7 @@ struct Line {
     line_total: f64,
     product_name: Option<String>,
     imei: Option<String>,
+    imei2: Option<String>,
     serial_no: Option<String>,
     reason: Option<String>,
     condition: String,
@@ -52,6 +46,9 @@ struct Line {
     deduction: f64,
     refund: f64,
     color: Option<String>,
+    pta_status: Option<String>,
+    storage: Option<String>,
+    battery_health_pct: Option<i64>,
 }
 
 struct PreparedReturn {
@@ -171,6 +168,7 @@ fn prepare(
             line_total,
             product_name: si.product_name.clone(),
             imei: si.imei.clone(),
+            imei2: si.imei2.clone(),
             serial_no: si.serial_no.clone(),
             reason: item
                 .reason
@@ -183,11 +181,16 @@ fn prepare(
             deduction: 0.0,
             refund: 0.0,
             color: si.color.clone(),
+            pta_status: si.pta_status.clone(),
+            storage: si.storage.clone(),
+            battery_health_pct: si.battery_health_pct,
         });
     }
 
     if total_value <= 0.0 {
-        return Err(AppError::validation("Returned value must be greater than zero"));
+        return Err(AppError::validation(
+            "Returned value must be greater than zero",
+        ));
     }
 
     // ----- Deduction rule: a fixed amount overrides the percentage -----
@@ -198,7 +201,9 @@ fn prepare(
         utils::round2(total_value * input.return_charge_percent / 100.0)
     };
     if target_deduction > total_value {
-        return Err(AppError::validation("Deduction cannot exceed the returned value"));
+        return Err(AppError::validation(
+            "Deduction cannot exceed the returned value",
+        ));
     }
 
     // Allocate the deduction proportionally across the lines so the header
@@ -271,10 +276,28 @@ fn prepare(
 fn insert_lines(conn: &Connection, return_id: i64, lines: &[Line]) -> Result<(), AppError> {
     for line in lines {
         product_return_repository::insert_return_item(
-            conn, return_id, line.sale_item_id, &line.item_type, line.item_id, line.imei_id,
-            line.product_name.as_deref(), line.imei.as_deref(), line.serial_no.as_deref(),
-            line.quantity, line.unit_price, line.line_total, line.deduction, line.refund,
-            line.reason.as_deref(), &line.condition, line.restock, line.color.as_deref(),
+            conn,
+            return_id,
+            line.sale_item_id,
+            &line.item_type,
+            line.item_id,
+            line.imei_id,
+            line.product_name.as_deref(),
+            line.imei.as_deref(),
+            line.imei2.as_deref(),
+            line.serial_no.as_deref(),
+            line.quantity,
+            line.unit_price,
+            line.line_total,
+            line.deduction,
+            line.refund,
+            line.reason.as_deref(),
+            &line.condition,
+            line.restock,
+            line.color.as_deref(),
+            line.pta_status.as_deref(),
+            line.storage.as_deref(),
+            line.battery_health_pct,
         )?;
     }
     Ok(())
@@ -287,7 +310,7 @@ pub fn create(
 ) -> Result<ProductReturn, AppError> {
     let mut input = input;
     let exchange_item = input.exchange_item.take();
-    
+
     let mut prepared = prepare(conn, &input, None)?;
 
     // ----- Persist everything in a single transaction -----
@@ -296,47 +319,63 @@ pub fn create(
     let mut exchange_sale_id = None;
     if input.return_type == "exchange" {
         if let Some(mut sale_input) = exchange_item {
-            let s_amount = sale_input.items.iter().map(|i| i.quantity as f64 * i.unit_price.unwrap_or(0.0)).sum::<f64>();
+            let s_amount = sale_input
+                .items
+                .iter()
+                .map(|i| i.quantity as f64 * i.unit_price.unwrap_or(0.0))
+                .sum::<f64>();
             let r_amount = prepared.refund_amount;
             sale_input.discount = 0.0;
-            
+
             sale_input.payments.clear();
             if s_amount > r_amount {
-                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
-                    amount: r_amount,
-                    payment_method: "exchange_credit".to_string(),
-                    reference: None,
-                    notes: None,
-                });
-                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
-                    amount: utils::round2(s_amount - r_amount),
-                    payment_method: prepared.refund_method.clone(),
-                    reference: None,
-                    notes: None,
-                });
+                sale_input
+                    .payments
+                    .push(crate::models::sale_payment::SalePaymentInput {
+                        amount: r_amount,
+                        payment_method: "exchange_credit".to_string(),
+                        reference: None,
+                        notes: None,
+                    });
+                sale_input
+                    .payments
+                    .push(crate::models::sale_payment::SalePaymentInput {
+                        amount: utils::round2(s_amount - r_amount),
+                        payment_method: prepared.refund_method.clone(),
+                        reference: None,
+                        notes: None,
+                    });
                 prepared.refund_amount = 0.0;
             } else if s_amount < r_amount {
-                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
-                    amount: s_amount,
-                    payment_method: "exchange_credit".to_string(),
-                    reference: None,
-                    notes: None,
-                });
+                sale_input
+                    .payments
+                    .push(crate::models::sale_payment::SalePaymentInput {
+                        amount: s_amount,
+                        payment_method: "exchange_credit".to_string(),
+                        reference: None,
+                        notes: None,
+                    });
                 prepared.refund_amount = utils::round2(r_amount - s_amount);
             } else {
-                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
-                    amount: s_amount,
-                    payment_method: "exchange_credit".to_string(),
-                    reference: None,
-                    notes: None,
-                });
+                sale_input
+                    .payments
+                    .push(crate::models::sale_payment::SalePaymentInput {
+                        amount: s_amount,
+                        payment_method: "exchange_credit".to_string(),
+                        reference: None,
+                        notes: None,
+                    });
                 prepared.refund_amount = 0.0;
             }
-            
+
             sale_input.member_id = prepared.sale.member_id;
-            exchange_sale_id = Some(crate::services::sale_service::create_tx(&tx, sale_input, actor)?);
+            exchange_sale_id = Some(crate::services::sale_service::create_tx(
+                &tx, sale_input, actor,
+            )?);
         } else {
-            return Err(AppError::validation("Exchange item details are required for an exchange"));
+            return Err(AppError::validation(
+                "Exchange item details are required for an exchange",
+            ));
         }
     }
 
@@ -377,6 +416,7 @@ pub fn create(
             line.imei_id,
             line.product_name.as_deref(),
             line.imei.as_deref(),
+            line.imei2.as_deref(),
             line.serial_no.as_deref(),
             line.quantity,
             line.unit_price,
@@ -387,6 +427,9 @@ pub fn create(
             &line.condition,
             line.restock,
             line.color.as_deref(),
+            line.pta_status.as_deref(),
+            line.storage.as_deref(),
+            line.battery_health_pct,
         )?;
 
         // ----- Inventory restoration -----
@@ -447,16 +490,19 @@ fn apply_inventory_change(
 ) -> Result<(), AppError> {
     let mut deltas: HashMap<(String, i64), i64> = HashMap::new();
     for item in old.iter().filter(|item| item.restocked) {
-        *deltas.entry((item.item_type.clone(), item.item_id)).or_default() -= item.quantity;
+        *deltas
+            .entry((item.item_type.clone(), item.item_id))
+            .or_default() -= item.quantity;
     }
     for item in new.iter().filter(|item| item.restock) {
-        *deltas.entry((item.item_type.clone(), item.item_id)).or_default() += item.quantity;
+        *deltas
+            .entry((item.item_type.clone(), item.item_id))
+            .or_default() += item.quantity;
     }
     for ((item_type, item_id), delta) in deltas {
         if delta > 0 {
             product_return_repository::increment_stock(conn, &item_type, item_id, delta)?;
-        } else if delta < 0
-            && !sale_repository::decrement_stock(conn, &item_type, item_id, -delta)?
+        } else if delta < 0 && !sale_repository::decrement_stock(conn, &item_type, item_id, -delta)?
         {
             return Err(AppError::validation(
                 "This return cannot be changed because some restocked units have already been sold",
@@ -505,7 +551,9 @@ pub fn update(
 ) -> Result<ProductReturn, AppError> {
     let old = get(conn, id)?;
     if input.sale_id != old.sale_id {
-        return Err(AppError::validation("A return cannot be moved to another sale"));
+        return Err(AppError::validation(
+            "A return cannot be moved to another sale",
+        ));
     }
     let mut input = input;
     let exchange_item = input.exchange_item.take();
@@ -517,45 +565,61 @@ pub fn update(
     let mut exchange_sale_id = old.exchange_sale_id;
     if input.return_type == "exchange" {
         if let Some(mut sale_input) = exchange_item {
-            let s_amount = sale_input.items.iter().map(|i| i.quantity as f64 * i.unit_price.unwrap_or(0.0)).sum::<f64>();
+            let s_amount = sale_input
+                .items
+                .iter()
+                .map(|i| i.quantity as f64 * i.unit_price.unwrap_or(0.0))
+                .sum::<f64>();
             let r_amount = prepared.refund_amount;
             sale_input.discount = 0.0;
             sale_input.payments.clear();
             if s_amount > r_amount {
-                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
-                    amount: r_amount,
-                    payment_method: "exchange_credit".to_string(),
-                    reference: None,
-                    notes: None,
-                });
-                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
-                    amount: utils::round2(s_amount - r_amount),
-                    payment_method: prepared.refund_method.clone(),
-                    reference: None,
-                    notes: None,
-                });
+                sale_input
+                    .payments
+                    .push(crate::models::sale_payment::SalePaymentInput {
+                        amount: r_amount,
+                        payment_method: "exchange_credit".to_string(),
+                        reference: None,
+                        notes: None,
+                    });
+                sale_input
+                    .payments
+                    .push(crate::models::sale_payment::SalePaymentInput {
+                        amount: utils::round2(s_amount - r_amount),
+                        payment_method: prepared.refund_method.clone(),
+                        reference: None,
+                        notes: None,
+                    });
             } else if s_amount < r_amount {
-                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
-                    amount: s_amount,
-                    payment_method: "exchange_credit".to_string(),
-                    reference: None,
-                    notes: None,
-                });
+                sale_input
+                    .payments
+                    .push(crate::models::sale_payment::SalePaymentInput {
+                        amount: s_amount,
+                        payment_method: "exchange_credit".to_string(),
+                        reference: None,
+                        notes: None,
+                    });
             } else {
-                sale_input.payments.push(crate::models::sale_payment::SalePaymentInput {
-                    amount: s_amount,
-                    payment_method: "exchange_credit".to_string(),
-                    reference: None,
-                    notes: None,
-                });
+                sale_input
+                    .payments
+                    .push(crate::models::sale_payment::SalePaymentInput {
+                        amount: s_amount,
+                        payment_method: "exchange_credit".to_string(),
+                        reference: None,
+                        notes: None,
+                    });
             }
             sale_input.member_id = prepared.sale.member_id;
             if let Some(old_sid) = exchange_sale_id {
                 crate::services::sale_service::delete_tx(&tx, old_sid)?;
             }
-            exchange_sale_id = Some(crate::services::sale_service::create_tx(&tx, sale_input, actor)?);
+            exchange_sale_id = Some(crate::services::sale_service::create_tx(
+                &tx, sale_input, actor,
+            )?);
         } else {
-            return Err(AppError::validation("Exchange item details are required for an exchange"));
+            return Err(AppError::validation(
+                "Exchange item details are required for an exchange",
+            ));
         }
     } else if input.return_type == "return" {
         if let Some(old_sid) = exchange_sale_id {
@@ -592,11 +656,11 @@ pub fn delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppE
     if !product_return_repository::delete_return(&tx, id)? {
         return Err(AppError::validation("Return not found"));
     }
-    
+
     if let Some(exchange_sale_id) = old.exchange_sale_id {
         crate::services::sale_service::delete_tx(&tx, exchange_sale_id)?;
     }
-    
+
     tx.commit()?;
     services::record_activity(conn, actor, "return", "delete", Some(id))
 }
@@ -610,7 +674,8 @@ mod tests {
     use crate::models::sale::{CreateSaleInput, SaleItemInput};
     use crate::repositories::phone_repository;
     use crate::services::{
-        accessory_service, phone_service, sale_service, test_utils::{in_memory_conn, seed_product_categories},
+        accessory_service, phone_service, sale_service,
+        test_utils::{in_memory_conn, seed_product_categories},
     };
 
     fn phone(conn: &Connection, qty: i64, price: f64) -> i64 {
@@ -661,6 +726,7 @@ mod tests {
             None,
         )
         .unwrap();
+
         (pid, iid)
     }
 
@@ -670,14 +736,23 @@ mod tests {
             AddPhoneImeiInput {
                 phone_id,
                 imei: imei.into(),
+                imei2: None,
                 color: None,
+                pta_status: None,
+                storage: None,
+                battery_health_pct: None,
             },
         )
         .unwrap()
         .id
     }
 
-    fn return_input(sale_id: i64, sale_item_id: i64, qty: i64, condition: &str) -> CreateReturnInput {
+    fn return_input(
+        sale_id: i64,
+        sale_item_id: i64,
+        qty: i64,
+        condition: &str,
+    ) -> CreateReturnInput {
         CreateReturnInput {
             sale_id,
             return_type: "return".into(),
@@ -699,7 +774,9 @@ mod tests {
     }
 
     fn sale_item_id(conn: &Connection, sale_id: i64) -> i64 {
-        let sale = sale_repository::get_sale_with_items(conn, sale_id).unwrap().unwrap();
+        let sale = sale_repository::get_sale_with_items(conn, sale_id)
+            .unwrap()
+            .unwrap();
         sale.items[0].id
     }
 
@@ -893,9 +970,17 @@ mod tests {
         )
         .unwrap();
 
+        conn.execute(
+            "UPDATE phone_imeis SET imei2 = '333333333333339', pta_status = 'PTA Approved' WHERE phone_id = ?1 AND imei = '333333333333331'",
+            [pid],
+        )
+        .unwrap();
+
         let imeis = phone_service::list_imei(&conn, pid).unwrap();
         assert_eq!(imeis.len(), 2);
         assert_eq!(imeis[0].color.as_deref(), Some("Green"));
+        assert_eq!(imeis[0].imei2.as_deref(), Some("333333333333339"));
+        assert_eq!(imeis[0].pta_status.as_deref(), Some("PTA Approved"));
         assert_eq!(imeis[1].color.as_deref(), Some("Blue"));
         let green_id = imeis[0].id;
 
@@ -928,6 +1013,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(sale.items[0].color.as_deref(), Some("Green"));
+        assert_eq!(sale.items[0].imei2.as_deref(), Some("333333333333339"));
+        assert_eq!(sale.items[0].pta_status.as_deref(), Some("PTA Approved"));
         assert_eq!(imei_status_of(&conn, green_id), "sold");
 
         // Only Blue remains counted as in-stock per colour.
@@ -946,6 +1033,8 @@ mod tests {
         let imeis_after = phone_service::list_imei(&conn, pid).unwrap();
         let green = imeis_after.iter().find(|i| i.id == green_id).unwrap();
         assert_eq!(green.color.as_deref(), Some("Green"));
+        assert_eq!(green.imei2.as_deref(), Some("333333333333339"));
+        assert_eq!(green.pta_status.as_deref(), Some("PTA Approved"));
     }
 
     #[test]
@@ -1281,7 +1370,10 @@ mod tests {
         assert_eq!(updated.refund_amount, 27.0);
         assert!(!updated.items[0].restocked);
         assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 0);
-        assert_eq!(sale_service::get(&conn, sale.id).unwrap().return_status, "partial");
+        assert_eq!(
+            sale_service::get(&conn, sale.id).unwrap().return_status,
+            "partial"
+        );
     }
 
     #[test]
@@ -1289,7 +1381,12 @@ mod tests {
         let conn = in_memory_conn();
         let aid = accessory(&conn);
         let sale = accessory_sale(&conn, aid);
-        let ret = create(&conn, return_input(sale.id, sale.items[0].id, 2, "sellable"), None).unwrap();
+        let ret = create(
+            &conn,
+            return_input(sale.id, sale.items[0].id, 2, "sellable"),
+            None,
+        )
+        .unwrap();
         assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 2);
 
         delete(&conn, ret.id, None).unwrap();

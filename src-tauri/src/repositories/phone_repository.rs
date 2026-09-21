@@ -54,8 +54,12 @@ fn imei_from_row(r: &rusqlite::Row) -> rusqlite::Result<PhoneImei> {
         id: r.get("id")?,
         phone_id: r.get("phone_id")?,
         imei: r.get("imei")?,
+        imei2: r.get("imei2")?,
         status: r.get("status")?,
         color: r.get("color")?,
+        pta_status: r.get("pta_status")?,
+        storage: r.get("storage")?,
+        battery_health_pct: r.get("battery_health_pct")?,
         sold_at: r.get("sold_at")?,
         created_at: r.get("created_at")?,
     })
@@ -112,7 +116,7 @@ pub fn list(conn: &Connection, search: Option<&str>) -> Result<Vec<Phone>, AppEr
         if !s.is_empty() {
             let p = format!("%{s}%");
             clauses.push(format!(
-                "(p.brand LIKE ?{0} OR p.model LIKE ?{0} OR p.imei LIKE ?{0} OR p.imei2 LIKE ?{0} OR p.serial_number LIKE ?{0} OR p.sku LIKE ?{0} OR EXISTS (SELECT 1 FROM phone_imeis pi WHERE pi.phone_id=p.id AND pi.imei LIKE ?{0}))",
+                "(p.brand LIKE ?{0} OR p.model LIKE ?{0} OR p.imei LIKE ?{0} OR p.imei2 LIKE ?{0} OR p.serial_number LIKE ?{0} OR p.sku LIKE ?{0} OR EXISTS (SELECT 1 FROM phone_imeis pi WHERE pi.phone_id=p.id AND (pi.imei LIKE ?{0} OR pi.imei2 LIKE ?{0})))",
                 values.len() + 1,
             ));
             values.push(p);
@@ -194,7 +198,7 @@ pub fn imei_taken(
             .query_row(
                 "SELECT 1 WHERE
                    EXISTS (SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND id != ?2 AND is_deleted = 0)
-                   OR EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1)",
+                   OR EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1 OR imei2 = ?1)",
                 params![imei, id],
                 |_| Ok(true),
             )
@@ -203,7 +207,7 @@ pub fn imei_taken(
             .query_row(
                 "SELECT 1 WHERE
                    EXISTS (SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND is_deleted = 0)
-                   OR EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1)",
+                   OR EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1 OR imei2 = ?1)",
                 [imei],
                 |_| Ok(true),
             )
@@ -233,7 +237,7 @@ pub fn add_quantity(conn: &Connection, id: i64, amount: i64) -> Result<bool, App
 pub fn imei_exists(conn: &Connection, imei: &str) -> Result<bool, AppError> {
     let exists: Option<bool> = conn
         .query_row(
-            "SELECT 1 WHERE EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1)
+            "SELECT 1 WHERE EXISTS (SELECT 1 FROM phone_imeis WHERE imei = ?1 OR imei2 = ?1)
                OR EXISTS (SELECT 1 FROM phones WHERE (imei = ?1 OR imei2 = ?1) AND is_deleted = 0)",
             [imei],
             |_| Ok(true),
@@ -244,15 +248,15 @@ pub fn imei_exists(conn: &Connection, imei: &str) -> Result<bool, AppError> {
 
 pub fn insert_imei(conn: &Connection, input: &AddPhoneImeiInput) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO phone_imeis (phone_id, imei, color) VALUES (?1, ?2, ?3)",
-        params![input.phone_id, input.imei, input.color],
+        "INSERT INTO phone_imeis (phone_id, imei, imei2, color, pta_status, storage, battery_health_pct) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![input.phone_id, input.imei, input.imei2, input.color, input.pta_status, input.storage, input.battery_health_pct],
     )?;
     Ok(conn.last_insert_rowid())
 }
 
 pub fn list_imei(conn: &Connection, phone_id: i64) -> Result<Vec<PhoneImei>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, phone_id, imei, status, color, sold_at, created_at
+        "SELECT id, phone_id, imei, imei2, status, color, pta_status, storage, battery_health_pct, sold_at, created_at
          FROM phone_imeis WHERE phone_id = ?1 ORDER BY id",
     )?;
     let rows = stmt.query_map([phone_id], imei_from_row)?;
@@ -264,10 +268,7 @@ pub fn list_imei(conn: &Connection, phone_id: i64) -> Result<Vec<PhoneImei>, App
 }
 
 /// In-stock units grouped by colour for a single phone.
-pub fn stock_by_color(
-    conn: &Connection,
-    phone_id: i64,
-) -> Result<Vec<ColorCount>, AppError> {
+pub fn stock_by_color(conn: &Connection, phone_id: i64) -> Result<Vec<ColorCount>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT color, COUNT(*) AS count FROM phone_imeis
          WHERE phone_id = ?1 AND status = 'in_stock'

@@ -41,6 +41,7 @@ export function AccessoriesPage() {
         addLabel="Add Accessory"
         icon={Headphones}
         showCategoryManager
+        permissionPrefix="accessories"
         extraAction={
           <Button
             variant="secondary"

@@ -29,11 +29,13 @@ import { useSettingsStore } from "../store/settings";
 import { PAYMENT_METHODS } from "../types/payment";
 import type { Payment } from "../types/payment";
 import type { CustomerDueInvoice } from "../types/payment";
+import { can } from "../lib/permissions";
 
 export function PaymentsPage() {
   const { add } = usePaymentStore();
   const { members, load: loadMembers } = useMemberStore();
   const user = useSessionStore((s) => s.user);
+  const canCreatePayment = can(user?.permissions, "payments:create");
   const businessName = useSettingsStore((s) => s.businessName);
   const whatsappTemplate = useSettingsStore((s) => s.whatsappTemplate);
 
@@ -309,7 +311,7 @@ export function PaymentsPage() {
                         <MessageCircle className="h-3.5 w-3.5" />
                       </button>
                     )}
-                    <button
+                    {canCreatePayment && <button
                       type="button"
                       onClick={() => openQuickPay(d)}
                       className="flex h-7 items-center gap-1.5 rounded px-2.5 text-[12px] font-medium text-white transition-colors hover:opacity-90"
@@ -318,7 +320,7 @@ export function PaymentsPage() {
                     >
                       <Banknote className="h-3.5 w-3.5" />
                       Pay
-                    </button>
+                    </button>}
                     <div className="text-right">
                       <div className="amount font-bold text-[14px]" style={{ color: "#B45309" }}>
                         {formatMoneyCompact(d.due_amount)}
