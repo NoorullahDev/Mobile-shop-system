@@ -17,8 +17,8 @@ export async function pickBackupFolder(): Promise<string | null> { return invoke
 export async function createSelectiveBackup(modules: string[], folder?: string | null, actor?: number | null): Promise<Backup> {
   return invoke("create_selective_backup", { modules, folder: folder ?? null, actor: actor ?? null });
 }
-export async function inspectBackup(id?: number | null, file_path?: string | null): Promise<BackupInspection> {
-  return invoke("inspect_backup", { id: id ?? null, file_path: file_path ?? null });
+export async function inspectBackup(id?: number | null, filePath?: string | null): Promise<BackupInspection> {
+  return invoke("inspect_backup", { id: id ?? null, filePath: filePath ?? null });
 }
 export async function openBackupFolder(path: string): Promise<void> { return invoke("open_backup_folder", { path }); }
 
@@ -47,11 +47,11 @@ export async function pickBackupFile(): Promise<string | null> {
 }
 
 export async function restoreBackupFromPath(
-  file_path: string,
+  filePath: string,
   actor?: number | null,
 ): Promise<void> {
   return invoke<void>("restore_backup_from_path", {
-    file_path,
+    filePath,
     actor: actor ?? null,
   });
 }

@@ -314,7 +314,7 @@ export function BackupManagerPage() {
         <Alert
           variant="info"
           title="How backups work"
-          message={`Backups are saved as .zip archives to the folder shown below (${status?.config.backup_folder ?? "Desktop\\Software Backup by default"}). They include your database, settings, configuration and embedded data. Automatic backups run on your chosen schedule; a backup is also taken automatically whenever you close the app.`}
+          message={`Backups are saved as single .db files to the folder shown below (${status?.config.backup_folder ?? "Desktop\\Software Backup by default"}). Each file contains the complete database, settings, configuration and data in one place. Automatic backups run on your chosen schedule; a backup is also taken automatically whenever you close the app.`}
         />
       </div>
 

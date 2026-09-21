@@ -16,12 +16,11 @@ use tauri::Manager;
 use tauri::WindowEvent;
 use utils::logging;
 
-/// Creates a zip backup of the database file into the configured backup folder
+/// Creates a single-file `.db` backup of the database into the configured backup folder
 /// (falls back to Desktop/Software Backup when none is selected) and records it
 /// in the backup history. Returns Ok(()) on success, Err(message) on failure.
 fn create_exit_backup(db: &Database) -> Result<(), String> {
     use std::fs;
-    use std::io::Write;
 
     let conn = db
         .conn
@@ -35,47 +34,26 @@ fn create_exit_backup(db: &Database) -> Result<(), String> {
     fs::create_dir_all(&backup_dir)
         .map_err(|e| format!("Could not create backup directory: {e}"))?;
 
-    // 2. Generate timestamped filename (same convention as the automatic backup)
+    // 2. Generate timestamped filename (same convention as the automatic backup).
     let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let zip_name = format!("Auto_Backup_{stamp}.zip");
-    let zip_path = backup_dir.join(&zip_name);
+    let file_name = format!("Auto_Backup_{stamp}.db");
+    let file_path = backup_dir.join(&file_name);
 
-    // 3. Take a consistent snapshot of the live database to a temp file
-    let temp_db = backup_dir.join(format!(".tmp_backup_{stamp}.db"));
-    services::backup_service::write_backup(&conn, &temp_db)
-        .map_err(|e| format!("DB snapshot failed: {e}"))?;
+    // 3. Write the single-file backup (snapshot + embedded manifest + images).
+    let size = services::backup_service::write_single_file_backup(
+        &conn,
+        &file_path,
+        crate::models::backup::BackupType::Database,
+        &services::backup_service::all_module_ids(),
+    )
+    .map_err(|e| format!("Backup file creation failed: {e}"))?;
 
-    // 4. Compress the snapshot into a zip file
-    let zip_file = fs::File::create(&zip_path)
-        .map_err(|e| format!("Could not create zip file: {e}"))?;
-    let mut zip_writer = zip::ZipWriter::new(zip_file);
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-
-    // Add the database file
-    zip_writer
-        .start_file("business_management.db", options)
-        .map_err(|e| format!("Zip start_file error: {e}"))?;
-    let db_bytes = fs::read(&temp_db)
-        .map_err(|e| format!("Could not read temp db: {e}"))?;
-    zip_writer
-        .write_all(&db_bytes)
-        .map_err(|e| format!("Zip write error: {e}"))?;
-
-    zip_writer
-        .finish()
-        .map_err(|e| format!("Zip finish error: {e}"))?;
-
-    // 5. Clean up the temp snapshot
-    let _ = fs::remove_file(&temp_db);
-
-    // 6. Record in the backup history so it appears in Backup Manager.
-    let size = fs::metadata(&zip_path).map(|m| m.len() as i64).unwrap_or(0);
-    if let Err(e) = services::backup_service::record_exit_backup(&conn, &zip_name, &zip_path, size) {
+    // 4. Record in the backup history so it appears in Backup Manager.
+    if let Err(e) = services::backup_service::record_exit_backup(&conn, &file_name, &file_path, size as i64) {
         log::warn!("Exit backup could not be recorded in history: {e}");
     }
 
-    log::info!("Exit backup created: {}", zip_path.display());
+    log::info!("Exit backup created: {}", file_path.display());
     Ok(())
 }
 

@@ -1714,7 +1714,7 @@ pub fn pick_backup_file(
     let picked = app
         .dialog()
         .file()
-        .add_filter("Backup files", &["zip"])
+        .add_filter("Backup files", &["db", "zip"])
         .set_title("Select a Backup to Restore")
         .set_directory(&folder)
         .blocking_pick_file();
@@ -1746,7 +1746,7 @@ pub fn restore_backup_from_path(
     let file_name = source
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "restored_backup.zip".into());
+        .unwrap_or_else(|| "restored_backup.db".into());
 
     // 1) Pre-flight validation before opening the confirmation flow would happen.
     backup_service::validate_archive(&source)?;
