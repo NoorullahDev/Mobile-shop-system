@@ -97,6 +97,7 @@ pub fn insert_sale_item(
     warranty: Option<&str>,
     warranty_expiry: Option<&str>,
     color: Option<&str>,
+    imei_snapshot: Option<&str>,
 ) -> Result<(), AppError> {
     let (col, val) = if item_type == "phone" {
         ("phone_id", rusqlite::types::Value::from(item_id))
@@ -105,8 +106,8 @@ pub fn insert_sale_item(
     };
     conn.execute(
         &format!(
-            "INSERT INTO sale_items (sale_id, {col}, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+            "INSERT INTO sale_items (sale_id, {col}, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color, imei_snapshot)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
         ),
         rusqlite::params![
             sale_id,
@@ -117,10 +118,33 @@ pub fn insert_sale_item(
             cost_price,
             warranty,
             warranty_expiry,
-            color
+            color,
+            imei_snapshot
         ],
     )?;
     Ok(())
+}
+
+/// Number of exact physical units currently available for sale (in stock) for a phone.
+pub fn in_stock_imei_count(conn: &Connection, phone_id: i64) -> Result<i64, AppError> {
+    let count = conn.query_row(
+        "SELECT COUNT(*) FROM phone_imeis WHERE phone_id = ?1 AND status = 'in_stock'",
+        [phone_id],
+        |r| r.get::<_, i64>(0),
+    )?;
+    Ok(count)
+}
+
+/// The exact IMEI string of a unit, used to snapshot it onto the sale line.
+pub fn imei_value(conn: &Connection, imei_id: i64) -> Result<Option<String>, AppError> {
+    let val: Option<Option<String>> = conn
+        .query_row(
+            "SELECT imei FROM phone_imeis WHERE id = ?1",
+            [imei_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?;
+    Ok(val.flatten())
 }
 
 /// Returns Some(current_quantity) if the phone/accessory item exists and is not deleted.
@@ -253,6 +277,7 @@ pub fn update_sale_item(
     warranty: Option<&str>,
     warranty_expiry: Option<&str>,
     color: Option<&str>,
+    imei_snapshot: Option<&str>,
 ) -> Result<(), AppError> {
     let (phone_id, accessory_id) = if item_type == "phone" {
         (Some(item_id), None)
@@ -260,8 +285,8 @@ pub fn update_sale_item(
         (None, Some(item_id))
     };
     conn.execute(
-        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6, cost_price = ?7, warranty = ?8, warranty_expiry = ?9, color = ?10 WHERE id = ?1",
-        params![id, phone_id, accessory_id, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color],
+        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6, cost_price = ?7, warranty = ?8, warranty_expiry = ?9, color = ?10, imei_snapshot = ?11 WHERE id = ?1",
+        params![id, phone_id, accessory_id, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color, imei_snapshot],
     )?;
     Ok(())
 }
@@ -347,7 +372,7 @@ fn list_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItem>, AppError
                 COALESCE(si.phone_id, si.accessory_id) AS item_id,
                 si.imei_id, si.quantity, si.unit_price, si.cost_price, si.color,
                 COALESCE(p.brand || ' ' || p.model, a.brand || ' ' || a.product_name) AS product_name,
-                im.imei AS imei,
+                COALESCE(si.imei_snapshot, im.imei) AS imei,
                 CASE WHEN si.phone_id IS NOT NULL THEN p.variant END AS variant,
                 COALESCE(p.serial_number, a.serial_number) AS serial_no,
                 si.warranty, si.warranty_expiry

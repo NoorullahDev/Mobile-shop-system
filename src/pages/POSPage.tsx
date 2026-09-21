@@ -175,6 +175,44 @@ export function POSPage() {
 
   const addToCart = (item: Product) => {
     setError(null);
+    if (item.item_type === "phone") {
+      // A tracked phone is sold as exact physical units: one cart line per
+      // unit, each line carrying its own IMEI. Lines are never merged so a
+      // line never ends up with quantity > 1 and a single IMEI.
+      const inStock = imeiByItem[item.item_id]?.length;
+      if (typeof inStock === "number" && inStock > 0) {
+        const already = cart.filter(
+          (l) => l.item_type === "phone" && l.item_id === item.item_id,
+        ).length;
+        if (already >= inStock) {
+          setError(`Only ${inStock} unit${inStock !== 1 ? "s" : ""} in stock.`);
+          return;
+        }
+      }
+      const existing = cart.find(
+        (l) => l.item_type === "phone" && l.item_id === item.item_id,
+      );
+      if (existing && existing.quantity >= item.quantity) {
+        setError(`Only ${item.quantity} in stock.`);
+        return;
+      }
+      setCart((prev) => [
+        ...prev,
+        {
+          key: ++lineKey,
+          item_type: item.item_type,
+          item_id: item.item_id,
+          quantity: 1,
+          imei_id: null,
+          unit_price: item.sale_price,
+          warranty: "",
+          warranty_expiry: null,
+          custom_warranty_expiry: "",
+        },
+      ]);
+      loadImeis(item.item_id);
+      return;
+    }
     const existing = cart.find(
       (l) => l.item_type === item.item_type && l.item_id === item.item_id,
     );
@@ -203,7 +241,6 @@ export function POSPage() {
           custom_warranty_expiry: "",
         },
       ]);
-      if (item.item_type === "phone") loadImeis(item.item_id);
     }
   };
 
@@ -218,10 +255,17 @@ export function POSPage() {
   const setQty = (key: number, qty: number) => {
     const line = cart.find((l) => l.key === key);
     if (!line) return;
-    const product = products.find(
-      (p) => p.item_type === line.item_type && p.item_id === line.item_id,
-    );
-    const max = product ? product.quantity : qty;
+    const backendMax =
+      line.item_type === "phone" &&
+      (imeiByItem[line.item_id]?.length ?? 0) > 0
+        ? 1
+        : undefined;
+    const product = backendMax
+      ? undefined
+      : products.find(
+          (p) => p.item_type === line.item_type && p.item_id === line.item_id,
+        );
+    const max = backendMax ?? (product ? product.quantity : qty);
     updateLine(key, { quantity: Math.max(1, Math.min(qty, max)) });
   };
 
@@ -255,6 +299,21 @@ export function POSPage() {
     if (cart.length === 0) {
       setError("Cart is empty. Add a product to checkout.");
       return;
+    }
+
+    // A tracked phone must be sold as an exact unit: every line of that phone
+    // needs its own IMEI selected, at quantity 1.
+    for (const l of cart) {
+      if (l.item_type === "phone" && (imeiByItem[l.item_id]?.length ?? 0) > 0) {
+        if (l.imei_id === null) {
+          setError("Select the exact unit (IMEI) being sold for every phone line.");
+          return;
+        }
+        if (l.quantity !== 1) {
+          setError("Each exact unit is sold separately — keep quantity at 1 and add the phone again for a second unit.");
+          return;
+        }
+      }
     }
 
     // Build payment records — always use split payments internally
@@ -600,8 +659,17 @@ export function POSPage() {
                           name={`imei-${l.key}`}
                           className="mt-2"
                           options={[
-                            { value: "", label: "No IMEI (count as units)" },
-                            ...imeis.map((i) => ({ value: String(i.id), label: i.imei })),
+                            {
+                              value: "",
+                              label:
+                                l.item_type === "phone"
+                                  ? "Select the exact unit (IMEI)"
+                                  : "No IMEI (count as units)",
+                            },
+                            ...imeis.map((i) => ({
+                              value: String(i.id),
+                              label: i.imei,
+                            })),
                           ]}
                           value={l.imei_id ? String(l.imei_id) : ""}
                           onChange={(e) =>

@@ -19,6 +19,7 @@ struct Line {
     warranty: Option<String>,
     warranty_expiry: Option<String>,
     color: Option<String>,
+    imei_snapshot: Option<String>,
 }
 
 struct PreparedSale {
@@ -106,14 +107,34 @@ fn prepare(
         let cost_price = sale_repository::item_cost(conn, &item_type, item.item_id)?
             .unwrap_or(0.0);
 
+        let exempt = item
+            .sale_item_id
+            .map(|id| imei_exempt_lines.contains(&id))
+            .unwrap_or(false);
+
         if item_type == "phone" {
             if let Some(imei_id) = item.imei_id {
-                let exempt = item
-                    .sale_item_id
-                    .map(|id| imei_exempt_lines.contains(&id))
-                    .unwrap_or(false);
                 if !exempt && !sale_repository::imei_available(conn, imei_id, item.item_id)? {
                     return Err(AppError::validation("IMEI is not available for this item"));
+                }
+            }
+        }
+
+        // A phone that tracks physical units by IMEI must be sold as an exact
+        // unit: one unit per line, and a unit must always be identified. This
+        // is what keeps the unit (and its colour stock) correct after a sale.
+        if item_type == "phone" && !exempt {
+            if item.imei_id.is_some() && item.quantity != 1 {
+                return Err(AppError::validation(
+                    "Each IMEI unit is one physical phone — set quantity to 1 and add the phone again for the second unit.",
+                ));
+            }
+            if item.imei_id.is_none() {
+                let tracked = sale_repository::in_stock_imei_count(conn, item.item_id)?;
+                if tracked > 0 {
+                    return Err(AppError::validation(
+                        "This phone has registered IMEI units. Select the exact unit being sold from the IMEI list.",
+                    ));
                 }
             }
         }
@@ -139,6 +160,17 @@ fn prepare(
         } else {
             None
         };
+        // IMEI snapshot: the exact unit's IMEI string at the time of sale, so
+        // invoices always show what was actually sold even if the unit is later
+        // edited, returned or reassigned.
+        let imei_snapshot = if item_type == "phone" {
+            match line_imei {
+                Some(imei_id) => sale_repository::imei_value(conn, imei_id)?,
+                None => None,
+            }
+        } else {
+            None
+        };
         lines.push(Line {
             sale_item_id: item.sale_item_id,
             item_type,
@@ -150,6 +182,7 @@ fn prepare(
             warranty,
             warranty_expiry,
             color,
+            imei_snapshot,
         });
     }
 
@@ -282,6 +315,7 @@ pub fn create_tx(
             line.warranty.as_deref(),
             line.warranty_expiry.as_deref(),
             line.color.as_deref(),
+            line.imei_snapshot.as_deref(),
         )?;
 
         if !sale_repository::decrement_stock(tx, &line.item_type, line.item_id, line.quantity)? {
@@ -400,12 +434,12 @@ pub fn update(
         if let Some(line_id) = line.sale_item_id {
             sale_repository::update_sale_item(
                 &tx, line_id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price, line.cost_price,
-                line.warranty.as_deref(), line.warranty_expiry.as_deref(), line.color.as_deref(),
+                line.warranty.as_deref(), line.warranty_expiry.as_deref(), line.color.as_deref(), line.imei_snapshot.as_deref(),
             )?;
         } else {
             sale_repository::insert_sale_item(
                 &tx, id, &line.item_type, line.item_id, line.imei_id, line.quantity, line.unit_price, line.cost_price,
-                line.warranty.as_deref(), line.warranty_expiry.as_deref(), line.color.as_deref(),
+                line.warranty.as_deref(), line.warranty_expiry.as_deref(), line.color.as_deref(), line.imei_snapshot.as_deref(),
             )?;
         }
         if !sale_repository::decrement_stock(&tx, &line.item_type, line.item_id, line.quantity)? {
@@ -742,6 +776,101 @@ mod tests {
 
         let imeis = phone_service::list_imei(&conn, id).unwrap();
         assert_eq!(imeis[0].status, "sold");
+    }
+
+    #[test]
+    fn selling_a_tracked_unit_marks_only_it_sold_and_keeps_invoice_snapshot() {
+        use crate::models::phone::AddPhoneImeiInput;
+
+        let conn = in_memory_conn();
+        // Client scenario: one product, three physical units (Purple/Green/White).
+        let id = phone(&conn, 0, 100.0);
+        let mut units = Vec::new();
+        for (imei, colour) in [
+            ("762387998439", "Purple"),
+            ("762387998440", "Green"),
+            ("762387998441", "White"),
+        ] {
+            units.push((
+                phone_service::add_imei(
+                    &conn,
+                    AddPhoneImeiInput {
+                        phone_id: id,
+                        imei: imei.into(),
+                        color: Some(colour.into()),
+                    },
+                )
+                .unwrap(),
+                colour.to_string(),
+            ));
+        }
+        assert_eq!(phone_service::get(&conn, id).unwrap().quantity, 3);
+
+        // Sell exactly the Purple unit.
+        let duplicate_purple_id = units[0].0.id;
+        let duplicate_purple_imei = units[0].0.imei.clone();
+        let mut input = sale_input(id, 1);
+        input.items[0].imei_id = Some(duplicate_purple_id);
+        let sale = create(&conn, input, None).unwrap();
+
+        // Stock decreased exactly once: 3 → 2.
+        assert_eq!(phone_service::get(&conn, id).unwrap().quantity, 2);
+
+        // Only Purple is sold; Green and White remain in stock.
+        let imeis = phone_service::list_imei(&conn, id).unwrap();
+        assert_eq!(imeis.len(), 3);
+        let by_imei: std::collections::HashMap<String, String> = imeis
+            .iter()
+            .map(|i| (i.imei.clone(), i.status.clone()))
+            .collect();
+        assert_eq!(by_imei.get("762387998439").map(String::as_str), Some("sold"));
+        assert_eq!(by_imei.get("762387998440").map(String::as_str), Some("in_stock"));
+        assert_eq!(by_imei.get("762387998441").map(String::as_str), Some("in_stock"));
+
+        // The sale line carries the sale-time IMEI + colour snapshot.
+        let got = get(&conn, sale.id).unwrap();
+        assert_eq!(got.items[0].imei.as_deref(), Some("762387998439"));
+        assert_eq!(got.items[0].color.as_deref(), Some("Purple"));
+        let snapshot: String = conn
+            .query_row(
+                "SELECT imei_snapshot FROM sale_items WHERE id = ?1",
+                [got.items[0].id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(snapshot, duplicate_purple_imei);
+    }
+
+    #[test]
+    fn tracked_phone_must_be_sold_as_an_exact_unit() {
+        use crate::models::phone::AddPhoneImeiInput;
+
+        let conn = in_memory_conn();
+        let id = phone(&conn, 0, 100.0);
+        let purple = phone_service::add_imei(
+            &conn,
+            AddPhoneImeiInput {
+                phone_id: id,
+                imei: "700000000000001".into(),
+                color: Some("Purple".into()),
+            },
+        )
+        .unwrap();
+
+        // Selling by count while exact units are tracked is rejected.
+        let without_imei = sale_input(id, 1);
+        let err = create(&conn, without_imei, None).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+
+        // One IMEI is one physical unit: quantity must be 1.
+        let mut qty_two = sale_input(id, 2);
+        qty_two.items[0].imei_id = Some(purple.id);
+        let err = create(&conn, qty_two, None).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+
+        // No sale was written.
+        assert!(list(&conn, None).unwrap().is_empty());
+        assert_eq!(phone_service::get(&conn, id).unwrap().quantity, 1);
     }
 
     #[test]

@@ -164,7 +164,7 @@ CREATE TABLE sale_items (
     phone_id INTEGER, accessory_id INTEGER,
     imei_id INTEGER, quantity INTEGER NOT NULL DEFAULT 1, unit_price REAL NOT NULL DEFAULT 0,
     cost_price REAL NOT NULL DEFAULT 0,
-    warranty TEXT, warranty_expiry TEXT, color TEXT
+    warranty TEXT, warranty_expiry TEXT, color TEXT, imei_snapshot TEXT
 );
 CREATE TABLE purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_no TEXT NOT NULL UNIQUE, supplier_id INTEGER,

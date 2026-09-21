@@ -1306,6 +1306,16 @@ const MIGRATIONS: &[(&str, &str)] = &[
         ALTER TABLE return_items ADD COLUMN color TEXT;
         "#,
     ),
+    (
+        "0039_sale_item_imei_snapshot",
+        r#"
+        -- The exact IMEI string sold at the point of sale, snapshotted onto the
+        -- sale line. Invoices print this snapshot (with the colour snapshot) so
+        -- old invoices never change even if the unit is later edited or
+        -- returned/re-sold.
+        ALTER TABLE sale_items ADD COLUMN imei_snapshot TEXT;
+        "#,
+    ),
 ];
 
 fn apply_range(conn: &Connection, upto: usize) -> Result<(), AppError> {

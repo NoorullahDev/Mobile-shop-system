@@ -823,9 +823,10 @@ mod tests {
     #[test]
     fn returning_quantity_with_imei_restores_the_tracked_unit() {
         let conn = in_memory_conn();
-        let pid = phone(&conn, 3, 100.0);
-        let iid = add_imei_to(&conn, pid, "222222222222222");
-        // Sell 2 units of the phone while tracking the single physical unit.
+        let pid = phone(&conn, 0, 100.0);
+        let iid_a = add_imei_to(&conn, pid, "222222222222221");
+        let iid_b = add_imei_to(&conn, pid, "222222222222222");
+        // Each tracked unit is sold as its own exact-unit line.
         let sale_id = sale_service::create(
             &conn,
             CreateSaleInput {
@@ -835,31 +836,46 @@ mod tests {
                 payment_method: Some("cash".into()),
                 notes: None,
                 payments: vec![],
-                items: vec![SaleItemInput {
-                    sale_item_id: None,
-                    item_type: "phone".into(),
-                    item_id: pid,
-                    quantity: 2,
-                    imei_id: Some(iid),
-                    unit_price: Some(100.0),
-                    warranty: None,
-                    warranty_expiry: None,
-                }],
+                items: vec![
+                    SaleItemInput {
+                        sale_item_id: None,
+                        item_type: "phone".into(),
+                        item_id: pid,
+                        quantity: 1,
+                        imei_id: Some(iid_a),
+                        unit_price: Some(100.0),
+                        warranty: None,
+                        warranty_expiry: None,
+                    },
+                    SaleItemInput {
+                        sale_item_id: None,
+                        item_type: "phone".into(),
+                        item_id: pid,
+                        quantity: 1,
+                        imei_id: Some(iid_b),
+                        unit_price: Some(100.0),
+                        warranty: None,
+                        warranty_expiry: None,
+                    },
+                ],
             },
             None,
         )
         .unwrap()
         .id;
-        assert_eq!(imei_status_of(&conn, iid), "sold");
+        assert_eq!(imei_status_of(&conn, iid_a), "sold");
+        assert_eq!(imei_status_of(&conn, iid_b), "sold");
+        // Return line A by quantity, but identify the exact unit via IMEI.
         let sid = sale_item_id(&conn, sale_id);
-        let mut input = return_input(sale_id, sid, 2, "sellable");
-        input.items[0].imei_id = Some(iid);
+        let mut input = return_input(sale_id, sid, 1, "sellable");
+        input.items[0].imei_id = Some(iid_a);
 
         create(&conn, input, None).unwrap();
 
         // The exact unit must be restored so it can be resold and counted by
         // colour again, even though the return was processed by quantity.
-        assert_eq!(imei_status_of(&conn, iid), "in_stock");
+        assert_eq!(imei_status_of(&conn, iid_a), "in_stock");
+        assert_eq!(imei_status_of(&conn, iid_b), "sold");
     }
 
     #[test]
@@ -973,7 +989,10 @@ mod tests {
     fn rejects_imei_that_does_not_belong_to_the_sale() {
         let conn = in_memory_conn();
         let pid = phone(&conn, 5, 100.0);
-        let iid = add_imei_to(&conn, pid, "222222222222222");
+        // A tracked unit that exists on a *different* phone: it must never be
+        // accepted as belonging to the returned sale line.
+        let other = phone(&conn, 5, 100.0);
+        let iid = add_imei_to(&conn, other, "222222222222222");
         let sale_id = sale_phone(&conn, pid, 1, 100.0);
         let sid = sale_item_id(&conn, sale_id);
 

@@ -169,6 +169,20 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
       setError("Add at least one item to the sale.");
       return;
     }
+    // A tracked phone is sold as an exact unit: each line must select its IMEI
+    // at quantity 1.
+    for (const l of lines) {
+      if (l.item_type === "phone" && (imeiByItem[l.item_id]?.length ?? 0) > 0) {
+        if (l.imei_id === null) {
+          setError(`Select the exact unit (IMEI) being sold for ${l.item_id}.`);
+          return;
+        }
+        if (l.quantity !== 1) {
+          setError("Each exact unit is sold separately — keep quantity at 1 and add the phone again for a second unit.");
+          return;
+        }
+      }
+    }
     const items: SaleItemInput[] = lines.map((l) => ({
       sale_item_id: l.sale_item_id ?? null,
       item_type: l.item_type,
@@ -269,7 +283,12 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
                     max={inStock.find((p) => p.item_type === l.item_type && p.item_id === l.item_id)?.quantity ?? undefined}
                     value={l.quantity}
                     onChange={(e) => {
-                      const maxQty = inStock.find((p) => p.item_type === l.item_type && p.item_id === l.item_id)?.quantity ?? Infinity;
+                      const tracked =
+                        l.item_type === "phone" &&
+                        (imeiByItem[l.item_id]?.length ?? 0) > 0;
+                      const maxQty = tracked
+                        ? 1
+                        : (inStock.find((p) => p.item_type === l.item_type && p.item_id === l.item_id)?.quantity ?? Infinity);
                       updateLine(l.key, { quantity: Math.max(1, Math.min(Number(e.target.value) || 1, maxQty)) });
                     }}
                     disabled={saving}
@@ -296,7 +315,11 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
                   <div className="col-span-12 mt-1">
                     <Select
                       name={`imei-${l.key}`}
-                      label="IMEI Number (Optional)"
+                      label={
+                        l.item_type === "phone"
+                          ? "IMEI Number (Select the exact unit)"
+                          : "IMEI Number (Optional)"
+                      }
                       options={emeiOptionsFor(l.item_id)}
                       value={l.imei_id ? String(l.imei_id) : ""}
                       onChange={(e) => updateLine(l.key, { imei_id: e.target.value ? Number(e.target.value) : null })}
