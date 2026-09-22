@@ -158,7 +158,7 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
           />
           <Select
             name="brand"
-            label="Brand"
+            label="Brand (Optional)"
             placeholder="— Select brand —"
             options={brandOptions}
             value={form.brand ?? ""}

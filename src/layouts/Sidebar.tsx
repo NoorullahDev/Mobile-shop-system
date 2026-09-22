@@ -31,6 +31,7 @@ interface NavItem {
   shortcut?: string;
   end?: boolean;
   permission?: string;
+  anyPermissions?: string[];
 }
 
 interface SidebarProps {
@@ -58,7 +59,13 @@ const mainNav: NavItem[] = [
 
 /* System modules are managed from Settings (Settings → Administration). */
 const settingsNav: NavItem[] = [
-  { to: "/settings", label: "Settings", icon: Settings, end: true, permission: "settings:view" },
+  {
+    to: "/settings",
+    label: "Settings",
+    icon: Settings,
+    end: true,
+    anyPermissions: ["settings:view", "staff:view", "users:manage", "activity:view", "backup:view", "license:view"],
+  },
 ];
 
 function getInitials(name: string) {
@@ -86,7 +93,10 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
     (item) => !item.permission || can(permissions, item.permission),
   );
   const visibleSettingsNav = settingsNav.filter(
-    (item) => !item.permission || can(permissions, item.permission),
+    (item) =>
+      (!item.permission && !item.anyPermissions) ||
+      (item.permission ? can(permissions, item.permission) : false) ||
+      item.anyPermissions?.some((permission) => can(permissions, permission)),
   );
 
   const handleLogout = async () => {

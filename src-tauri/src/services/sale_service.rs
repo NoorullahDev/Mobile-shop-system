@@ -38,6 +38,51 @@ struct PreparedSale {
     payments: Vec<crate::models::sale_payment::SalePaymentInput>,
 }
 
+fn current_item_price(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    imei_id: Option<i64>,
+) -> Result<f64, AppError> {
+    if item_type == "phone" {
+        if let Some(imei_id) = imei_id {
+            if let Some(price) = sale_repository::imei_unit_pricing(conn, imei_id)?.1 {
+                return Ok(price);
+            }
+        }
+    }
+    sale_repository::item_price(conn, item_type, item_id)?
+        .ok_or_else(|| AppError::validation("Sale item not found"))
+}
+
+/// Detects a hidden price reduction as well as the explicit invoice discount.
+/// Command authorization uses this so a caller cannot bypass
+/// `sales:apply_discount` by lowering an item's unit price directly.
+pub fn has_price_reduction(
+    conn: &Connection,
+    input: &CreateSaleInput,
+    existing: Option<&Sale>,
+) -> Result<bool, AppError> {
+    for item in &input.items {
+        let baseline = match (existing, item.sale_item_id) {
+            (Some(sale), Some(line_id)) => sale
+                .items
+                .iter()
+                .find(|line| line.id == line_id)
+                .map(|line| line.unit_price)
+                .ok_or_else(|| {
+                    AppError::validation("A sale item does not belong to this invoice")
+                })?,
+            _ => current_item_price(conn, &item.item_type, item.item_id, item.imei_id)?,
+        };
+        let proposed = item.unit_price.unwrap_or(baseline);
+        if proposed + 0.005 < baseline {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn prepare(
     conn: &Connection,
     input: &CreateSaleInput,
@@ -92,18 +137,27 @@ fn prepare(
             return Err(AppError::validation("Not enough stock for this item"));
         }
 
+        let unit_pricing = if item_type == "phone" {
+            match item.imei_id {
+                Some(imei_id) => Some(sale_repository::imei_unit_pricing(conn, imei_id)?),
+                None => None,
+            }
+        } else {
+            None
+        };
         let unit_price = match item.unit_price {
             Some(p) if p > 0.0 => p,
             _ => {
-                let p = sale_repository::item_price(conn, &item_type, item.item_id)?.ok_or_else(
-                    || {
+                let p = unit_pricing
+                    .and_then(|(_, sale_price)| sale_price)
+                    .or(sale_repository::item_price(conn, &item_type, item.item_id)?)
+                    .ok_or_else(|| {
                         AppError::validation(if item_type == "phone" {
                             "Phone not found"
                         } else {
                             "Accessory not found"
                         })
-                    },
-                )?;
+                    })?;
                 if p > 0.0 {
                     p
                 } else {
@@ -114,7 +168,10 @@ fn prepare(
             }
         };
 
-        let cost_price = sale_repository::item_cost(conn, &item_type, item.item_id)?.unwrap_or(0.0);
+        let cost_price = unit_pricing
+            .and_then(|(cost_price, _)| cost_price)
+            .or(sale_repository::item_cost(conn, &item_type, item.item_id)?)
+            .unwrap_or(0.0);
 
         let exempt = item
             .sale_item_id
@@ -494,6 +551,7 @@ pub fn update(
             && line.item_id == old_line.item_id
             && line.imei_id == old_line.imei_id
         {
+            line.cost_price = old_line.cost_price;
             line.color = old_line.color.clone();
             line.imei_snapshot = old_line.imei.clone();
             line.imei2_snapshot = old_line.imei2.clone();
@@ -756,6 +814,18 @@ mod tests {
         let conn = in_memory_conn();
         let err = create(&conn, CreateSaleInput::default(), None).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn detects_direct_unit_price_discount_for_permission_enforcement() {
+        let conn = in_memory_conn();
+        let id = phone(&conn, 1, 100.0);
+        let mut input = sale_input(id, 1);
+        input.items[0].unit_price = Some(90.0);
+        assert!(has_price_reduction(&conn, &input, None).unwrap());
+
+        input.items[0].unit_price = Some(100.0);
+        assert!(!has_price_reduction(&conn, &input, None).unwrap());
     }
 
     #[test]
@@ -1318,6 +1388,24 @@ mod tests {
         assert_eq!(corrected.returns[0].total_sale_price, 150.0);
         assert_eq!(corrected.returns[0].refund_amount, 135.0);
         assert_eq!(phone_service::get(&conn, id).unwrap().quantity, 3);
+    }
+
+    #[test]
+    fn editing_sale_does_not_reprice_historical_cogs() {
+        let conn = in_memory_conn();
+        let id = phone(&conn, 2, 100.0);
+        let sale = create(&conn, sale_input(id, 1), None).unwrap();
+        assert_eq!(sale.items[0].cost_price, 500.0);
+
+        conn.execute("UPDATE phones SET cost_price = 900 WHERE id = ?1", [id])
+            .unwrap();
+        let mut correction = sale_input(id, 1);
+        correction.items[0].sale_item_id = Some(sale.items[0].id);
+        correction.items[0].unit_price = Some(sale.items[0].unit_price);
+        correction.notes = Some("payment note corrected".into());
+        let corrected = update(&conn, sale.id, correction, None).unwrap();
+
+        assert_eq!(corrected.items[0].cost_price, 500.0);
     }
 
     #[test]

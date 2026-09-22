@@ -23,6 +23,7 @@ function unitSearchText(unit: PhoneImei) {
     unit.storage,
     unit.battery_health_pct,
     unit.pta_status,
+    unit.sale_price,
   ]
     .filter((value) => value != null)
     .join(" ")
@@ -113,6 +114,7 @@ export function PhysicalUnitPicker({
         {visibleUnits.map((unit) => {
           const selected = unit.id === selectedId;
           const isCurrentSoldUnit = unit.status !== "in_stock";
+          const effectivePrice = unit.sale_price ?? unitPrice;
           if (compact) {
             const details = [
               unit.color || "Color not set",
@@ -147,6 +149,9 @@ export function PhysicalUnitPicker({
                   <span className="mt-0.5 block font-mono text-[10px] leading-4" style={{ color: "#64748B" }}>
                     IMEI 1: ...{unit.imei.slice(-4)}
                     {unit.imei2 ? ` · IMEI 2: ...${unit.imei2.slice(-4)}` : ""}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] font-bold" style={{ color: "#0F172A" }}>
+                    {formatMoneyCompact(effectivePrice)}
                   </span>
                 </span>
               </button>
@@ -184,7 +189,7 @@ export function PhysicalUnitPicker({
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <span className="whitespace-nowrap text-[11px] font-bold" style={{ color: "#0F172A" }}>
-                    {formatMoneyCompact(unitPrice)}
+                    {formatMoneyCompact(effectivePrice)}
                   </span>
                   {selected && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-semibold" style={{ color: "#2563EB" }}>

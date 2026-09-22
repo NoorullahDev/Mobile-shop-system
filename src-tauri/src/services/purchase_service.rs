@@ -345,6 +345,8 @@ pub fn create_purchase(
                 &line.imei_pta_statuses,
                 &line.imei_storages,
                 &line.imei_battery_healths,
+                Some(line.unit_cost),
+                line.selling_price,
             )?;
         }
     }
@@ -380,7 +382,17 @@ pub fn delete_purchase(
 
     // Revert inventory effects for existing items
     for item in &existing.items {
-        purchase_repository::decrement_stock(&tx, &item.item_type, item.item_id, item.quantity)?;
+        let ok = purchase_repository::decrement_stock(
+            &tx,
+            &item.item_type,
+            item.item_id,
+            item.quantity,
+        )?;
+        if !ok {
+            return Err(AppError::validation(
+                "Cannot delete this purchase: stock from it has already been sold. Adjust inventory instead.",
+            ));
+        }
         if item.item_type == "phone" {
             purchase_repository::delete_purchase_imeis(&tx, item.item_id, &item.serials)?;
         }
@@ -487,7 +499,17 @@ pub fn update_purchase(
 
     // 1. Revert old items
     for item in &existing.items {
-        purchase_repository::decrement_stock(&tx, &item.item_type, item.item_id, item.quantity)?;
+        let ok = purchase_repository::decrement_stock(
+            &tx,
+            &item.item_type,
+            item.item_id,
+            item.quantity,
+        )?;
+        if !ok {
+            return Err(AppError::validation(
+                "Cannot edit this purchase: stock from it has already been sold. Create a correction instead.",
+            ));
+        }
         if item.item_type == "phone" {
             purchase_repository::delete_purchase_imeis(&tx, item.item_id, &item.serials)?;
         }
@@ -546,6 +568,8 @@ pub fn update_purchase(
                 &line.imei_pta_statuses,
                 &line.imei_storages,
                 &line.imei_battery_healths,
+                Some(line.unit_cost),
+                line.selling_price,
             )?;
         }
     }
@@ -982,6 +1006,72 @@ mod tests {
     }
 
     #[test]
+    fn physical_unit_keeps_its_purchase_batch_price_and_cost_for_sale() {
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Apple".into(),
+                model: "18 Pro Max".into(),
+                quantity: 0,
+                cost_price: 0.0,
+                sale_price: 0.0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+
+        let mut first = purchase_input(phone_id, None);
+        first.items[0].quantity = 1;
+        first.items[0].unit_cost = Some(250_000.0);
+        first.items[0].selling_price = Some(400_000.0);
+        first.items[0].imeis = vec!["180000000000001".into()];
+        first.items[0].imei_colors = vec!["Purple".into()];
+        first.paid_amount = Some(250_000.0);
+        create_purchase(&conn, first, None).unwrap();
+
+        let mut second = purchase_input(phone_id, None);
+        second.items[0].quantity = 1;
+        second.items[0].unit_cost = Some(300_000.0);
+        second.items[0].selling_price = Some(450_000.0);
+        second.items[0].imeis = vec!["180000000000002".into()];
+        second.items[0].imei_colors = vec!["Black".into()];
+        second.paid_amount = Some(300_000.0);
+        create_purchase(&conn, second, None).unwrap();
+
+        let units = phone_service::list_imei(&conn, phone_id).unwrap();
+        assert_eq!(units[0].cost_price, Some(250_000.0));
+        assert_eq!(units[0].sale_price, Some(400_000.0));
+        assert_eq!(units[1].cost_price, Some(300_000.0));
+        assert_eq!(units[1].sale_price, Some(450_000.0));
+
+        let sale = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                discount: 150_000.0,
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: phone_id,
+                    quantity: 1,
+                    imei_id: Some(units[0].id),
+                    unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(sale.items[0].unit_price, 400_000.0);
+        assert_eq!(sale.items[0].cost_price, 250_000.0);
+        assert_eq!(sale.total_amount, 250_000.0);
+        assert_eq!(sale.total_amount - sale.items[0].cost_price, 0.0);
+    }
+
+    #[test]
     fn purchase_without_supplier_syncs_prices() {
         let conn = in_memory_conn();
         let iid = phone_item(&conn, None);
@@ -1036,6 +1126,73 @@ mod tests {
         assert_eq!(purchase.items[0].quantity, 100);
         assert_eq!(phone_service::list_imei(&conn, iid).unwrap().len(), 100);
         assert_eq!(phone_service::get(&conn, iid).unwrap().quantity, 105);
+    }
+
+    #[test]
+    fn cannot_delete_or_edit_purchase_whose_stock_was_sold() {
+        use crate::models::sale::{CreateSaleInput, SaleItemInput};
+        let conn = in_memory_conn();
+        // Master starts with 0 stock so the purchased batch is the only stock.
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Apple".into(),
+                model: "X".into(),
+                quantity: 0,
+                cost_price: 0.0,
+                sale_price: 0.0,
+                low_stock_threshold: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+
+        let purchase = create_purchase(&conn, purchase_input(phone_id, None), None).unwrap();
+        let units = phone_service::list_imei(&conn, phone_id).unwrap();
+        assert_eq!(units.len(), 2);
+
+        // Sell one unit of the purchased batch.
+        let sale = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                discount: 0.0,
+                paid_amount: Some(150.0),
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: phone_id,
+                    quantity: 1,
+                    imei_id: Some(units[0].id),
+                    unit_price: Some(150.0),
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 1);
+
+        // Deleting the purchase after a partial sale must be rejected instead of
+        // silently leaving phantom stock (quantity without matching IMEI units).
+        let err = delete_purchase(&conn, purchase.id, None, None).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 1);
+        assert_eq!(phone_service::list_imei(&conn, phone_id).unwrap().len(), 2);
+        assert!(get(&conn, purchase.id).is_ok());
+
+        // Editing it back to the same lines must also be rejected.
+        let err = update_purchase(&conn, purchase.id, purchase_input(phone_id, None), None)
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 1);
+        assert_eq!(phone_service::list_imei(&conn, phone_id).unwrap().len(), 2);
+
+        // The recorded sale invoice still resolves against the snapshotted unit.
+        let historical = sale_service::get(&conn, sale.id).unwrap();
+        assert_eq!(historical.items[0].imei.as_deref(), Some("111111111111111"));
     }
 
     #[test]

@@ -17,6 +17,11 @@ function phoneSubtitle(item: Phone) {
   if (item.battery_capacity) parts.push(item.battery_capacity);
   if (item.chipset) parts.push(item.chipset);
   if (item.color) parts.push(item.color);
+  const unitColors = (item.stock_by_color ?? [])
+    .filter((entry) => entry.count > 0)
+    .map((entry) => `${entry.color || "Unspecified"} × ${entry.count}`)
+    .join(" / ");
+  if (unitColors) parts.push(unitColors);
   return parts.join(" · ") || "—";
 }
 

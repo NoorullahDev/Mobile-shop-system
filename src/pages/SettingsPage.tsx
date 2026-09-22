@@ -13,6 +13,7 @@ import {
   Cpu,
   MessageCircle,
   KeyRound,
+  BriefcaseBusiness,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -41,6 +42,7 @@ type SettingsTab =
   | "receipt"
   | "whatsapp"
   | "backup"
+  | "staff"
   | "users"
   | "activity"
   | "notifications"
@@ -59,6 +61,7 @@ const NAV: NavSection[] = [
   { id: "receipt", label: "Receipt", icon: Printer, permission: "settings:view" },
   { id: "whatsapp", label: "WhatsApp Reminder", icon: MessageCircle, permission: "settings:view" },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup, permission: "backup:view" },
+  { id: "staff", label: "Staff / Salary", icon: BriefcaseBusiness, permission: "staff:view" },
   { id: "users", label: "Users & Roles", icon: UserCog, permission: "users:manage" },
   { id: "activity", label: "Activity Logs", icon: ClipboardList, permission: "activity:view" },
   { id: "notifications", label: "Notifications", icon: Bell, permission: "settings:view" },
@@ -106,6 +109,7 @@ export function SettingsPage() {
   const actor = user?.id ?? null;
   const permissions = user?.permissions ?? [];
   const canUpdateSettings = can(permissions, "settings:update");
+  const canViewBusinessSettings = can(permissions, "settings:view");
   const visibleNav = NAV.filter((item) => can(permissions, item.permission));
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("business");
@@ -126,6 +130,10 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!canViewBusinessSettings) {
+      setLoading(false);
+      return;
+    }
     (async () => {
       try {
         const settings = await settingsService.getAllSettings();
@@ -146,7 +154,13 @@ export function SettingsPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [canViewBusinessSettings]);
+
+  useEffect(() => {
+    if (!visibleNav.some((item) => item.id === activeTab) && visibleNav[0]) {
+      setActiveTab(visibleNav[0].id);
+    }
+  }, [activeTab, visibleNav]);
 
   const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -362,6 +376,7 @@ export function SettingsPage() {
           {activeTab === "receipt" && <ReceiptSettingsPage />}
           {activeTab === "whatsapp" && <WhatsAppReminderSettings />}
           {activeTab === "backup" && <BackupManagerPage />}
+          {activeTab === "staff" && <UsersPage initialTab="staff" />}
           {activeTab === "users" && <UsersPage />}
           {activeTab === "activity" && <ActivityLogsPage />}
           {activeTab === "notifications" && <NotificationsPage />}

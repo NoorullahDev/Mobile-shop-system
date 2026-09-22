@@ -240,14 +240,22 @@ pub fn insert_imeis(
     pta_statuses: &[Option<String>],
     storages: &[Option<String>],
     battery_healths: &[Option<i64>],
+    unit_cost: Option<f64>,
+    selling_price: Option<f64>,
 ) -> Result<(), AppError> {
     if imeis.is_empty() {
         return Ok(());
     }
-    const BATCH: usize = 140;
+    // One shared phone_id plus eight values per row. Keep the statement below
+    // SQLite's common 999-variable limit (1 + 8 * 120 = 961).
+    const BATCH: usize = 120;
     for (ci, chunk) in imeis.chunks(BATCH).enumerate() {
-        let placeholders = vec!["(?1, ?, ?, ?, ?, ?, ?)"; chunk.len()].join(",");
-        let sql = format!("INSERT INTO phone_imeis (phone_id, imei, imei2, color, pta_status, storage, battery_health_pct) VALUES {placeholders}");
+        let placeholders = vec![
+            "(?1, ?, ?, ?, ?, ?, ?, COALESCE(?, (SELECT cost_price FROM phones WHERE id = ?1)), COALESCE(?, (SELECT sale_price FROM phones WHERE id = ?1)))";
+            chunk.len()
+        ]
+        .join(",");
+        let sql = format!("INSERT INTO phone_imeis (phone_id, imei, imei2, color, pta_status, storage, battery_health_pct, cost_price, sale_price) VALUES {placeholders}");
         let mut params: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::from(phone_id)];
         let offset = ci * BATCH;
         for (j, imei) in chunk.iter().enumerate() {
@@ -265,6 +273,11 @@ pub fn insert_imeis(
             params.push(storage.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
             let battery = battery_healths.get(offset + j).copied().flatten();
             params.push(battery.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
+            params
+                .push(unit_cost.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
+            params.push(
+                selling_price.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from),
+            );
         }
         conn.execute(&sql, rusqlite::params_from_iter(params.iter()))?;
     }

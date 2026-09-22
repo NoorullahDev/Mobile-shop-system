@@ -60,6 +60,8 @@ fn imei_from_row(r: &rusqlite::Row) -> rusqlite::Result<PhoneImei> {
         pta_status: r.get("pta_status")?,
         storage: r.get("storage")?,
         battery_health_pct: r.get("battery_health_pct")?,
+        cost_price: r.get("cost_price")?,
+        sale_price: r.get("sale_price")?,
         sold_at: r.get("sold_at")?,
         created_at: r.get("created_at")?,
     })
@@ -248,7 +250,10 @@ pub fn imei_exists(conn: &Connection, imei: &str) -> Result<bool, AppError> {
 
 pub fn insert_imei(conn: &Connection, input: &AddPhoneImeiInput) -> Result<i64, AppError> {
     conn.execute(
-        "INSERT INTO phone_imeis (phone_id, imei, imei2, color, pta_status, storage, battery_health_pct) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO phone_imeis (phone_id, imei, imei2, color, pta_status, storage, battery_health_pct, cost_price, sale_price)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                 (SELECT cost_price FROM phones WHERE id = ?1),
+                 (SELECT sale_price FROM phones WHERE id = ?1))",
         params![input.phone_id, input.imei, input.imei2, input.color, input.pta_status, input.storage, input.battery_health_pct],
     )?;
     Ok(conn.last_insert_rowid())
@@ -256,7 +261,8 @@ pub fn insert_imei(conn: &Connection, input: &AddPhoneImeiInput) -> Result<i64, 
 
 pub fn list_imei(conn: &Connection, phone_id: i64) -> Result<Vec<PhoneImei>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, phone_id, imei, imei2, status, color, pta_status, storage, battery_health_pct, sold_at, created_at
+        "SELECT id, phone_id, imei, imei2, status, color, pta_status, storage, battery_health_pct,
+                cost_price, sale_price, sold_at, created_at
          FROM phone_imeis WHERE phone_id = ?1 ORDER BY id",
     )?;
     let rows = stmt.query_map([phone_id], imei_from_row)?;

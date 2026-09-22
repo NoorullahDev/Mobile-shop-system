@@ -231,6 +231,8 @@ pub fn restock(
             &[],
             &[],
             &[],
+            None,
+            None,
         )?;
     }
     tx.commit()?;
@@ -242,9 +244,8 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
     if imei.len() < 8 {
         return Err(AppError::validation("IMEI must be at least 8 characters"));
     }
-    if phone_repository::get_by_id(conn, input.phone_id)?.is_none() {
-        return Err(AppError::validation("Phone not found"));
-    }
+    let phone = phone_repository::get_by_id(conn, input.phone_id)?
+        .ok_or_else(|| AppError::validation("Phone not found"))?;
     if phone_repository::imei_exists(conn, &imei)? {
         return Err(AppError::validation(format!(
             "IMEI {imei} is already in use"
@@ -324,6 +325,8 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
         pta_status,
         storage,
         battery_health_pct: input.battery_health_pct,
+        cost_price: Some(phone.cost_price),
+        sale_price: Some(phone.sale_price),
         sold_at: None,
         created_at: String::new(),
     })

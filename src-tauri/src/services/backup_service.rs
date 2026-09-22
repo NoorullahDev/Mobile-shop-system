@@ -1465,10 +1465,19 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(cost, 400.0);
+            let unit_cols: Vec<String> = v2
+                .prepare("PRAGMA table_info('phone_imeis')")
+                .unwrap()
+                .query_map([], |r| r.get(1))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(unit_cols.contains(&"cost_price".to_string()));
+            assert!(unit_cols.contains(&"sale_price".to_string()));
             let versions: i64 = v2
                 .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(versions, 42);
+            assert_eq!(versions, 43);
 
             // License preserved: the backup cannot replace this machine's activation.
             let license_key: String = v2

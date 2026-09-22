@@ -40,6 +40,19 @@ fn validate_permissions(conn: &Connection, permissions: &[String]) -> Result<(),
     Ok(())
 }
 
+fn role_is_builtin_admin(conn: &Connection, role_id: i64) -> Result<bool, AppError> {
+    Ok(repo::get_role(conn, role_id)?
+        .map(|r| r.is_builtin && r.name.eq_ignore_ascii_case("admin"))
+        .unwrap_or(false))
+}
+
+fn is_primary_admin(conn: &Connection, actor: Option<i64>) -> Result<bool, AppError> {
+    match actor {
+        Some(actor_id) => repo::is_primary_admin(conn, actor_id),
+        None => Ok(false),
+    }
+}
+
 // ----- Users -----
 
 pub fn create_user(
@@ -58,6 +71,12 @@ pub fn create_user(
     }
     if !repo::role_exists(conn, input.role_id)? {
         return Err(AppError::validation("Role not found"));
+    }
+    let target_is_admin = role_is_builtin_admin(conn, input.role_id)?;
+    if target_is_admin && !is_primary_admin(conn, actor)? {
+        return Err(AppError::validation(
+            "Only the primary admin can create users with the built-in Admin role",
+        ));
     }
     if repo::username_exists(conn, &username)? {
         return Err(AppError::validation(
@@ -105,6 +124,27 @@ pub fn update_user(
     let role_id = input.role_id.unwrap_or(current.role_id);
     if !repo::role_exists(conn, role_id)? {
         return Err(AppError::validation("Role not found"));
+    }
+
+    // A user must never be able to promote themselves by editing their own account.
+    if let Some(actor) = actor {
+        if actor == id && role_id != current.role_id {
+            return Err(AppError::validation(
+                "You cannot change your own role",
+            ));
+        }
+    }
+
+    // Only the primary admin may grant the built-in Admin role. This stops a
+    // users:manage holder from promoting any user (including themselves) to full
+    // admin access, then taking over the new account via a reset password.
+    if role_id != current.role_id {
+        let target_is_admin = role_is_builtin_admin(conn, role_id)?;
+        if target_is_admin && !is_primary_admin(conn, actor)? {
+            return Err(AppError::validation(
+                "Only the primary admin can assign the built-in Admin role",
+            ));
+        }
     }
 
     let full_name = clean_opt(input.full_name).or(current.full_name);
@@ -308,6 +348,16 @@ pub fn update_role(
 ) -> Result<RoleWithPermissions, AppError> {
     let current =
         repo::get_role(conn, id)?.ok_or_else(|| AppError::validation("Role not found"))?;
+    // A user must never be able to grant additional permissions to the role they
+    // themselves hold, or strip protections from it.
+    if let Some(actor_id) = actor {
+        let actors_role = repo::get_user(conn, actor_id)?.map(|u| u.role_id);
+        if actors_role == Some(id) {
+            return Err(AppError::validation(
+                "You cannot modify the permissions of your own role",
+            ));
+        }
+    }
     let name = input.name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::validation("Role name is required"));
@@ -620,6 +670,178 @@ mod tests {
         seed_roles(&conn);
         let err = delete_role(&conn, 1, None).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
+    }
+
+    #[test]
+    fn cannot_change_own_role_or_self_grant_permissions() {
+        let conn = in_memory_conn();
+        seed_roles(&conn);
+        let role = create_role(
+            &conn,
+            CreateRoleInput {
+                name: "Manager".into(),
+                description: None,
+                permissions: vec!["users:manage".into()],
+            },
+            None,
+        )
+        .unwrap();
+        let u = create_user(
+            &conn,
+            CreateUserInput {
+                username: "boss".into(),
+                password: "secret123".into(),
+                full_name: None,
+                email: None,
+                role_id: role.id,
+                status: None,
+            },
+            None,
+        )
+        .unwrap();
+
+        // Boss (holds users:manage) must not be able to change their own role.
+        let err = update_user(
+            &conn,
+            u.id,
+            UpdateUserInput {
+                role_id: Some(2),
+                ..Default::default()
+            },
+            Some(u.id),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        assert_eq!(get_user(&conn, u.id).unwrap().role_id, role.id);
+
+        // Boss must not be able to edit the permissions of their own role.
+        let err = update_role(
+            &conn,
+            role.id,
+            UpdateRoleInput {
+                name: "Manager".into(),
+                description: None,
+                permissions: vec!["users:manage".into(), "settings:manage".into()],
+            },
+            Some(u.id),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        assert_eq!(
+            repo::role_permissions(&conn, role.id).unwrap(),
+            vec!["users:manage"]
+        );
+
+        // Editing a role they do NOT hold is still allowed.
+        update_role(
+            &conn,
+            2,
+            UpdateRoleInput {
+                name: "Staff".into(),
+                description: None,
+                permissions: vec!["sales:create".into()],
+            },
+            Some(u.id),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn only_primary_admin_can_assign_builtin_admin_role() {
+        let conn = in_memory_conn();
+        seed_roles(&conn);
+        let role = create_role(
+            &conn,
+            CreateRoleInput {
+                name: "Manager".into(),
+                description: None,
+                permissions: vec!["users:manage".into()],
+            },
+            None,
+        )
+        .unwrap();
+        let u = create_user(
+            &conn,
+            CreateUserInput {
+                username: "boss".into(),
+                password: "secret123".into(),
+                full_name: None,
+                email: None,
+                role_id: role.id,
+                status: None,
+            },
+            None,
+        )
+        .unwrap();
+        let target = create_user(
+            &conn,
+            CreateUserInput {
+                username: "staff".into(),
+                password: "secret123".into(),
+                full_name: None,
+                email: None,
+                role_id: 2,
+                status: None,
+            },
+            None,
+        )
+        .unwrap();
+
+        // Boss can promote staff to their own (non-admin) role.
+        update_user(
+            &conn,
+            target.id,
+            UpdateUserInput {
+                role_id: Some(role.id),
+                ..Default::default()
+            },
+            Some(u.id),
+        )
+        .unwrap();
+
+        // ...but cannot create or promote anyone (including themselves) to Admin.
+        let err = create_user(
+            &conn,
+            CreateUserInput {
+                username: "hack".into(),
+                password: "secret123".into(),
+                full_name: None,
+                email: None,
+                role_id: 1,
+                status: None,
+            },
+            Some(u.id),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+
+        let err = update_user(
+            &conn,
+            target.id,
+            UpdateUserInput {
+                role_id: Some(1),
+                ..Default::default()
+            },
+            Some(u.id),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+
+        // The primary admin can still create users with the Admin role.
+        let admin_created = create_user(
+            &conn,
+            CreateUserInput {
+                username: "coworker".into(),
+                password: "secret123".into(),
+                full_name: None,
+                email: None,
+                role_id: 1,
+                status: None,
+            },
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(admin_created.role_id, 1);
     }
 
     #[test]

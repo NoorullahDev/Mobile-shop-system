@@ -195,6 +195,21 @@ pub fn imei_unit_details(
     Ok(value.unwrap_or((None, None)))
 }
 
+/// Purchase-batch pricing attached to the exact physical handset.
+pub fn imei_unit_pricing(
+    conn: &Connection,
+    imei_id: i64,
+) -> Result<(Option<f64>, Option<f64>), AppError> {
+    let value = conn
+        .query_row(
+            "SELECT cost_price, sale_price FROM phone_imeis WHERE id = ?1",
+            [imei_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(value.unwrap_or((None, None)))
+}
+
 /// Returns Some(current_quantity) if the phone/accessory item exists and is not deleted.
 pub fn item_quantity(conn: &Connection, item_type: &str, id: i64) -> Result<Option<i64>, AppError> {
     super::inventory_repository::item_quantity(conn, item_type, id)

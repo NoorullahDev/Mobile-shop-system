@@ -139,6 +139,10 @@ pub struct PhoneImei {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub battery_health_pct: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sale_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sold_at: Option<String>,
     pub created_at: String,
 }

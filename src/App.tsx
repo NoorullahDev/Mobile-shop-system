@@ -62,6 +62,20 @@ function RequirePermission({ permission, children }: { permission: string; child
   return <>{children}</>;
 }
 
+function RequireAnyPermission({ permissions: required, children }: { permissions: string[]; children: React.ReactNode }) {
+  const permissions = useSessionStore((s) => s.user?.permissions ?? []);
+  if (!required.some((permission) => can(permissions, permission))) {
+    const fallback = landingRoutes.find(([, permission]) => can(permissions, permission))?.[0];
+    return fallback ? <Navigate to={fallback} replace /> : (
+      <div className="rounded-lg border border-red-200 bg-white p-8 text-center">
+        <h1 className="text-lg font-semibold text-slate-900">Access denied</h1>
+        <p className="mt-2 text-sm text-slate-500">Your role does not grant access to this page.</p>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   const { user, checking, init } = useSessionStore();
   const businessName = useSettingsStore((s) => s.businessName);
@@ -168,7 +182,7 @@ export default function App() {
             <Route path="online-payments" element={<RequirePermission permission="online_payments:view"><OnlinePaymentsPage /></RequirePermission>} />
             <Route path="expenses" element={<RequirePermission permission="expenses:view"><ExpensesPage /></RequirePermission>} />
             <Route path="reports" element={<RequirePermission permission="reports:view"><ReportsPage /></RequirePermission>} />
-            <Route path="settings" element={<RequirePermission permission="settings:view"><SettingsPage /></RequirePermission>} />
+            <Route path="settings" element={<RequireAnyPermission permissions={["settings:view", "staff:view", "users:manage", "activity:view", "backup:view", "license:view"]}><SettingsPage /></RequireAnyPermission>} />
             <Route path="settings/receipt" element={<RequirePermission permission="settings:view"><ReceiptSettingsPage /></RequirePermission>} />
             <Route path="license" element={<RequirePermission permission="license:view"><LicensePage /></RequirePermission>} />
           </Route>

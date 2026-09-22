@@ -75,6 +75,7 @@ export interface Phone {
   is_deleted: boolean;
   created_at: string;
   updated_at: string;
+  stock_by_color?: Array<{ color?: string | null; count: number }>;
 }
 
 export interface CreatePhoneInput {
@@ -124,6 +125,8 @@ export interface PhoneImei {
   pta_status?: string | null;
   storage?: string | null;
   battery_health_pct?: number | null;
+  cost_price?: number | null;
+  sale_price?: number | null;
   sold_at?: string | null;
   created_at: string;
 }

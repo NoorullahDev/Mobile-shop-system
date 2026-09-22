@@ -1444,6 +1444,21 @@ const MIGRATIONS: &[(&str, &str)] = &[
         WHERE lower(r.name) = 'admin' AND r.is_builtin = 1;
         "#,
     ),
+    (
+        "0043_phone_unit_pricing",
+        r#"
+        -- Cost and selling price belong to the received physical handset.
+        -- Backfill existing units from their product master to preserve the
+        -- behaviour of installations created before per-unit pricing existed.
+        ALTER TABLE phone_imeis ADD COLUMN cost_price REAL;
+        ALTER TABLE phone_imeis ADD COLUMN sale_price REAL;
+
+        UPDATE phone_imeis
+        SET cost_price = (SELECT p.cost_price FROM phones p WHERE p.id = phone_imeis.phone_id),
+            sale_price = (SELECT p.sale_price FROM phones p WHERE p.id = phone_imeis.phone_id)
+        WHERE cost_price IS NULL OR sale_price IS NULL;
+        "#,
+    ),
 ];
 
 fn apply_range(conn: &Connection, upto: usize) -> Result<(), AppError> {

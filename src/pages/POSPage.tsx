@@ -234,6 +234,9 @@ export function POSPage() {
   }, [products]);
 
   const appendSinglePhone = (item: Product, imeiId: number | null) => {
+    const unitPrice = imeiId == null
+      ? item.sale_price
+      : (imeiByItem[item.item_id] ?? []).find((unit) => unit.id === imeiId)?.sale_price ?? item.sale_price;
     setCart((prev) => [
       ...prev,
       {
@@ -242,7 +245,7 @@ export function POSPage() {
         item_id: item.item_id,
         quantity: 1,
         imei_id: imeiId,
-        unit_price: item.sale_price,
+        unit_price: unitPrice,
         warranty: "",
         warranty_expiry: null,
         custom_warranty_expiry: "",

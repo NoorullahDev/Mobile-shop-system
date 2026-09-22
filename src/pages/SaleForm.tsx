@@ -331,7 +331,13 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
                       unitPrice={l.unit_price}
                       loading={imeiLoadingByItem[l.item_id] === true}
                       allowSelectedSoldUnit={Boolean(initialSale)}
-                      onChange={(imeiId) => updateLine(l.key, { imei_id: imeiId })}
+                      onChange={(imeiId) => {
+                        const unit = imeis.find((candidate) => candidate.id === imeiId);
+                        updateLine(l.key, {
+                          imei_id: imeiId,
+                          unit_price: unit?.sale_price ?? l.unit_price,
+                        });
+                      }}
                       disabled={saving}
                     />
                   </div>

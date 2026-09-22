@@ -664,6 +664,14 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                       Battery {i.battery_health_pct}%
                     </span>
                   )}
+                  {i.sale_price != null && (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                      style={{ background: "#ECFDF5", color: "#047857" }}
+                    >
+                      Sale {formatMoneyCompact(i.sale_price)}
+                    </span>
+                  )}
                   <StatusBadge status={i.status === "in_stock" ? "in stock" : i.status} />
                 </div>
               </div>

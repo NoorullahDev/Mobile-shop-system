@@ -1062,7 +1062,7 @@ pub fn create_sale(
     _actor: Option<i64>,
 ) -> Result<Sale, AppError> {
     let guard = authorized_conn(&db, &session, "sales:create")?;
-    if input.discount > 0.0 {
+    if input.discount > 0.0 || sale_service::has_price_reduction(&guard, &input, None)? {
         let identity =
             user_repository::find_active_identity_by_id(&guard, current_user_id(&session)?)?
                 .ok_or_else(|| {
@@ -1113,14 +1113,10 @@ pub fn update_sale(
     _actor: Option<i64>,
 ) -> Result<Sale, AppError> {
     let guard = authorized_conn(&db, &session, "sales:update")?;
-    let existing_discount: f64 = guard
-        .query_row(
-            "SELECT discount FROM sales WHERE id = ?1 AND is_deleted = 0",
-            [id],
-            |r| r.get(0),
-        )
-        .map_err(|_| AppError::validation("Sale not found"))?;
-    if (input.discount - existing_discount).abs() > 0.005 {
+    let existing = sale_service::get(&guard, id)?;
+    if (input.discount - existing.discount).abs() > 0.005
+        || sale_service::has_price_reduction(&guard, &input, Some(&existing))?
+    {
         let identity =
             user_repository::find_active_identity_by_id(&guard, current_user_id(&session)?)?
                 .ok_or_else(|| {

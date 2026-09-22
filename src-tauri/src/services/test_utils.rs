@@ -151,6 +151,7 @@ CREATE TABLE phone_imeis (
     id INTEGER PRIMARY KEY AUTOINCREMENT, phone_id INTEGER NOT NULL,
     imei TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'in_stock', sold_at DATETIME,
     color TEXT, imei2 TEXT UNIQUE, pta_status TEXT, storage TEXT, battery_health_pct INTEGER,
+    cost_price REAL, sale_price REAL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE sales (
