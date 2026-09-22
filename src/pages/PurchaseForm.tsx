@@ -700,20 +700,22 @@ export function PurchaseForm({
                               <Input
                                 label="IMEI 1"
                                 placeholder="Enter IMEI 1"
+                                maxLength={15}
                                 value={imei}
                                 disabled={saving}
                                 mono
-                                onChange={(e) => setPhoneImei(l.key, i, e.target.value)}
+                                onChange={(e) => setPhoneImei(l.key, i, e.target.value.slice(0, 15))}
                               />
                             </div>
                             <div className="min-w-0">
                               <Input
                                 label="IMEI 2 (Optional)"
                                 placeholder="Enter IMEI 2"
+                                maxLength={15}
                                 value={l.imei2s[i] ?? ""}
                                 disabled={saving}
                                 mono
-                                onChange={(e) => setPhoneImei2(l.key, i, e.target.value)}
+                                onChange={(e) => setPhoneImei2(l.key, i, e.target.value.slice(0, 15))}
                               />
                             </div>
                             <div className="min-w-0">
