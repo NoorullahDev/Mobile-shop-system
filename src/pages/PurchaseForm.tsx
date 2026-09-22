@@ -421,8 +421,12 @@ export function PurchaseForm({
         errs.push("Enter a custom PTA status for every unit using Other / Custom.");
         continue;
       }
-      if (units.some((u) => !u.color)) {
-        errs.push("Enter a color for every physical phone unit.");
+      if (units.some((u) => !/^\d{15}$/.test(u.imei))) {
+        errs.push("IMEI 1 must be exactly 15 numeric digits for every physical phone unit.");
+        continue;
+      }
+      if (units.some((u) => u.imei2.length > 0 && !/^\d{15}$/.test(u.imei2))) {
+        errs.push("IMEI 2, when entered, must also be exactly 15 numeric digits.");
         continue;
       }
       if (units.some((u) => !u.storage)) {
@@ -682,7 +686,7 @@ export function PurchaseForm({
                     <div className="mb-1 text-[12px] font-medium text-slate-500">
                       Physical Phone Units{" "}
                       <span className="text-red-600">
-                        (IMEI 1 required — exactly {Number(l.quantity) || 0})
+                        (IMEI 1 required, exactly 15 digits — {Number(l.quantity) || 0})
                       </span>
                     </div>
                     <div className="flex flex-col gap-2">
@@ -714,7 +718,7 @@ export function PurchaseForm({
                             </div>
                             <div className="min-w-0">
                               <Input
-                                label="Color"
+                                label="Color (Optional)"
                                 placeholder="Color"
                                 value={l.imeiColors[i] ?? ""}
                                 disabled={saving}

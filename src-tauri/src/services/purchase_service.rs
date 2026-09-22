@@ -17,6 +17,10 @@ fn normalize_payment_method(m: &str) -> String {
     }
 }
 
+fn is_valid_imei(value: &str) -> bool {
+    value.len() == 15 && value.chars().all(|c| c.is_ascii_digit())
+}
+
 fn validate_sp_status(s: Option<&str>) -> String {
     match s {
         Some(v) => {
@@ -123,8 +127,10 @@ pub fn prepare_purchase_lines(
                 if imei.is_empty() {
                     continue;
                 }
-                if imei.len() < 8 {
-                    return Err(AppError::validation("IMEI must be at least 8 characters"));
+                if !is_valid_imei(&imei) {
+                    return Err(AppError::validation(
+                        "IMEI 1 must be exactly 15 numeric digits",
+                    ));
                 }
                 if seen.contains(&imei) {
                     return Err(AppError::validation(format!("IMEI {imei} is duplicated")));
@@ -136,8 +142,10 @@ pub fn prepare_purchase_lines(
                     .map(|s| s.trim().to_uppercase())
                     .filter(|s| !s.is_empty());
                 if let Some(second) = imei2.as_deref() {
-                    if second.len() < 8 {
-                        return Err(AppError::validation("IMEI 2 must be at least 8 characters"));
+                    if !is_valid_imei(second) {
+                        return Err(AppError::validation(
+                            "IMEI 2 must be exactly 15 numeric digits",
+                        ));
                     }
                     if second == imei {
                         return Err(AppError::validation(
@@ -1119,7 +1127,7 @@ mod tests {
         let mut input = purchase_input(iid, None);
         input.items[0].quantity = 100;
         input.items[0].imeis = (0..100)
-            .map(|index| format!("TESTIMEI{index:08}"))
+            .map(|index| format!("{index:015}"))
             .collect();
         input.paid_amount = Some(10_000.0);
         let purchase = create_purchase(&conn, input, None).unwrap();
