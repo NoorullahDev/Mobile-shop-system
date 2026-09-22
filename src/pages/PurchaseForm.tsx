@@ -435,11 +435,12 @@ export function PurchaseForm({
       }
       if (
         units.some((u) => {
+          if (u.batteryHealth === "") return false;
           const value = Number(u.batteryHealth);
-          return u.batteryHealth === "" || !Number.isInteger(value) || value < 0 || value > 100;
+          return !Number.isInteger(value) || value < 0 || value > 100;
         })
       ) {
-        errs.push("Battery health must be a whole number from 0 to 100 for every unit.");
+        errs.push("Battery health must be a whole number from 0 to 100 when entered.");
         continue;
       }
       items.push({
@@ -457,7 +458,9 @@ export function PurchaseForm({
         imei_colors: units.map((u) => u.color),
         imei_pta_statuses: units.map((u) => u.ptaStatus),
         imei_storages: units.map((u) => u.storage),
-        imei_battery_healths: units.map((u) => Number(u.batteryHealth)),
+        imei_battery_healths: units.map((u) =>
+          u.batteryHealth === "" ? null : Number(u.batteryHealth),
+        ),
       });
     }
 
@@ -758,7 +761,7 @@ export function PurchaseForm({
                             </div>
                             <div className="min-w-0">
                               <Input
-                                label="Battery Health %"
+                                label="Battery Health % (Optional)"
                                 type="number"
                                 min="0"
                                 max="100"

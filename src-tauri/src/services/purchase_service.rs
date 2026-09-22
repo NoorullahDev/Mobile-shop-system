@@ -180,11 +180,6 @@ pub fn prepare_purchase_lines(
                 }
                 imei_storages.push(storage);
                 let battery_health = item.imei_battery_healths.get(i).copied().flatten();
-                if !item.imei_battery_healths.is_empty() && battery_health.is_none() {
-                    return Err(AppError::validation(
-                        "Battery health is required for every physical phone unit",
-                    ));
-                }
                 if let Some(value) = battery_health {
                     if !(0..=100).contains(&value) {
                         return Err(AppError::validation(
