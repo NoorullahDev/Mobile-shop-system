@@ -182,6 +182,20 @@ h3 { font-size: 14px; font-weight: 600; line-height: 1.4;  margin: 0; }
 .kpi-icon-red    { background: #FEE2E2; color: #DC2626; }
 .kpi-icon-navy   { background: #E0E7FF; color: #2E4B8F; }
 
+.kpi-card {
+  box-shadow: var(--shadow-sm);
+}
+
+.dashboard-kpis .kpi-card {
+  transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dashboard-kpis .kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.10), 0 2px 4px rgba(15, 23, 42, 0.06);
+}
+
 /* ─────────────────────────────────────────
    AMOUNT / MONEY DISPLAY
 ────────────────────────────────────────── */
@@ -326,8 +340,14 @@ h3 { font-size: 14px; font-weight: 600; line-height: 1.4;  margin: 0; }
   overflow: hidden;
 }
 
+.app-sidebar {
+  width: 260px;
+}
+
 .app-content {
   flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 24px 28px 40px;
 }
@@ -337,14 +357,37 @@ h3 { font-size: 14px; font-weight: 600; line-height: 1.4;  margin: 0; }
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
   width: 100%;
   border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
   line-height: 1;
   text-decoration: none;
-  transition: background 0.12s, color 0.12s;
+}
+
+.sidebar-nav-item {
+  min-height: 44px;
+  gap: 10px;
+  padding: 0 10px;
+  font-size: 15px;
+  transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+              color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-nav-item:hover {
+  z-index: 1;
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-kpis .kpi-card,
+  .sidebar-nav-item {
+    transition: none;
+  }
+
+  .dashboard-kpis .kpi-card:hover,
+  .sidebar-nav-item:hover {
+    transform: none;
+  }
 }
 
 /* Table row hover for interactive rows */

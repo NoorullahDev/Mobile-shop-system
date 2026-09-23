@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
@@ -6,8 +6,38 @@ import * as licenseService from "../services/licenseService";
 
 export function MainLayout() {
   const location = useLocation();
+  const contentRef = useRef<HTMLElement>(null);
+  const previousPathRef = useRef(location.pathname);
+  const pageAnimationRef = useRef<Animation | null>(null);
   const [licenseDismissed, setLicenseDismissed] = useState(() => localStorage.getItem("licenseDismissed") === "true");
   const [unlicensed, setUnlicensed] = useState(false);
+
+  useLayoutEffect(() => {
+    if (previousPathRef.current === location.pathname) return;
+    previousPathRef.current = location.pathname;
+
+    pageAnimationRef.current?.cancel();
+    pageAnimationRef.current = null;
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const content = contentRef.current;
+    if (!content) return;
+
+    const animation = content.animate(
+      [{ transform: "translateX(8px)" }, { transform: "translateX(0)" }],
+      { duration: 180, easing: "ease-out" },
+    );
+    pageAnimationRef.current = animation;
+    animation.onfinish = () => {
+      if (pageAnimationRef.current === animation) pageAnimationRef.current = null;
+    };
+
+    return () => {
+      animation.cancel();
+      if (pageAnimationRef.current === animation) pageAnimationRef.current = null;
+    };
+  }, [location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,7 +102,7 @@ export function MainLayout() {
             </button>
           </div>
         )}
-        <main className="app-content">
+        <main ref={contentRef} className="app-content">
           <Outlet />
         </main>
       </div>

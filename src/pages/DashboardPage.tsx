@@ -236,7 +236,7 @@ export function DashboardPage() {
       ) : (
         <>
           {/* KPI Cards */}
-          <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="dashboard-kpis mb-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <KpiCard
               title={period === "today" ? "TODAY'S SALES" : period === "week" ? "THIS WEEK'S SALES" : period === "month" ? "THIS MONTH'S SALES" : "THIS YEAR'S SALES"}
               value={formatMoneyCompact(periodSummary?.revenue ?? summary?.today_revenue ?? 0)}

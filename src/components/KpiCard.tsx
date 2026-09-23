@@ -43,11 +43,8 @@ export function KpiCard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-lg bg-white ${onClick ? "cursor-pointer transition-shadow hover:shadow-md" : ""}`}
-      style={{
-        border: "1px solid #E2E8F0",
-        boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-      }}
+      className={`kpi-card rounded-lg bg-white ${onClick ? "cursor-pointer" : ""}`}
+      style={{ border: "1px solid #E2E8F0" }}
     >
       <div className="flex items-start justify-between px-4 pt-4">
         <span

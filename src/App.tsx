@@ -185,20 +185,6 @@ export default function App() {
             <Route path="settings" element={<RequireAnyPermission permissions={["settings:view", "staff:view", "users:manage", "activity:view", "backup:view", "license:view"]}><SettingsPage /></RequireAnyPermission>} />
             <Route path="settings/receipt" element={<RequirePermission permission="settings:view"><ReceiptSettingsPage /></RequirePermission>} />
             <Route path="license" element={<RequirePermission permission="license:view"><LicensePage /></RequirePermission>} />
-          </Route>
-
-          {/* Placeholder routes for planned modules (built in later phases) */}
-          <Route
-            element={
-              pendingActivation ? (
-                <Navigate to="/activation" replace />
-              ) : user ? (
-                <MainLayout />
-              ) : (
-                <Navigate to="/login" replace />
-              )
-            }
-          >
             <Route path="sales/new" element={<RequirePermission permission="sales:create"><POSPage /></RequirePermission>} />
             <Route path="accessories" element={<RequirePermission permission="accessories:view"><AccessoriesPage /></RequirePermission>} />
             <Route path="purchases" element={<RequirePermission permission="purchases:view"><PurchasesPage /></RequirePermission>} />

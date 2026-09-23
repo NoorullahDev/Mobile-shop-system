@@ -117,9 +117,9 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
           <NavLink
             to={item.to}
             onClick={onNavigate}
-            className="relative flex items-center gap-2.5 rounded px-2.5 py-2 text-[13px] font-semibold text-white nav-pos-item"
+            className="sidebar-nav-item nav-pos-item relative flex items-center rounded font-semibold text-white"
           >
-            <item.icon className="h-4 w-4 shrink-0" />
+            <item.icon className="h-5 w-5 shrink-0" />
             <span className="flex-1 truncate">{item.label}</span>
             {item.shortcut && (
               <span className="rounded px-1.5 text-[10px] font-bold" style={{ background: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.9)" }}>
@@ -137,7 +137,7 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
           end={item.end}
           onClick={onNavigate}
           className={({ isActive }) =>
-            `side-link ${isActive ? "font-medium" : ""}`
+            `side-link sidebar-nav-item ${isActive ? "font-medium" : ""}`
           }
           style={({ isActive }) => ({
             background: isActive ? "#1E3356" : "transparent",
@@ -152,7 +152,7 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
                   style={{ background: "#5B8FE8" }}
                 />
               )}
-              <item.icon className="h-4 w-4 shrink-0" style={{ opacity: 0.9 }} />
+              <item.icon className="h-5 w-5 shrink-0" style={{ opacity: 0.9 }} />
               <span className="flex-1 truncate">{item.label}</span>
             </>
           )}
@@ -162,7 +162,7 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col" style={{ background: "#0F1B32", borderRight: "1px solid #1E2E4F" }}>
+    <aside className="app-sidebar flex min-h-0 shrink-0 flex-col" style={{ background: "#0F1B32", borderRight: "1px solid #1E2E4F" }}>
       {/* Brand */}
       <div className="flex h-16 shrink-0 items-center gap-3 px-5" style={{ borderBottom: "1px solid #1E2E4F" }}>
         {shopLogo ? (
@@ -186,7 +186,7 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
       </div>
 
       {/* Main navigation (scrolls independently) */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
         <ul className="space-y-0.5">{visibleMainNav.map(renderItem)}</ul>
       </nav>
 
