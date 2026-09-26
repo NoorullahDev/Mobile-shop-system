@@ -281,19 +281,7 @@ pub fn decrement_stock(
     item_id: i64,
     qty: i64,
 ) -> Result<bool, AppError> {
-    let table = if item_type == "phone" {
-        "phones"
-    } else {
-        "accessories"
-    };
-    let affected = conn.execute(
-        &format!(
-            "UPDATE {table} SET quantity = quantity - ?1, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?2 AND is_deleted = 0 AND quantity >= ?1"
-        ),
-        params![qty, item_id],
-    )?;
-    Ok(affected > 0)
+    super::inventory_repository::decrement_stock(conn, item_type, item_id, qty)
 }
 
 pub fn mark_imei_sold(conn: &Connection, imei_id: i64, phone_id: i64) -> Result<bool, AppError> {
@@ -447,7 +435,13 @@ pub fn product_color(
 }
 
 pub fn next_receipt_no(conn: &Connection) -> Result<String, AppError> {
-    let max: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM sales", [], |r| r.get(0))?;
+    // AUTOINCREMENT keeps a monotonic high-water mark in sqlite_sequence, so a
+    // receipt number is never reused after a sale is deleted.
+    let max: i64 = conn.query_row(
+        "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'sales'), (SELECT MAX(id) FROM sales), 0)",
+        [],
+        |r| r.get(0),
+    )?;
     Ok(format!("INV-{:06}", max + 1))
 }
 

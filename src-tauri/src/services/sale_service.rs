@@ -576,7 +576,14 @@ pub fn update(
             "The customer cannot be changed after a due payment has been recorded",
         ));
     }
-    let combined_paid = utils::round2(prepared.paid_amount + linked_due_payments);
+    // When the caller passes an explicit paid_amount it already reflects the
+    // total received (the edit form seeds it from the inclusive paid_amount
+    // column). Only the "unspecified" path should add due payments again.
+    let combined_paid = if input.paid_amount.is_some() {
+        utils::round2(prepared.paid_amount)
+    } else {
+        utils::round2(prepared.paid_amount + linked_due_payments)
+    };
     if combined_paid > prepared.total_amount + 0.005 {
         return Err(AppError::validation(
             "The corrected invoice total cannot be lower than its recorded payments",
@@ -676,11 +683,13 @@ pub fn update(
     sale_payment_repository::delete_active_payments_for_sale(&tx, id)?;
     if !prepared.payments.is_empty() {
         sale_payment_repository::insert_payments(&tx, id, &prepared.payments)?;
-    } else if prepared.paid_amount > 0.0 {
+    } else if combined_paid > linked_due_payments + 0.005 {
+        // Only re-record the portion that is not already captured as a linked
+        // due payment, so the paid_amount column always equals the true total.
         sale_payment_repository::insert_sale_payment(
             &tx,
             id,
-            prepared.paid_amount,
+            utils::round2(combined_paid - linked_due_payments),
             &prepared.payment_method,
             None,
             None,
@@ -918,7 +927,7 @@ mod tests {
         let mut correction = sale_input(id, 1);
         correction.items[0].sale_item_id = Some(sale.items[0].id);
         correction.member_id = Some(member_id);
-        correction.paid_amount = Some(40.0);
+        correction.paid_amount = Some(60.0);
         let corrected = update(&conn, sale.id, correction, None).unwrap();
         assert_eq!(corrected.paid_amount, 60.0);
         assert_eq!(corrected.sale_payments.len(), 1);
@@ -1391,6 +1400,82 @@ mod tests {
         assert_eq!(corrected.returns[0].total_sale_price, 150.0);
         assert_eq!(corrected.returns[0].refund_amount, 135.0);
         assert_eq!(phone_service::get(&conn, id).unwrap().quantity, 3);
+    }
+
+    #[test]
+    fn editing_due_sale_does_not_double_count_collected_payments() {
+        use crate::models::member::CreateMemberInput;
+        use crate::models::payment::CreatePaymentInput;
+        use crate::repositories::member_repository;
+        use crate::services::payment_service;
+
+        let conn = in_memory_conn();
+        let id = phone(&conn, 10, 100.0);
+        let member = member_repository::insert(
+            &conn,
+            &CreateMemberInput {
+                name: "Ali".into(),
+                phone: Some("03000000000".into()),
+                cnic: None,
+                address: None,
+                notes: None,
+            },
+        )
+        .unwrap();
+        let mut due = sale_input(id, 6);
+        due.member_id = Some(member);
+        due.paid_amount = Some(0.0);
+        let sale = create(&conn, due, None).unwrap();
+        assert_eq!(sale.total_amount, 600.0);
+        assert_eq!(sale.paid_amount, 0.0);
+
+        payment_service::create(
+            &conn,
+            CreatePaymentInput {
+                member_id: Some(member),
+                amount: 400.0,
+                payment_method: "cash".into(),
+                payment_type: Some("invoice".into()),
+                status: Some("completed".into()),
+                reference: Some("COLLECT-1".into()),
+                account_details: None,
+                notes: None,
+                payment_date: None,
+                sale_id: Some(sale.id),
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(get(&conn, sale.id).unwrap().paid_amount, 400.0);
+
+        // SaleForm seeds paid_amount with the accumulated received total (400);
+        // saving the edit must keep 400 and not re-add the linked collection.
+        let corrected = update(
+            &conn,
+            sale.id,
+            CreateSaleInput {
+                member_id: Some(member),
+                discount: 0.0,
+                paid_amount: Some(400.0),
+                payment_method: Some("cash".into()),
+                notes: Some("edited".into()),
+                payments: vec![],
+                items: vec![SaleItemInput {
+                    sale_item_id: Some(sale.items[0].id),
+                    item_type: "phone".into(),
+                    item_id: id,
+                    quantity: 6,
+                    imei_id: None,
+                    unit_price: Some(100.0),
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(corrected.paid_amount, 400.0);
+        assert!(corrected.sale_payments.is_empty());
     }
 
     #[test]

@@ -21,6 +21,7 @@ import { Input } from "../components/Input";
 import { Select } from "../components/Select";
 import { usePaymentStore } from "../store/payments";
 import { useMemberStore } from "../store/members";
+import { useSaleStore } from "../store/sales";
 import * as paymentService from "../services/paymentService";
 import { useSessionStore } from "../store/session";
 import { formatMoney, formatMoneyCompact, methodLabels } from "../lib/format";
@@ -132,6 +133,10 @@ export function PaymentsPage() {
       setPayMemberId(null);
       const rows = await paymentService.listCustomerDueInvoices(duesSearch || undefined);
       setDueInvoices(rows);
+      await Promise.allSettled([
+        useSaleStore.getState().load(),
+        useMemberStore.getState().load(),
+      ]);
     } catch (err) {
       setPayError(String(err));
     } finally {

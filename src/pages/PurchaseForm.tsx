@@ -73,6 +73,13 @@ interface AccessoryDraftLine {
   warranty: string;
 }
 
+function toInputDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 let nextKey = 1;
 
 function newPhoneLine(quantity = 1): PhoneDraftLine {
@@ -196,7 +203,7 @@ export function PurchaseForm({
   const [discountStr, setDiscountStr] = useState(initial ? String(initial.discount) : "0");
   const [paidStr, setPaidStr] = useState(initial ? String(initial.paid_amount) : "");
   const [method, setMethod] = useState(initial?.payment_method || "cash");
-  const [purchaseDate, setPurchaseDate] = useState(initial?.purchase_date ? initial.purchase_date.substring(0, 10) : "");
+  const [purchaseDate, setPurchaseDate] = useState(initial?.purchase_date ? initial.purchase_date.substring(0, 10) : toInputDate(new Date()));
   const [invoiceRef, setInvoiceRef] = useState(initial?.invoice_reference || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [saving, setSaving] = useState(false);

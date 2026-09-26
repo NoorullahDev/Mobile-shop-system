@@ -233,7 +233,7 @@ pub fn soft_delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(),
     if let Some(sale_id) = payment.sale_id {
         // Only block if deleting this payment would make the sale's balance negative.
         let sale_due: f64 = conn.query_row(
-            "SELECT MAX(s.total_amount - s.paid_amount, 0) FROM sales s WHERE s.id = ?1",
+            "SELECT MAX(s.total_amount - s.paid_amount - COALESCE((SELECT SUM(r.refund_amount) FROM returns r WHERE r.sale_id = s.id), 0), 0) FROM sales s WHERE s.id = ?1",
             [sale_id],
             |r| r.get(0),
         )?;

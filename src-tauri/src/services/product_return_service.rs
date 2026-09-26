@@ -310,7 +310,7 @@ fn apply_exchange_offset(
     conn: &Connection,
     sale_input: &mut crate::models::sale::CreateSaleInput,
     prepared: &mut PreparedReturn,
-) {
+) -> Result<(), AppError> {
     let mut s_amount = 0.0;
     for item in &sale_input.items {
         let price = match item.unit_price {
@@ -320,8 +320,7 @@ fn apply_exchange_offset(
                 &item.item_type,
                 item.item_id,
                 item.imei_id,
-            )
-            .unwrap_or(0.0),
+            )?,
         };
         s_amount += item.quantity as f64 * price;
     }
@@ -368,6 +367,7 @@ fn apply_exchange_offset(
             });
         prepared.refund_amount = 0.0;
     }
+    Ok(())
 }
 
 pub fn create(
@@ -386,7 +386,7 @@ pub fn create(
     let mut exchange_sale_id = None;
     if input.return_type == "exchange" {
         if let Some(mut sale_input) = exchange_item {
-            apply_exchange_offset(&tx, &mut sale_input, &mut prepared);
+            apply_exchange_offset(&tx, &mut sale_input, &mut prepared)?;
             sale_input.member_id = prepared.sale.member_id;
             exchange_sale_id = Some(crate::services::sale_service::create_tx(
                 &tx, sale_input, actor,
@@ -584,7 +584,7 @@ pub fn update(
     let mut exchange_sale_id = old.exchange_sale_id;
     if input.return_type == "exchange" {
         if let Some(mut sale_input) = exchange_item {
-            apply_exchange_offset(&tx, &mut sale_input, &mut prepared);
+            apply_exchange_offset(&tx, &mut sale_input, &mut prepared)?;
             sale_input.member_id = prepared.sale.member_id;
             if let Some(old_sid) = exchange_sale_id {
                 crate::services::sale_service::delete_tx(&tx, old_sid)?;

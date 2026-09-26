@@ -449,7 +449,7 @@ export function POSPage() {
     const input: CreateSaleInput = {
       member_id: memberId ? Number(memberId) : null,
       discount: discountNum,
-      paid_amount: null,
+      paid_amount: payments.length > 0 ? null : 0,
       payment_method: null,
       items: cart.map((l) => ({
         item_type: l.item_type,
@@ -467,6 +467,8 @@ export function POSPage() {
     try {
       const created = await add(input, user?.id ?? null);
       clearCart();
+      imeiRequests.current.clear();
+      setImeiByItem({});
       await loadInventory();
       setJustSold(created);
     } catch (err) {

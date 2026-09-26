@@ -63,11 +63,7 @@ export function SaleForm({ onSubmit, onCancel, products, members, initialSale }:
   const [imeiLoadingByItem, setImeiLoadingByItem] = useState<Record<number, boolean>>({});
   const [discount, setDiscount] = useState(String(initialSale?.discount ?? 0));
   const initialInvoicePayments = (initialSale?.sale_payments ?? []).filter((sp) => !sp.is_voided);
-  const [paidAmount, setPaidAmount] = useState(initialSale
-    ? String(roundMoney(initialInvoicePayments.length > 0
-      ? initialInvoicePayments.reduce((sum, payment) => sum + payment.amount, 0)
-      : initialSale.paid_amount))
-    : "");
+  const [paidAmount, setPaidAmount] = useState(initialSale ? String(roundMoney(initialSale.paid_amount)) : "");
   const [paymentMethod, setPaymentMethod] = useState(initialSale?.payment_method ?? "cash");
   const [memberId, setMemberId] = useState(initialSale?.member_id ? String(initialSale.member_id) : "");
   const [notes, setNotes] = useState(initialSale?.notes ?? "");

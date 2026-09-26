@@ -291,6 +291,11 @@ pub fn recalculate_for_sale(conn: &Connection, sale_id: i64) -> Result<(), AppEr
                 "The corrected sale price is lower than an existing return deduction",
             ));
         }
+        if total <= 0.0 {
+            return Err(AppError::validation(
+                "Cannot recalculate a return on a zero-total invoice",
+            ));
+        }
         let mut allocated = 0.0;
         let count = values.len();
         for (index, (item_id, unit_price, line_total)) in values.into_iter().enumerate() {

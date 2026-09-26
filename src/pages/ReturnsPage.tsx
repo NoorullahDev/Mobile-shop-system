@@ -8,6 +8,8 @@ import { EmptyState } from "../components/EmptyState";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { useReturnStore } from "../store/returns";
+import { useSaleStore } from "../store/sales";
+import { useInventoryStore } from "../store/inventory";
 import { NewReturnModal } from "./NewReturnModal";
 import type { ProductReturn, ReturnSummary } from "../types/return";
 import { useSessionStore } from "../store/session";
@@ -62,6 +64,16 @@ export function ReturnsPage() {
     if (full) setEditReturn(full);
   };
 
+  // A return changes inventory, the sale's return status and the customer due
+  // balances, so every related store is re-synced after a mutation.
+  const refreshRelated = async () => {
+    await Promise.allSettled([
+      load(),
+      useSaleStore.getState().load(),
+      useInventoryStore.getState().load(),
+    ]);
+  };
+
   const handleDelete = async () => {
     if (!confirmDelete) return;
     setDeleting(true);
@@ -69,6 +81,7 @@ export function ReturnsPage() {
       await remove(confirmDelete.id, user?.id ?? null);
       setConfirmDelete(null);
       setDetail(null);
+      await refreshRelated();
     } finally {
       setDeleting(false);
     }
@@ -251,7 +264,7 @@ export function ReturnsPage() {
       <NewReturnModal
         open={newOpen}
         onClose={() => setNewOpen(false)}
-        onCreated={() => load()}
+        onCreated={refreshRelated}
       />
 
       {editReturn && (
@@ -260,7 +273,7 @@ export function ReturnsPage() {
           open
           initialReturn={editReturn}
           onClose={() => setEditReturn(null)}
-          onSaved={() => { setEditReturn(null); load(); }}
+          onSaved={() => { setEditReturn(null); refreshRelated(); }}
         />
       )}
 
