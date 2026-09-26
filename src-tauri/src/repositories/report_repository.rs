@@ -20,7 +20,10 @@ pub fn dashboard_summary(
         |r| r.get::<_, f64>(0),
     )?;
     let cogs = conn.query_row(
-        "SELECT COALESCE(SUM(si.quantity * si.cost_price), 0)
+        "SELECT COALESCE(SUM(
+             (si.quantity - COALESCE((SELECT SUM(ri.quantity) FROM return_items ri
+                                      WHERE ri.sale_item_id = si.id AND ri.restocked = 1), 0))
+             * si.cost_price), 0)
          FROM sale_items si",
         [],
         |r| r.get::<_, f64>(0),
@@ -401,14 +404,17 @@ pub fn profit_loss_summary(
         |r| r.get::<_, f64>(0),
     )?;
     let cogs = conn.query_row(
-        "SELECT COALESCE(SUM(t.qty * t.cost), 0) FROM (
-             SELECT si.quantity AS qty, si.cost_price AS cost
+        "SELECT COALESCE(SUM(
+             (t.qty - COALESCE((SELECT SUM(ri.quantity) FROM return_items ri
+                                WHERE ri.sale_item_id = t.sid AND ri.restocked = 1), 0))
+             * t.cost), 0) FROM (
+             SELECT si.id AS sid, si.quantity AS qty, si.cost_price AS cost
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              WHERE date(s.created_at, 'localtime') >= date(?1) AND date(s.created_at, 'localtime') < date(?2, '+1 day')
                  AND si.phone_id IS NOT NULL
              UNION ALL
-             SELECT si.quantity AS qty, si.cost_price AS cost
+             SELECT si.id AS sid, si.quantity AS qty, si.cost_price AS cost
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              WHERE date(s.created_at, 'localtime') >= date(?1) AND date(s.created_at, 'localtime') < date(?2, '+1 day')
@@ -454,14 +460,15 @@ pub fn monthly_profit_loss(
             UNION ALL
             SELECT strftime('%Y-%m', s.created_at) AS m,
                    0.0 AS revenue,
-                   SUM(t.qty * t.cost) AS cogs,
+                   SUM((t.qty - COALESCE((SELECT SUM(ri.quantity) FROM return_items ri
+                                         WHERE ri.sale_item_id = t.item_sid AND ri.restocked = 1), 0)) * t.cost) AS cogs,
                    0.0 AS expenses
             FROM (
-                SELECT si.sale_id AS sid, si.quantity AS qty, si.cost_price AS cost
+                SELECT si.id AS item_sid, si.sale_id AS sid, si.quantity AS qty, si.cost_price AS cost
                 FROM sale_items si
                 WHERE si.phone_id IS NOT NULL
                 UNION ALL
-                SELECT si.sale_id AS sid, si.quantity AS qty, si.cost_price AS cost
+                SELECT si.id AS item_sid, si.sale_id AS sid, si.quantity AS qty, si.cost_price AS cost
                 FROM sale_items si
                 WHERE si.accessory_id IS NOT NULL
             ) t JOIN sales s ON s.id = t.sid

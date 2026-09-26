@@ -175,7 +175,12 @@ pub fn profit_loss(conn: &Connection, from: &str, to: &str) -> Result<ProfitLoss
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::phone::CreatePhoneInput;
+    use crate::models::product_return::{CreateReturnInput, ReturnItemInput};
+    use crate::models::purchase::{CreatePurchaseInput, PurchaseItemInput};
+    use crate::models::sale::{CreateSaleInput, SaleItemInput};
     use crate::services::test_utils::in_memory_conn;
+    use crate::services::{phone_service, product_return_service, purchase_service, sale_service};
 
     fn local_today() -> String {
         chrono::Local::now()
@@ -214,6 +219,132 @@ mod tests {
             RN += 1;
             RN
         }
+    }
+
+    /// Creates a tracked phone master with zero stock.
+    fn phone_master(conn: &Connection) -> i64 {
+        phone_service::create(
+            conn,
+            CreatePhoneInput {
+                brand: "Apple".into(),
+                model: "iPhone 15".into(),
+                cost_price: 100.0,
+                sale_price: 200.0,
+                quantity: 0,
+                supplier_id: None,
+                low_stock_threshold: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id
+    }
+
+    /// Add Mobile Phone -> Purchase one tracked physical unit. Returns the imei id.
+    fn purchase_phone_unit(conn: &Connection, pid: i64) -> i64 {
+        let imei = format!("35{:013}", rand_id());
+        let imei2 = format!("35{:013}", rand_id());
+        let purchase = purchase_service::create_purchase(
+            conn,
+            CreatePurchaseInput {
+                supplier_id: None,
+                discount: 0.0,
+                paid_amount: None,
+                payment_method: Some("cash".into()),
+                purchase_date: None,
+                invoice_reference: None,
+                notes: None,
+                items: vec![PurchaseItemInput {
+                    item_type: "phone".into(),
+                    item_id: pid,
+                    quantity: 1,
+                    unit_cost: Some(100.0),
+                    selling_price: Some(200.0),
+                    warranty: None,
+                    condition: None,
+                    imeis: vec![imei.clone()],
+                    imei2s: vec![imei2.clone()],
+                    imei_colors: vec!["Midnight".into()],
+                    imei_pta_statuses: vec!["PTA Approved".into()],
+                    imei_storages: vec!["128GB".into()],
+                    imei_battery_healths: vec![Some(90)],
+                    imei_unit_costs: vec![Some(100.0)],
+                    imei_sale_prices: vec![Some(200.0)],
+                }],
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(purchase.items[0].imei_costs, vec![100.0]);
+        phone_service::list_imei(conn, pid)
+            .unwrap()
+            .into_iter()
+            .find(|u| u.imei == imei)
+            .unwrap()
+            .id
+    }
+
+    /// Purchase -> POS sale of an exact tracked unit (unit price taken from the unit).
+    fn sell_phone_unit(conn: &Connection, pid: i64, imei_id: i64) -> i64 {
+        let sale = sale_service::create(
+            conn,
+            CreateSaleInput {
+                member_id: None,
+                discount: 0.0,
+                paid_amount: None,
+                payment_method: Some("cash".into()),
+                notes: None,
+                payments: vec![],
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: pid,
+                    quantity: 1,
+                    imei_id: Some(imei_id),
+                    unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(sale.items[0].cost_price, 100.0);
+        assert_eq!(sale.items[0].unit_price, 200.0);
+        sale.id
+    }
+
+    /// POS sale -> Return of one sale line, optionally identifying the exact unit.
+    fn return_phone_sale_item(
+        conn: &Connection,
+        sale_id: i64,
+        sale_item_id: i64,
+        imei_id: Option<i64>,
+        condition: &str,
+    ) -> crate::models::product_return::ProductReturn {
+        product_return_service::create(
+            conn,
+            CreateReturnInput {
+                sale_id,
+                return_type: "return".into(),
+                return_charge_percent: 0.0,
+                fixed_deduction: None,
+                refund_method: Some("cash".into()),
+                return_date: None,
+                reference: None,
+                notes: None,
+                items: vec![ReturnItemInput {
+                    sale_item_id,
+                    quantity: 1,
+                    imei_id,
+                    reason: Some("change of mind".into()),
+                    condition: condition.into(),
+                }],
+                exchange_item: None,
+            },
+            None,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -671,5 +802,180 @@ mod tests {
         assert_eq!(after_loss.net_profit, -10_000.0);
         assert_eq!(after_loss.total_expenses, 0.0);
         assert_eq!(after_loss.sales_count, 2);
+    }
+
+    #[test]
+    fn profit_loss_nets_cogs_for_full_restocked_return_across_the_whole_chain() {
+        let conn = in_memory_conn();
+        let today = local_today();
+        let from = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-01")
+            .to_string();
+        let to = today.clone();
+
+        // Add Mobile Phone -> Purchase a tracked physical unit.
+        let pid = phone_master(&conn);
+        let imei_id = purchase_phone_unit(&conn, pid);
+        assert_eq!(phone_service::get(&conn, pid).unwrap().quantity, 1);
+
+        // Purchase -> POS sale of that exact unit (cost 100, price 200).
+        let sale_id = sell_phone_unit(&conn, pid, imei_id);
+        assert_eq!(phone_service::get(&conn, pid).unwrap().quantity, 0);
+        let before = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(before.total_revenue, 200.0);
+        assert_eq!(before.total_cogs, 100.0);
+        assert_eq!(before.net_profit, 100.0);
+
+        // POS sale -> Return as sellable (restocked). Same physical unit comes back.
+        let sale_item_id = sale_service::get(&conn, sale_id).unwrap().items[0].id;
+        let ret = return_phone_sale_item(&conn, sale_id, sale_item_id, Some(imei_id), "sellable");
+        assert!(ret.items[0].restocked);
+
+        // Unit identity + per-unit price survive the full round trip.
+        let unit = phone_service::list_imei(&conn, pid)
+            .unwrap()
+            .into_iter()
+            .find(|u| u.id == imei_id)
+            .unwrap();
+        assert_eq!(unit.status, "in_stock");
+        assert_eq!(unit.color.as_deref(), Some("Midnight"));
+        assert!(unit.imei2.is_some());
+        assert_eq!(unit.pta_status.as_deref(), Some("PTA Approved"));
+        assert_eq!(unit.storage.as_deref(), Some("128GB"));
+        assert_eq!(unit.battery_health_pct, Some(90));
+        assert_eq!(unit.cost_price, Some(100.0));
+        assert_eq!(unit.sale_price, Some(200.0));
+        assert_eq!(phone_service::get(&conn, pid).unwrap().quantity, 1);
+
+        // The restocked unit's cost must drop out of COGS; the refund stays an
+        // expense. Net profit on a fully returned sale is therefore zero.
+        let after = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(after.total_revenue, 200.0);
+        assert_eq!(after.total_cogs, 0.0);
+        assert_eq!(after.total_expenses, 200.0);
+        assert_eq!(after.gross_profit, 200.0);
+        assert_eq!(after.net_profit, 0.0);
+
+        let d = dashboard(&conn, 12, &today).unwrap();
+        assert_eq!(d.revenue, 200.0);
+        assert_eq!(d.expenses, 200.0);
+        assert_eq!(d.profit, 0.0);
+
+        let last_month = profit_loss(&conn, &from, &to).unwrap().monthly;
+        let m = last_month.last().unwrap();
+        assert_eq!(m.revenue, 200.0);
+        assert_eq!(m.cogs, 0.0);
+        assert_eq!(m.expenses, 200.0);
+        assert_eq!(m.net_profit, 0.0);
+    }
+
+    #[test]
+    fn profit_loss_nets_only_the_returned_unit_for_a_partial_return() {
+        let conn = in_memory_conn();
+        let today = local_today();
+        let from = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-01")
+            .to_string();
+        let to = today.clone();
+
+        // Purchase two tracked units (both cost 100 / price 200).
+        let pid = phone_master(&conn);
+        let imei_a = purchase_phone_unit(&conn, pid);
+        let imei_b = purchase_phone_unit(&conn, pid);
+        assert_eq!(phone_service::get(&conn, pid).unwrap().quantity, 2);
+
+        // Sell both exact units on one invoice.
+        let sale = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                member_id: None,
+                discount: 0.0,
+                paid_amount: None,
+                payment_method: Some("cash".into()),
+                notes: None,
+                payments: vec![],
+                items: vec![
+                    SaleItemInput {
+                        sale_item_id: None,
+                        item_type: "phone".into(),
+                        item_id: pid,
+                        quantity: 1,
+                        imei_id: Some(imei_a),
+                        unit_price: None,
+                        warranty: None,
+                        warranty_expiry: None,
+                    },
+                    SaleItemInput {
+                        sale_item_id: None,
+                        item_type: "phone".into(),
+                        item_id: pid,
+                        quantity: 1,
+                        imei_id: Some(imei_b),
+                        unit_price: None,
+                        warranty: None,
+                        warranty_expiry: None,
+                    },
+                ],
+            },
+            None,
+        )
+        .unwrap();
+        let items = sale_service::get(&conn, sale.id).unwrap().items;
+        let a_line = items.iter().find(|i| i.imei_id == Some(imei_a)).unwrap().id;
+        let b_line = items.iter().find(|i| i.imei_id == Some(imei_b)).unwrap().id;
+        assert_eq!(items.iter().map(|i| i.cost_price).sum::<f64>(), 200.0);
+
+        let before = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(before.total_revenue, 400.0);
+        assert_eq!(before.total_cogs, 200.0);
+        assert_eq!(before.net_profit, 200.0);
+
+        // Only unit A comes back restocked.
+        assert!(return_phone_sale_item(&conn, sale.id, a_line, Some(imei_a), "sellable")
+            .items[0]
+            .restocked);
+
+        // One unit still sold (cost 100); unit B remains on COGS.
+        let after = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(after.total_revenue, 400.0);
+        assert_eq!(after.total_cogs, 100.0);
+        assert_eq!(after.total_expenses, 200.0);
+        assert_eq!(after.net_profit, 100.0);
+        assert_eq!(b_line, b_line); // unit B line still contributes its cost
+
+        let d = dashboard(&conn, 12, &today).unwrap();
+        assert_eq!(d.profit, 100.0);
+    }
+
+    #[test]
+    fn cogs_stays_for_defective_returns_that_are_not_restocked() {
+        let conn = in_memory_conn();
+        let today = local_today();
+        let from = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-01")
+            .to_string();
+        let to = today.clone();
+
+        let pid = phone_master(&conn);
+        let imei_id = purchase_phone_unit(&conn, pid);
+        let sale_id = sell_phone_unit(&conn, pid, imei_id);
+
+        // Damaged unit is NOT restocked: it was scrapped, so its cost is a
+        // genuine loss and must remain in COGS.
+        let sale_item_id = sale_service::get(&conn, sale_id).unwrap().items[0].id;
+        let ret = return_phone_sale_item(&conn, sale_id, sale_item_id, Some(imei_id), "damaged");
+        assert!(!ret.items[0].restocked);
+
+        let pl = profit_loss(&conn, &from, &to).unwrap();
+        assert_eq!(pl.total_revenue, 200.0);
+        assert_eq!(pl.total_cogs, 100.0);
+        assert_eq!(pl.total_expenses, 200.0);
+        assert_eq!(pl.net_profit, -100.0);
+
+        let d = dashboard(&conn, 12, &today).unwrap();
+        assert_eq!(d.profit, -100.0);
     }
 }
