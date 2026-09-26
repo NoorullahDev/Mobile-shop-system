@@ -625,6 +625,17 @@ pub fn update_purchase(
         }
     }
 
+    // 4. Revert last_purchase_cost for products whose lines were fully removed
+    for item in &existing.items {
+        if lines
+            .iter()
+            .any(|l| l.item_type == item.item_type && l.item_id == item.item_id)
+        {
+            continue;
+        }
+        purchase_repository::revert_last_purchase_cost(&tx, &item.item_type, item.item_id)?;
+    }
+
     tx.commit()?;
 
     services::record_activity(conn, actor, "purchase", "update", Some(id))?;
@@ -1844,5 +1855,49 @@ mod tests {
 
         delete_supplier_payment(&conn, payment.id, None).unwrap();
         assert_eq!(supplier_balance(&conn, sid).unwrap().balance, 200.0);
+    }
+
+    #[test]
+    fn updating_purchase_with_a_fully_removed_line_reverts_its_last_purchase_cost() {
+        let conn = in_memory_conn();
+        let sid = supplier(&conn);
+        let iid_a = phone_item(&conn, Some(sid));
+        let iid_b = phone_item(&conn, Some(sid));
+
+        let mut two_line = purchase_input(iid_a, Some(sid));
+        two_line.items.push(PurchaseItemInput {
+            item_type: "phone".into(),
+            item_id: iid_b,
+            quantity: 2,
+            unit_cost: Some(100.0),
+            selling_price: Some(150.0),
+            warranty: Some("12 months".into()),
+            condition: Some("new".into()),
+            imeis: vec!["333333333333333".into(), "444444444444444".into()],
+            imei2s: Vec::new(),
+            imei_colors: Vec::new(),
+            imei_pta_statuses: Vec::new(),
+            imei_storages: Vec::new(),
+            imei_battery_healths: Vec::new(),
+            imei_unit_costs: Vec::new(),
+            imei_sale_prices: Vec::new(),
+        });
+        let p = create_purchase(&conn, two_line, None).unwrap();
+        let lpc = |pid: i64| -> Option<f64> {
+            conn.query_row(
+                "SELECT last_purchase_cost FROM phones WHERE id = ?1",
+                [pid],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(lpc(iid_a), Some(100.0));
+        assert_eq!(lpc(iid_b), Some(100.0));
+
+        let single_line = purchase_input(iid_a, Some(sid));
+        update_purchase(&conn, p.id, single_line, None).unwrap();
+
+        assert_eq!(lpc(iid_a), Some(100.0));
+        assert_eq!(lpc(iid_b), None);
     }
 }

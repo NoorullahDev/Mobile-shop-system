@@ -46,6 +46,8 @@ interface PhoneDraftLine {
   imeiBatteryHealths: string[];
   imeiUnitCosts: string[];
   imeiSalePrices: string[];
+  imeiCostEdited: Set<number>;
+  imeiSaleEdited: Set<number>;
 }
 
 const CUSTOM_PTA_STATUS = "__custom__";
@@ -90,6 +92,8 @@ function newPhoneLine(quantity = 1): PhoneDraftLine {
     imeiBatteryHealths: Array.from({ length: quantity }, () => ""),
     imeiUnitCosts: Array.from({ length: quantity }, () => ""),
     imeiSalePrices: Array.from({ length: quantity }, () => ""),
+    imeiCostEdited: new Set<number>(),
+    imeiSaleEdited: new Set<number>(),
   };
 }
 
@@ -164,6 +168,12 @@ export function PurchaseForm({
           i.imei_costs?.map((c) => String(c)) ?? [],
         imeiSalePrices:
           (i.imei_sale_prices ?? []).map((sp) => (sp == null ? "" : String(sp))) ?? [],
+        imeiCostEdited: new Set(
+          Array.from({ length: i.imei_costs?.length ?? 0 }, (_, k) => k),
+        ),
+        imeiSaleEdited: new Set(
+          Array.from({ length: i.imei_sale_prices?.length ?? 0 }, (_, k) => k),
+        ),
       }));
   }, [initial]);
 
@@ -248,8 +258,8 @@ export function PurchaseForm({
       ls.map((l) => {
         if (l.key !== key) return l;
         const prev = l.unitCost;
-        const imeiUnitCosts = l.imeiUnitCosts.map((v) =>
-          value === "" ? v : v === "" || v === prev ? value : v,
+        const imeiUnitCosts = l.imeiUnitCosts.map((v, i) =>
+          value === "" || l.imeiCostEdited.has(i) ? v : v === "" || v === prev ? value : v,
         );
         return { ...l, unitCost: value, imeiUnitCosts };
       }),
@@ -261,8 +271,8 @@ export function PurchaseForm({
       ls.map((l) => {
         if (l.key !== key) return l;
         const prev = l.sellingPrice;
-        const imeiSalePrices = l.imeiSalePrices.map((v) =>
-          value === "" ? v : v === "" || v === prev ? value : v,
+        const imeiSalePrices = l.imeiSalePrices.map((v, i) =>
+          value === "" || l.imeiSaleEdited.has(i) ? v : v === "" || v === prev ? value : v,
         );
         return { ...l, sellingPrice: value, imeiSalePrices };
       }),
@@ -274,15 +284,23 @@ export function PurchaseForm({
       ls.map((l) => {
         if (l.key !== key) return l;
         const n = Math.max(1, quantity);
-        const imeis = Array.from({ length: n }, (_, i) => l.imeis[i] ?? "");
-        const imei2s = Array.from({ length: n }, (_, i) => l.imei2s[i] ?? "");
-        const imeiColors = Array.from({ length: n }, (_, i) => l.imeiColors[i] ?? "");
-        const imeiPtaStatuses = Array.from({ length: n }, (_, i) => l.imeiPtaStatuses[i] ?? "PTA Approved");
-        const imeiStorages = Array.from({ length: n }, (_, i) => l.imeiStorages[i] ?? "");
-        const imeiBatteryHealths = Array.from({ length: n }, (_, i) => l.imeiBatteryHealths[i] ?? "");
-        // New units created by raising the quantity inherit the line defaults.
-        const imeiUnitCosts = Array.from({ length: n }, (_, i) => l.imeiUnitCosts[i] ?? l.unitCost);
-        const imeiSalePrices = Array.from({ length: n }, (_, i) => l.imeiSalePrices[i] ?? l.sellingPrice);
+        const grow = <T,>(arr: T[], fill: T): T[] =>
+          arr.length >= n
+            ? arr
+            : [
+                ...arr,
+                ...Array.from({ length: n - arr.length }, () => fill),
+              ];
+        const imeis = grow(l.imeis, "");
+        const imei2s = grow(l.imei2s, "");
+        const imeiColors = grow(l.imeiColors, "");
+        const imeiPtaStatuses = grow(l.imeiPtaStatuses, "PTA Approved");
+        const imeiStorages = grow(l.imeiStorages, "");
+        const imeiBatteryHealths = grow(l.imeiBatteryHealths, "");
+        // New units created by raising the quantity inherit the line defaults;
+        // existing units keep whatever the user already typed.
+        const imeiUnitCosts = grow(l.imeiUnitCosts, l.unitCost);
+        const imeiSalePrices = grow(l.imeiSalePrices, l.sellingPrice);
         return {
           ...l,
           quantity: String(n),
@@ -303,7 +321,11 @@ export function PurchaseForm({
     setPhoneLines((ls) =>
       ls.map((l) =>
         l.key === key
-          ? { ...l, imeiUnitCosts: l.imeiUnitCosts.map((v, i) => (i === index ? value : v)) }
+          ? {
+              ...l,
+              imeiUnitCosts: l.imeiUnitCosts.map((v, i) => (i === index ? value : v)),
+              imeiCostEdited: new Set(l.imeiCostEdited).add(index),
+            }
           : l,
       ),
     );
@@ -313,7 +335,11 @@ export function PurchaseForm({
     setPhoneLines((ls) =>
       ls.map((l) =>
         l.key === key
-          ? { ...l, imeiSalePrices: l.imeiSalePrices.map((v, i) => (i === index ? value : v)) }
+          ? {
+              ...l,
+              imeiSalePrices: l.imeiSalePrices.map((v, i) => (i === index ? value : v)),
+              imeiSaleEdited: new Set(l.imeiSaleEdited).add(index),
+            }
           : l,
       ),
     );
@@ -495,19 +521,17 @@ export function PurchaseForm({
         errs.push("Phone cost cannot be negative.");
         continue;
       }
-      const units = l.imeis
-        .map((s, i) => ({
-          imei: s.trim(),
-          imei2: (l.imei2s[i] ?? "").trim(),
-          color: (l.imeiColors[i] ?? "").trim(),
-          ptaStatus: (l.imeiPtaStatuses[i] ?? "PTA Approved").trim(),
-          storage: (l.imeiStorages[i] ?? "").trim(),
-          batteryHealth: (l.imeiBatteryHealths[i] ?? "").trim(),
-          unitCost: (l.imeiUnitCosts[i] ?? "").trim(),
-          salePrice: (l.imeiSalePrices[i] ?? "").trim(),
-        }))
-        .filter((u) => u.imei.length > 0);
-      const imeis = units.map((u) => u.imei);
+      const units = Array.from({ length: qty }, (_, i) => ({
+        imei: (l.imeis[i] ?? "").trim(),
+        imei2: (l.imei2s[i] ?? "").trim(),
+        color: (l.imeiColors[i] ?? "").trim(),
+        ptaStatus: (l.imeiPtaStatuses[i] ?? "PTA Approved").trim(),
+        storage: (l.imeiStorages[i] ?? "").trim(),
+        batteryHealth: (l.imeiBatteryHealths[i] ?? "").trim(),
+        unitCost: (l.imeiUnitCosts[i] ?? "").trim(),
+        salePrice: (l.imeiSalePrices[i] ?? "").trim(),
+      }));
+      const imeis = units.map((u) => u.imei).filter((s) => s.length > 0);
       if (imeis.length !== qty) {
         const phone = phones.find((p) => p.id === Number(l.productId));
         errs.push(

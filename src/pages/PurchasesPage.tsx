@@ -24,16 +24,9 @@ import { useInventoryStore } from "../store/inventory";
 import { useSupplierStore } from "../store/suppliers";
 import { useSessionStore } from "../store/session";
 import * as purchaseService from "../services/purchaseService";
-import { formatMoney, formatDate } from "../lib/format";
+import { formatMoney, formatDate, methodLabels } from "../lib/format";
 import type { Purchase } from "../types/purchase";
 import { can } from "../lib/permissions";
-
-const methodLabels: Record<string, string> = {
-  cash: "Cash",
-  bank_transfer: "Bank Transfer",
-  card: "Card",
-  other: "Other",
-};
 
 export function PurchasesPage() {
   const { purchases, loading, error, load, add, update, remove } = usePurchaseStore();

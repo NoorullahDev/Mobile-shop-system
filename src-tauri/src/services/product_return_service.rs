@@ -303,6 +303,73 @@ fn insert_lines(conn: &Connection, return_id: i64, lines: &[Line]) -> Result<(),
     Ok(())
 }
 
+/// Applies the exchange replacement to a prepared return: the replacement sale
+/// covers the returned value first, so the recorded refund is only the amount
+/// left over. Payments on the replacement sale are rewritten accordingly.
+fn apply_exchange_offset(
+    conn: &Connection,
+    sale_input: &mut crate::models::sale::CreateSaleInput,
+    prepared: &mut PreparedReturn,
+) {
+    let mut s_amount = 0.0;
+    for item in &sale_input.items {
+        let price = match item.unit_price {
+            Some(p) => p,
+            None => crate::services::sale_service::current_item_price(
+                conn,
+                &item.item_type,
+                item.item_id,
+                item.imei_id,
+            )
+            .unwrap_or(0.0),
+        };
+        s_amount += item.quantity as f64 * price;
+    }
+    let r_amount = prepared.refund_amount;
+    sale_input.discount = 0.0;
+
+    sale_input.payments.clear();
+    if s_amount > r_amount {
+        sale_input
+            .payments
+            .push(crate::models::sale_payment::SalePaymentInput {
+                amount: r_amount,
+                payment_method: "exchange_credit".to_string(),
+                reference: None,
+                notes: None,
+            });
+        sale_input
+            .payments
+            .push(crate::models::sale_payment::SalePaymentInput {
+                amount: utils::round2(s_amount - r_amount),
+                payment_method: prepared.refund_method.clone(),
+                reference: None,
+                notes: None,
+            });
+        prepared.refund_amount = 0.0;
+    } else if s_amount < r_amount {
+        sale_input
+            .payments
+            .push(crate::models::sale_payment::SalePaymentInput {
+                amount: s_amount,
+                payment_method: "exchange_credit".to_string(),
+                reference: None,
+                notes: None,
+            });
+        prepared.refund_amount = utils::round2(r_amount - s_amount);
+    } else {
+        sale_input
+            .payments
+            .push(crate::models::sale_payment::SalePaymentInput {
+                amount: s_amount,
+                payment_method: "exchange_credit".to_string(),
+                reference: None,
+                notes: None,
+            });
+        prepared.refund_amount = 0.0;
+    }
+}
+
 pub fn create(
     conn: &Connection,
     input: CreateReturnInput,
@@ -319,55 +386,7 @@ pub fn create(
     let mut exchange_sale_id = None;
     if input.return_type == "exchange" {
         if let Some(mut sale_input) = exchange_item {
-            let s_amount = sale_input
-                .items
-                .iter()
-                .map(|i| i.quantity as f64 * i.unit_price.unwrap_or(0.0))
-                .sum::<f64>();
-            let r_amount = prepared.refund_amount;
-            sale_input.discount = 0.0;
-
-            sale_input.payments.clear();
-            if s_amount > r_amount {
-                sale_input
-                    .payments
-                    .push(crate::models::sale_payment::SalePaymentInput {
-                        amount: r_amount,
-                        payment_method: "exchange_credit".to_string(),
-                        reference: None,
-                        notes: None,
-                    });
-                sale_input
-                    .payments
-                    .push(crate::models::sale_payment::SalePaymentInput {
-                        amount: utils::round2(s_amount - r_amount),
-                        payment_method: prepared.refund_method.clone(),
-                        reference: None,
-                        notes: None,
-                    });
-                prepared.refund_amount = 0.0;
-            } else if s_amount < r_amount {
-                sale_input
-                    .payments
-                    .push(crate::models::sale_payment::SalePaymentInput {
-                        amount: s_amount,
-                        payment_method: "exchange_credit".to_string(),
-                        reference: None,
-                        notes: None,
-                    });
-                prepared.refund_amount = utils::round2(r_amount - s_amount);
-            } else {
-                sale_input
-                    .payments
-                    .push(crate::models::sale_payment::SalePaymentInput {
-                        amount: s_amount,
-                        payment_method: "exchange_credit".to_string(),
-                        reference: None,
-                        notes: None,
-                    });
-                prepared.refund_amount = 0.0;
-            }
-
+            apply_exchange_offset(&tx, &mut sale_input, &mut prepared);
             sale_input.member_id = prepared.sale.member_id;
             exchange_sale_id = Some(crate::services::sale_service::create_tx(
                 &tx, sale_input, actor,
@@ -557,7 +576,7 @@ pub fn update(
     }
     let mut input = input;
     let exchange_item = input.exchange_item.take();
-    let prepared = prepare(conn, &input, Some(id))?;
+    let mut prepared = prepare(conn, &input, Some(id))?;
     let tx = conn.unchecked_transaction()?;
     apply_inventory_change(&tx, &old.items, &prepared.lines)?;
     tx.execute("DELETE FROM return_items WHERE return_id = ?1", [id])?;
@@ -565,50 +584,7 @@ pub fn update(
     let mut exchange_sale_id = old.exchange_sale_id;
     if input.return_type == "exchange" {
         if let Some(mut sale_input) = exchange_item {
-            let s_amount = sale_input
-                .items
-                .iter()
-                .map(|i| i.quantity as f64 * i.unit_price.unwrap_or(0.0))
-                .sum::<f64>();
-            let r_amount = prepared.refund_amount;
-            sale_input.discount = 0.0;
-            sale_input.payments.clear();
-            if s_amount > r_amount {
-                sale_input
-                    .payments
-                    .push(crate::models::sale_payment::SalePaymentInput {
-                        amount: r_amount,
-                        payment_method: "exchange_credit".to_string(),
-                        reference: None,
-                        notes: None,
-                    });
-                sale_input
-                    .payments
-                    .push(crate::models::sale_payment::SalePaymentInput {
-                        amount: utils::round2(s_amount - r_amount),
-                        payment_method: prepared.refund_method.clone(),
-                        reference: None,
-                        notes: None,
-                    });
-            } else if s_amount < r_amount {
-                sale_input
-                    .payments
-                    .push(crate::models::sale_payment::SalePaymentInput {
-                        amount: s_amount,
-                        payment_method: "exchange_credit".to_string(),
-                        reference: None,
-                        notes: None,
-                    });
-            } else {
-                sale_input
-                    .payments
-                    .push(crate::models::sale_payment::SalePaymentInput {
-                        amount: s_amount,
-                        payment_method: "exchange_credit".to_string(),
-                        reference: None,
-                        notes: None,
-                    });
-            }
+            apply_exchange_offset(&tx, &mut sale_input, &mut prepared);
             sale_input.member_id = prepared.sale.member_id;
             if let Some(old_sid) = exchange_sale_id {
                 crate::services::sale_service::delete_tx(&tx, old_sid)?;
@@ -1395,5 +1371,65 @@ mod tests {
         let sale = sale_service::get(&conn, sale.id).unwrap();
         assert_eq!(sale.return_status, "none");
         assert_eq!(sale.returned_amount, 0.0);
+    }
+
+    #[test]
+    fn exchange_credit_offsets_refund_on_create_update_and_recalculate() {
+        let conn = in_memory_conn();
+        let (_, iid_a) = sell_imei_phone(&conn);
+        let sale = sale_service::get(&conn, sale_service::list(&conn, None).unwrap()[0].id).unwrap();
+        let sale_item_id = sale.items[0].id;
+
+        let pid_b = phone(&conn, 3, 120.0);
+        let iid_b = add_imei_to(&conn, pid_b, "222222222222222");
+
+        let mut exchange = return_input(sale.id, sale_item_id, 1, "sellable");
+        exchange.items[0].imei_id = Some(iid_a);
+        exchange.return_type = "exchange".into();
+        exchange.exchange_item = Some(CreateSaleInput {
+            member_id: None,
+            discount: 0.0,
+            paid_amount: None,
+            payment_method: Some("cash".into()),
+            notes: None,
+            payments: vec![],
+            items: vec![SaleItemInput {
+                sale_item_id: None,
+                item_type: "phone".into(),
+                item_id: pid_b,
+                quantity: 1,
+                imei_id: Some(iid_b),
+                unit_price: None,
+                warranty: None,
+                warranty_expiry: None,
+            }],
+        });
+
+        let created = create(&conn, exchange.clone(), None).unwrap();
+        assert_eq!(created.refund_amount, 0.0);
+        assert!(created.exchange_sale_id.is_some());
+        assert_eq!(
+            sale_service::get(&conn, created.exchange_sale_id.unwrap())
+                .unwrap()
+                .total_amount,
+            120.0
+        );
+
+        let updated = update(&conn, created.id, exchange.clone(), None).unwrap();
+        assert_eq!(updated.refund_amount, 0.0);
+        assert!(updated.exchange_sale_id.is_some());
+
+        product_return_repository::recalculate_for_sale(&conn, sale.id).unwrap();
+        assert_eq!(get(&conn, created.id).unwrap().refund_amount, 0.0);
+
+        conn.execute(
+            "UPDATE sale_items SET unit_price = 150.0 WHERE id = ?1",
+            [sale_item_id],
+        )
+        .unwrap();
+        product_return_repository::recalculate_for_sale(&conn, sale.id).unwrap();
+        let again = get(&conn, created.id).unwrap();
+        assert_eq!(again.total_sale_price, 150.0);
+        assert_eq!(again.refund_amount, 30.0);
     }
 }

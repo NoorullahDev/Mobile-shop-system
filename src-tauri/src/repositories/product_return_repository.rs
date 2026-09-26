@@ -307,9 +307,18 @@ pub fn recalculate_for_sale(conn: &Connection, sale_id: i64) -> Result<(), AppEr
                 params![item_id, unit_price, line_total, deduction, refund],
             )?;
         }
+        let mut refund = crate::utils::round2(total - target_deduction);
+        if let Some(sid) = ret.exchange_sale_id {
+            let exchange_total: f64 = conn.query_row(
+                "SELECT COALESCE(SUM(quantity * unit_price), 0) FROM sale_items WHERE sale_id = ?1",
+                [sid],
+                |r| r.get(0),
+            )?;
+            refund = crate::utils::round2((refund - exchange_total).max(0.0));
+        }
         conn.execute(
             "UPDATE returns SET total_sale_price = ?2, deduction_amount = ?3, refund_amount = ?4 WHERE id = ?1",
-            params![ret.id, total, target_deduction, crate::utils::round2(total - target_deduction)],
+            params![ret.id, total, target_deduction, refund],
         )?;
     }
     Ok(())

@@ -38,7 +38,10 @@ struct PreparedSale {
     payments: Vec<crate::models::sale_payment::SalePaymentInput>,
 }
 
-fn current_item_price(
+/// Price the app actually uses when a sale item doesn't carry an explicit
+/// unit price: the phone IMEI unit price when present, otherwise the catalog
+/// sale price. Exposed so exchange returns can replay the same resolution.
+pub(crate) fn current_item_price(
     conn: &Connection,
     item_type: &str,
     item_id: i64,
