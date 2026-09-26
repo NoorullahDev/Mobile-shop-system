@@ -158,6 +158,20 @@ pub fn update(conn: &Connection, id: i64, input: CreatePhoneInput) -> Result<Pho
 }
 
 pub fn soft_delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
+    // A phone that still owns in-stock physical units must not be hidden while
+    // its purchased units and purchases remain: that is exactly how orphaned,
+    // un-deletable purchases were created. Charge anyone removing the phone to
+    // clear the units first (e.g. by deleting the purchase).
+    let in_stock: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM phone_imeis WHERE phone_id = ?1 AND status = 'in_stock'",
+        [id],
+        |r| r.get(0),
+    )?;
+    if in_stock > 0 {
+        return Err(AppError::validation(format!(
+            "Cannot delete this phone: it still has {in_stock} physical unit(s) in stock. Remove or sell those units first."
+        )));
+    }
     let deleted = phone_repository::soft_delete(conn, id)?;
     if !deleted {
         return Err(AppError::validation("Phone not found"));
@@ -551,6 +565,41 @@ mod tests {
         soft_delete(&conn, p.id, None).unwrap();
         assert!(get(&conn, p.id).is_err());
         assert!(list(&conn, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn soft_delete_rejected_while_in_stock_units_remain() {
+        let conn = in_memory_conn();
+        let p = create(&conn, sample()).unwrap();
+        restock(
+            &conn,
+            p.id,
+            2,
+            vec!["111111111111111".into(), "222222222222222".into()],
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(get(&conn, p.id).unwrap().quantity, 7);
+
+        // Soft-deleting a phone that still owns physical units must be refused
+        // so purchases cannot become orphaned/un-deletable again.
+        assert!(matches!(
+            soft_delete(&conn, p.id, None),
+            Err(AppError::Validation(_))
+        ));
+        assert!(get(&conn, p.id).is_ok());
+
+        // Once the units are cleared, deletion is allowed.
+        conn.execute(
+            "DELETE FROM phone_imeis WHERE phone_id = ?1 AND status = 'in_stock'",
+            [p.id],
+        )
+        .unwrap();
+        conn.execute("UPDATE phones SET quantity = 5 WHERE id = ?1", [p.id])
+            .unwrap();
+        soft_delete(&conn, p.id, None).unwrap();
+        assert!(get(&conn, p.id).is_err());
     }
 
     #[test]

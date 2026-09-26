@@ -63,3 +63,29 @@ pub fn decrement_stock(
     )?;
     Ok(affected > 0)
 }
+
+/// Reverses a purchase's stock increment when the purchase is deleted or
+/// edited. Unlike `decrement_stock` it never fails on an inventory deficit:
+/// any legacy quantity drift (a phone that was soft-deleted or edited while
+/// its purchased units still existed) is clamped at zero so the reversal is
+/// always consistent instead of leaving an un-deletable purchase behind.
+pub fn reverse_stock(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    qty: i64,
+) -> Result<(), AppError> {
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
+    conn.execute(
+        &format!(
+            "UPDATE {table} SET quantity = MAX(0, quantity - ?1), updated_at = CURRENT_TIMESTAMP \
+             WHERE id = ?2"
+        ),
+        rusqlite::params![qty, item_id],
+    )?;
+    Ok(())
+}

@@ -759,6 +759,15 @@ pub fn decrement_stock(
     super::inventory_repository::decrement_stock(conn, item_type, item_id, qty)
 }
 
+pub fn reverse_stock(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    qty: i64,
+) -> Result<(), AppError> {
+    super::inventory_repository::reverse_stock(conn, item_type, item_id, qty)
+}
+
 pub fn delete_purchase_imeis(
     conn: &Connection,
     phone_id: i64,
@@ -778,6 +787,172 @@ pub fn delete_purchase_imeis(
     }
     stmt.execute(rusqlite::params_from_iter(params))?;
     Ok(())
+}
+
+fn current_quantity(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+) -> Result<i64, AppError> {
+    let table = if item_type == "phone" {
+        "phones"
+    } else {
+        "accessories"
+    };
+    // Deliberately no `is_deleted = 0` filter: a phone that was soft-deleted
+    // while its purchased units still existed must still be readable here.
+    let q: Option<i64> = conn
+        .query_row(
+            &format!("SELECT quantity FROM {table} WHERE id = ?1"),
+            [item_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(q.unwrap_or(0))
+}
+
+/// Number of units of `item_id` genuinely consumed by live sales, minus the
+/// units that were put back into stock by a return (`restocked = 1`).
+fn real_sold_units(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+) -> Result<i64, AppError> {
+    let (col, return_col) = if item_type == "phone" {
+        ("phone_id", "phone_id")
+    } else {
+        ("accessory_id", "accessory_id")
+    };
+    let sold: i64 = conn.query_row(
+        &format!(
+            "SELECT COALESCE(SUM(si.quantity), 0) FROM sale_items si WHERE si.{col} = ?1"
+        ),
+        [item_id],
+        |r| r.get(0),
+    )?;
+    let restored: i64 = conn.query_row(
+        &format!(
+            "SELECT COALESCE(SUM(ri.quantity), 0) FROM return_items ri WHERE ri.{return_col} = ?1 AND ri.restocked = 1"
+        ),
+        [item_id],
+        |r| r.get(0),
+    )?;
+    Ok((sold - restored).max(0))
+}
+
+/// Returns the reason a purchase line cannot be reversed, or `None` when it
+/// can be safely rolled back.
+///
+/// This replaces the old "quantity >= qty" heuristic which was wrong in both
+/// directions:
+/// - it refused deletion when the aggregate `quantity` was low even though no
+///   sale, return, or sold IMEI backed that deficit (phone soft-deleted or
+///   quantity edited while its purchased physical units still existed), and
+/// - it allowed deletion when the aggregate quantity still looked sufficient
+///   while an IMEI belonging to the purchase had already actually been sold.
+///
+/// A line is genuinely blocking only when (1) a physical unit bought by this
+/// purchase was sold/returned (identified by its IMEI), or (2) the phone's
+/// stock is short AND real, live sales (net of restocked returns) explain the
+/// shortage.
+pub fn reversal_blocker(
+    conn: &Connection,
+    item_type: &str,
+    item_id: i64,
+    qty: i64,
+    serials: &[String],
+) -> Result<Option<String>, AppError> {
+    if item_type == "phone" && !serials.is_empty() {
+        let mut sold_imeis: Vec<String> = Vec::new();
+        let mut receipts: Vec<String> = Vec::new();
+        const BATCH: usize = 400;
+        for chunk in serials.chunks(BATCH) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!(
+                "SELECT i.imei, i.status,
+                        (SELECT COUNT(*) FROM sale_items si WHERE si.imei_id = i.id) AS sale_refs,
+                        (SELECT COUNT(*) FROM return_items ri WHERE ri.imei_id = i.id) AS ret_refs
+                 FROM phone_imeis i
+                 WHERE i.phone_id = ?1 AND i.imei IN ({placeholders})"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let mut params: Vec<rusqlite::types::Value> =
+                vec![rusqlite::types::Value::from(item_id)];
+            for s in chunk {
+                params.push(rusqlite::types::Value::from(s.clone()));
+            }
+            let rows = stmt.query_map(rusqlite::params_from_iter(params), |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (imei, status, sale_refs, ret_refs) = row?;
+                if status == "sold" || sale_refs > 0 || ret_refs > 0 {
+                    sold_imeis.push(imei.clone());
+                    let mut st2 = conn.prepare(
+                        "SELECT s.receipt_no FROM sale_items si
+                         JOIN sales s ON s.id = si.sale_id
+                         WHERE si.imei_id = (SELECT id FROM phone_imeis WHERE imei = ?1)
+                         ORDER BY s.created_at DESC LIMIT 3",
+                    )?;
+                    for r2 in st2.query_map([&imei], |r| r.get::<_, String>(0))? {
+                        let rec = r2?;
+                        if !receipts.contains(&rec) {
+                            receipts.push(rec);
+                        }
+                    }
+                }
+            }
+        }
+        if !sold_imeis.is_empty() {
+            let mut reason = format!("physical unit (IMEI {}) has already been sold", sold_imeis[0]);
+            if let Some(rec) = receipts.first() {
+                reason.push_str(&format!(" ({rec})"));
+            }
+            if sold_imeis.len() > 1 {
+                reason.push_str(&format!("; {} more unit(s) from this purchase are gone", sold_imeis.len() - 1));
+            }
+            return Ok(Some(reason));
+        }
+    }
+
+    let current_qty = current_quantity(conn, item_type, item_id)?;
+    if current_qty >= qty {
+        return Ok(None);
+    }
+    let deficit = qty - current_qty;
+    // Do not trust the aggregate deficit by itself: a phone that was
+    // soft-deleted, or whose quantity was edited, can sit below its purchase
+    // quantity while every purchased unit is still in stock and no sale ever
+    // occurred (the client's "sold stock" phantom). Only real sales count.
+    let net_sold = real_sold_units(conn, item_type, item_id)?;
+    if net_sold <= 0 || net_sold < deficit {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare(if item_type == "phone" {
+        "SELECT s.receipt_no FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+         WHERE si.phone_id = ?1 ORDER BY s.created_at DESC LIMIT 3"
+    } else {
+        "SELECT s.receipt_no FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+         WHERE si.accessory_id = ?1 ORDER BY s.created_at DESC LIMIT 3"
+    })?;
+    let receipts: Vec<String> = stmt
+        .query_map([item_id], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let recs = if receipts.is_empty() {
+        String::new()
+    } else {
+        format!(" (e.g. {})", receipts.join(", "))
+    };
+    Ok(Some(format!(
+        "{deficit} of its {qty} stock unit(s) have already been sold{recs}"
+    )))
 }
 
 pub fn delete_purchase(conn: &Connection, purchase_id: i64) -> Result<bool, AppError> {
