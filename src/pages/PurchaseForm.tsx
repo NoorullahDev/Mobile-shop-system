@@ -441,6 +441,17 @@ export function PurchaseForm({
       : (Number(l.quantity) || 0) * (Number(l.unitCost) || 0);
   };
 
+  // Fixed one-line label strip so every unit field sits on the same level and
+  // all controls share identical height and vertical alignment.
+  const unitFieldLabel = (text: string) => (
+    <div
+      className="flex h-[18px] items-center overflow-hidden whitespace-nowrap text-[13px] font-medium"
+      style={{ color: "#334155" }}
+    >
+      {text}
+    </div>
+  );
+
   const subtotal = roundMoney(
     phoneLines.reduce((sum, l) => sum + phoneLineTotal(l), 0) +
       accessoryLines.reduce((sum, l) => {
@@ -822,9 +833,9 @@ export function PurchaseForm({
                             Unit {i + 1}
                           </div>
                           <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("IMEI 1")}
                               <Input
-                                label="IMEI 1"
                                 placeholder="Enter IMEI 1"
                                 maxLength={15}
                                 value={imei}
@@ -833,9 +844,9 @@ export function PurchaseForm({
                                 onChange={(e) => setPhoneImei(l.key, i, e.target.value.slice(0, 15))}
                               />
                             </div>
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("IMEI 2 (Optional)")}
                               <Input
-                                label="IMEI 2 (Optional)"
                                 placeholder="Enter IMEI 2"
                                 maxLength={15}
                                 value={l.imei2s[i] ?? ""}
@@ -844,18 +855,18 @@ export function PurchaseForm({
                                 onChange={(e) => setPhoneImei2(l.key, i, e.target.value.slice(0, 15))}
                               />
                             </div>
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("Color (Optional)")}
                               <Input
-                                label="Color (Optional)"
                                 placeholder="Color"
                                 value={l.imeiColors[i] ?? ""}
                                 disabled={saving}
                                 onChange={(e) => setPhoneColor(l.key, i, e.target.value)}
                               />
                             </div>
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("PTA Status")}
                               <Select
-                                label="PTA Status"
                                 name={`pta-${l.key}-${i}`}
                                 options={PTA_STATUS_OPTIONS}
                                 value={
@@ -867,9 +878,9 @@ export function PurchaseForm({
                                 onChange={(e) => setPhonePtaStatus(l.key, i, e.target.value)}
                               />
                               {!DEFAULT_PTA_STATUSES.has(l.imeiPtaStatuses[i] ?? "PTA Approved") && (
-                                <div className="mt-2">
+                                <div className="flex flex-col gap-1">
+                                  {unitFieldLabel("Custom Status")}
                                   <Input
-                                    label="Custom Status"
                                     placeholder="e.g. Factory Unlocked"
                                     value={
                                       l.imeiPtaStatuses[i] === CUSTOM_PTA_STATUS
@@ -882,9 +893,9 @@ export function PurchaseForm({
                                 </div>
                               )}
                             </div>
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("Battery Health % (Optional)")}
                               <Input
-                                label="Battery Health % (Optional)"
                                 type="number"
                                 min="0"
                                 max="100"
@@ -896,9 +907,9 @@ export function PurchaseForm({
                                 onChange={(e) => setPhoneBatteryHealth(l.key, i, e.target.value)}
                               />
                             </div>
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("Storage")}
                               <Input
-                                label="Storage"
                                 list={`phone-unit-storage-suggestions-${l.key}`}
                                 placeholder="e.g. 256GB"
                                 value={l.imeiStorages[i] ?? ""}
@@ -906,9 +917,9 @@ export function PurchaseForm({
                                 onChange={(e) => setPhoneStorage(l.key, i, e.target.value)}
                               />
                             </div>
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("Unit Cost")}
                               <Input
-                                label="Unit Cost"
                                 type="number"
                                 min="0"
                                 step="0.01"
@@ -918,9 +929,9 @@ export function PurchaseForm({
                                 onChange={(e) => setPhoneUnitCost(l.key, i, e.target.value)}
                               />
                             </div>
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("Selling Price")}
                               <Input
-                                label="Selling Price"
                                 type="number"
                                 min="0"
                                 step="0.01"
