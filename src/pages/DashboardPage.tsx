@@ -291,7 +291,7 @@ export function DashboardPage() {
           </div>
 
           {/* Main grid */}
-          <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
             {/* Recharts trend */}
             <div className="lg:col-span-2">
               <Card title="Sales vs Expenses" subtitle={period === "year" || period === "today" ? "Last 12 months - monthly trend" : "Daily sales trend"}>
@@ -339,7 +339,7 @@ export function DashboardPage() {
             </div>
 
             {/* Right column */}
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 lg:row-span-2">
               <Card title="Quick Actions">
                 <div className="grid grid-cols-2 gap-2">
                   {[
@@ -478,11 +478,53 @@ export function DashboardPage() {
                   )}
                 </div>
               </Card>
+
+              <Card title="Today's Summary" noPadding>
+                <div className="flex h-full flex-col justify-center px-6 py-4">
+                  <div className="mb-4 grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-[12px] text-[#64748B]">Sales</div>
+                      <div className="mt-1 text-lg font-bold text-[#0F172A]">{formatMoney(summary?.today_revenue ?? 0)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[12px] text-[#64748B]">Transactions</div>
+                      <div className="mt-1 text-lg font-bold text-[#0F172A]">{summary?.today_sales_count ?? 0}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-[12px] text-[#64748B]">New Customers</div>
+                      <div className="mt-1 text-lg font-bold text-[#0F172A]">
+                        {totalMembers.filter((m) => {
+                          const d = new Date(m.created_at);
+                          const now = new Date();
+                          if (period === "today") {
+                            return d.toDateString() === now.toDateString();
+                          }
+                          if (period === "week") {
+                            const weekStart = new Date(now);
+                            weekStart.setDate(now.getDate() - now.getDay());
+                            weekStart.setHours(0, 0, 0, 0);
+                            return d >= weekStart;
+                          }
+                          if (period === "month") {
+                            return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+                          }
+                          return d.getFullYear() === now.getFullYear();
+                        }).length}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[12px] text-[#64748B]">Items Sold</div>
+                      <div className="mt-1 text-lg font-bold text-[#0F172A]">{topSellers.reduce((sum, item) => sum + item.quantity, 0)}</div>
+                    </div>
+                  </div>
+                </div>
+              </Card>
             </div>
-          </div>
-          
+
           {/* Bottom Tables */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:col-span-2 lg:grid-cols-2">
             <Card
               title="Top Selling Products"
               actions={
@@ -571,48 +613,7 @@ export function DashboardPage() {
               </div>
             </Card>
 
-            <Card title="Today's Summary" noPadding>
-              <div className="flex h-full flex-col justify-center px-6 py-4">
-                <div className="mb-4 grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-[12px] text-[#64748B]">Sales</div>
-                    <div className="mt-1 text-lg font-bold text-[#0F172A]">{formatMoney(summary?.today_revenue ?? 0)}</div>
-                  </div>
-                  <div>
-                    <div className="text-[12px] text-[#64748B]">Transactions</div>
-                    <div className="mt-1 text-lg font-bold text-[#0F172A]">{summary?.today_sales_count ?? 0}</div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-[12px] text-[#64748B]">New Customers</div>
-                    <div className="mt-1 text-lg font-bold text-[#0F172A]">
-                      {totalMembers.filter((m) => {
-                        const d = new Date(m.created_at);
-                        const now = new Date();
-                        if (period === "today") {
-                          return d.toDateString() === now.toDateString();
-                        }
-                        if (period === "week") {
-                          const weekStart = new Date(now);
-                          weekStart.setDate(now.getDate() - now.getDay());
-                          weekStart.setHours(0, 0, 0, 0);
-                          return d >= weekStart;
-                        }
-                        if (period === "month") {
-                          return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-                        }
-                        return d.getFullYear() === now.getFullYear();
-                      }).length}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[12px] text-[#64748B]">Items Sold</div>
-                    <div className="mt-1 text-lg font-bold text-[#0F172A]">{topSellers.reduce((sum, item) => sum + item.quantity, 0)}</div>
-                  </div>
-                </div>
-              </div>
-            </Card>
+          </div>
           </div>
         </>
       )}

@@ -89,3 +89,86 @@ pub fn reverse_stock(
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::test_utils::in_memory_conn;
+
+    #[test]
+    fn test_item_quantity() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO phones (brand, model, quantity) VALUES ('Apple', 'iPhone 13', 5)",
+            [],
+        )
+        .unwrap();
+        let phone_id = conn.last_insert_rowid();
+
+        assert_eq!(item_quantity(&conn, "phone", phone_id).unwrap(), Some(5));
+
+        // Soft-deleted item returns None
+        conn.execute(
+            "UPDATE phones SET is_deleted = 1 WHERE id = ?1",
+            [phone_id],
+        )
+        .unwrap();
+        assert_eq!(item_quantity(&conn, "phone", phone_id).unwrap(), None);
+
+        // Non-existent item returns None
+        assert_eq!(item_quantity(&conn, "phone", 9999).unwrap(), None);
+    }
+
+    #[test]
+    fn test_increment_stock() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO accessories (brand, product_name, quantity) VALUES ('Samsung', 'Case', 2)",
+            [],
+        )
+        .unwrap();
+        let id = conn.last_insert_rowid();
+
+        increment_stock(&conn, "accessory", id, 3).unwrap();
+        assert_eq!(item_quantity(&conn, "accessory", id).unwrap(), Some(5));
+    }
+
+    #[test]
+    fn test_decrement_stock() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO phones (brand, model, quantity) VALUES ('Apple', 'iPhone 12', 3)",
+            [],
+        )
+        .unwrap();
+        let id = conn.last_insert_rowid();
+
+        // Successful decrement
+        let success = decrement_stock(&conn, "phone", id, 2).unwrap();
+        assert!(success);
+        assert_eq!(item_quantity(&conn, "phone", id).unwrap(), Some(1));
+
+        // Insufficient stock returns false and does not decrement
+        let fail = decrement_stock(&conn, "phone", id, 5).unwrap();
+        assert!(!fail);
+        assert_eq!(item_quantity(&conn, "phone", id).unwrap(), Some(1));
+    }
+
+    #[test]
+    fn test_reverse_stock_clamps_at_zero() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO accessories (brand, product_name, quantity) VALUES ('Anker', 'Cable', 5)",
+            [],
+        )
+        .unwrap();
+        let id = conn.last_insert_rowid();
+
+        reverse_stock(&conn, "accessory", id, 3).unwrap();
+        assert_eq!(item_quantity(&conn, "accessory", id).unwrap(), Some(2));
+
+        // Reversal with quantity greater than stock clamps at 0
+        reverse_stock(&conn, "accessory", id, 10).unwrap();
+        assert_eq!(item_quantity(&conn, "accessory", id).unwrap(), Some(0));
+    }
+}

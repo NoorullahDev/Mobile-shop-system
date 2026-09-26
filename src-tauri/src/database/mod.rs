@@ -1,5 +1,10 @@
 pub mod migrations;
 pub mod seed;
+/// Development-only connected demo data. Compiled exclusively into debug
+/// builds; production EXEs (release profile) never contain this module or its
+/// call site, so fresh client installations start with zero business data.
+#[cfg(debug_assertions)]
+pub mod demo_seed;
 
 use std::fs;
 use std::path::{Path, PathBuf};

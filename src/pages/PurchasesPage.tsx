@@ -36,12 +36,14 @@ export function PurchasesPage() {
   const canCreate = can(user?.permissions, "purchases:create");
   const canUpdate = can(user?.permissions, "purchases:update");
   const canDelete = can(user?.permissions, "purchases:delete");
+  const canForceDelete = user?.role === "Admin" && canDelete;
 
   const [search, setSearch] = useState("");
   const [recordOpen, setRecordOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Purchase | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
+  const [forceDeleteArmed, setForceDeleteArmed] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -344,10 +346,16 @@ export function PurchasesPage() {
         open={deleteTarget !== null}
         title="Delete Purchase"
         subtitle={`Are you sure you want to delete ${deleteTarget?.purchase_no}?`}
-        onClose={() => { setDeleteTarget(null); setDeleteReason(""); setDeleteError(null); }}
+        onClose={() => { setDeleteTarget(null); setDeleteReason(""); setForceDeleteArmed(false); setDeleteError(null); }}
       >
         <div className="flex flex-col gap-4">
           <Alert variant="warning" message="This will reverse all inventory and payment effects of this purchase. This action cannot be undone." />
+          {forceDeleteArmed && (
+            <Alert
+              variant="error"
+              message="Some units of this purchase were already sold. Sold units and their sales/invoices are kept; only the remaining unsold stock is reversed. This is a forced deletion — a written reason is required."
+            />
+          )}
           {deleteError && <Alert variant="error" message={deleteError} />}
           <div>
             <label className="mb-1 block text-[13px] font-semibold text-[#1E293B]">Reason for Deletion</label>
@@ -361,31 +369,60 @@ export function PurchasesPage() {
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => { setDeleteTarget(null); setDeleteReason(""); setDeleteError(null); }} disabled={deleting}>
+            <Button variant="secondary" onClick={() => { setDeleteTarget(null); setDeleteReason(""); setForceDeleteArmed(false); setDeleteError(null); }} disabled={deleting}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              disabled={!deleteReason.trim() || deleting}
-              onClick={async () => {
-                if (!deleteTarget) return;
-                setDeleting(true);
-                setDeleteError(null);
-                try {
-                  await remove(deleteTarget.id, deleteReason.trim());
-                  await loadInventory();
-                  setDeleteTarget(null);
-                  setDeleteReason("");
-                } catch (e) {
-                  setDeleteError(String(e));
-                } finally {
-                  setDeleting(false);
-                }
-              }}
-              style={{ backgroundColor: "#EF4444" }}
-            >
-              {deleting ? "Deleting..." : "Delete Purchase"}
-            </Button>
+            {!forceDeleteArmed && (
+              <Button
+                variant="primary"
+                disabled={!deleteReason.trim() || deleting}
+                onClick={async () => {
+                  if (!deleteTarget) return;
+                  setDeleting(true);
+                  setDeleteError(null);
+                  try {
+                    await remove(deleteTarget.id, deleteReason.trim());
+                    await loadInventory();
+                    setDeleteTarget(null);
+                    setDeleteReason("");
+                    setForceDeleteArmed(false);
+                  } catch (e) {
+                    setDeleteError(String(e));
+                    if (canForceDelete) setForceDeleteArmed(true);
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+                style={{ backgroundColor: "#EF4444" }}
+              >
+                {deleting ? "Deleting..." : "Delete Purchase"}
+              </Button>
+            )}
+            {forceDeleteArmed && canForceDelete && (
+              <Button
+                variant="primary"
+                disabled={!deleteReason.trim() || deleting}
+                onClick={async () => {
+                  if (!deleteTarget) return;
+                  setDeleting(true);
+                  setDeleteError(null);
+                  try {
+                    await remove(deleteTarget.id, deleteReason.trim(), true);
+                    await loadInventory();
+                    setDeleteTarget(null);
+                    setDeleteReason("");
+                    setForceDeleteArmed(false);
+                  } catch (e) {
+                    setDeleteError(String(e));
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+                style={{ backgroundColor: "#EF4444" }}
+              >
+                {deleting ? "Deleting..." : "Force Delete"}
+              </Button>
+            )}
           </div>
         </div>
       </Modal>

@@ -42,6 +42,7 @@ export function SupplierDuesPage() {
   const [error, setError] = useState<string | null>(null);
   const [payments, setPayments] = useState<SupplierPayment[]>([]);
   const [allPayments, setAllPayments] = useState<SupplierPayment[]>([]);
+  const [paymentsWarning, setPaymentsWarning] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [payFor, setPayFor] = useState<Supplier | null>(null);
@@ -63,13 +64,25 @@ export function SupplierDuesPage() {
     }
   };
 
+  const refreshAllPayments = async () => {
+    try {
+      setAllPayments(await purchaseService.listSupplierPayments());
+      setPaymentsWarning(null);
+    } catch {
+      // Keep the last known payments visible and only surface a non-blocking warning.
+      setPaymentsWarning("Could not refresh supplier payments — showing the last loaded records.");
+    }
+  };
+
   useEffect(() => {
     loadDues();
     loadSuppliers();
     purchaseService
       .listSupplierPayments()
-      .then(setAllPayments)
-      .catch(() => {});
+      .then((list) => setAllPayments(list))
+      .catch(() =>
+        setPaymentsWarning("Could not load supplier payments — showing the last loaded records."),
+      );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -127,6 +140,7 @@ export function SupplierDuesPage() {
       user?.id ?? null,
     );
     await loadDues();
+    await refreshAllPayments();
     if (historyFor === supplierId) {
       const [list, bal] = await Promise.all([
         purchaseService.listSupplierPaymentsBySupplier(supplierId),
@@ -142,6 +156,7 @@ export function SupplierDuesPage() {
     await purchaseService.deleteSupplierPayment(confirmDelete, user?.id ?? null);
     setConfirmDelete(null);
     await loadDues();
+    await refreshAllPayments();
     const supplierId = historyFor;
     if (supplierId != null) {
       const [list, bal] = await Promise.all([
@@ -167,6 +182,12 @@ export function SupplierDuesPage() {
       {error && (
         <div className="mb-4">
           <Alert message={error} variant="error" />
+        </div>
+      )}
+
+      {paymentsWarning && (
+        <div className="mb-4">
+          <Alert message={paymentsWarning} variant="warning" />
         </div>
       )}
 
@@ -382,6 +403,7 @@ export function SupplierDuesPage() {
               const supplierId = editPayment.supplier_id;
               setEditPayment(null);
               await loadDues();
+              await refreshAllPayments();
               if (supplierId != null) await openHistory(supplierId);
             }}
             onCancel={() => setEditPayment(null)}

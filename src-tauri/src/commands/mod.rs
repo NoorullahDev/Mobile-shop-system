@@ -1,4 +1,5 @@
 use tauri::Emitter;
+use tauri::Manager as _;
 use tauri::State;
 
 use crate::database::Database;
@@ -33,7 +34,7 @@ use crate::models::user::{
     ChangePasswordInput, CreateRoleInput, CreateUserInput, Permission, ResetPasswordInput,
     RoleWithPermissions, SessionUser, UpdateRoleInput, UpdateUserInput, UserDetail,
 };
-use crate::repositories::{backup_repository, user_repository};
+use crate::repositories::{backup_repository, user_admin_repository, user_repository};
 use crate::security::SessionState;
 use crate::services::{
     accessory_service, auth_service, backup_service, expense_service, license_service,
@@ -48,6 +49,53 @@ fn public_conn(db: &Database) -> Result<std::sync::MutexGuard<'_, rusqlite::Conn
     db.conn
         .lock()
         .map_err(|_| AppError::Internal("Database lock poisoned".into()))
+}
+
+/// True when this process is the development demo: a debug build started with
+/// the `MSS_DEV_DATA_DIR` env var, which points business data at a separate
+/// database. Always false in release builds, so production behavior is
+/// untouched.
+fn is_demo_license_mode() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var_os("MSS_DEV_DATA_DIR").is_some()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
+}
+
+/// In demo mode, license state is evaluated against the production app-data
+/// database, opened read-only. The demo database therefore never holds a copy
+/// of the license, and the production database is only ever read here — never
+/// modified, reset, or deactivated. All cryptographic verification (signature,
+/// hardware-ID binding, anti-rollback clock) still runs exactly as in
+/// production; on Windows the anti-rollback clock lives in the registry, so no
+/// writes to the production database occur. Returns `Ok(None)` outside demo
+/// mode so commands fall back to the normal connection.
+fn open_production_license_conn(
+    app: &tauri::AppHandle,
+) -> Result<Option<rusqlite::Connection>, AppError> {
+    if !is_demo_license_mode() {
+        let _ = app;
+        return Ok(None);
+    }
+    let real_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Internal(format!("Cannot resolve app data dir: {e}")))?;
+    let db_path = real_dir.join("business_management.db");
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| AppError::Internal(format!("Cannot open production license: {e}")))?;
+    log::info!(
+        "Demo mode: license evaluated against production app data ({})",
+        db_path.display()
+    );
+    Ok(Some(conn))
 }
 
 /// Helper: the id of the currently signed-in user, or fail with authentication error.
@@ -780,7 +828,6 @@ pub fn save_product_image(
     extension: String,
 ) -> Result<String, AppError> {
     use rand_core::{OsRng, RngCore};
-    use tauri::Manager;
     drop(authorized_any_conn(
         &db,
         &session,
@@ -820,9 +867,7 @@ pub fn save_product_image(
     let mut random = [0_u8; 16];
     OsRng.fill_bytes(&mut random);
     let relative = format!("product_images/{}.{}", hex::encode(random), ext);
-    let path = app
-        .path()
-        .app_data_dir()
+    let path = crate::app_data_dir(&app)
         .map_err(|e| AppError::file(format!("Could not resolve application data folder: {e}")))?
         .join(&relative);
     if let Some(parent) = path.parent() {
@@ -842,7 +887,6 @@ pub fn read_product_image(
     relative_path: String,
 ) -> Result<String, AppError> {
     use base64::Engine;
-    use tauri::Manager;
     drop(authorized_any_conn(
         &db,
         &session,
@@ -855,9 +899,7 @@ pub fn read_product_image(
     {
         return Err(AppError::validation("Invalid product image path"));
     }
-    let path = app
-        .path()
-        .app_data_dir()
+    let path = crate::app_data_dir(&app)
         .map_err(|e| AppError::file(format!("Could not resolve application data folder: {e}")))?
         .join(&relative_path);
     let bytes = std::fs::read(&path)
@@ -1494,9 +1536,10 @@ pub fn get_profit_loss(
 #[tauri::command]
 pub fn get_all_settings(
     db: State<Database>,
-    session: State<SessionState>,
 ) -> Result<Vec<crate::models::setting::Setting>, AppError> {
-    let guard = authorized_conn(&db, &session, "settings:view")?;
+    // Branding (business name, logo) is shown on the pre-sign-in Login page, so
+    // settings must be readable without a session. Writes stay permission-gated.
+    let guard = public_conn(&db)?;
     settings_service::get_all(&guard)
 }
 
@@ -1518,7 +1561,11 @@ pub fn update_setting(
 pub fn get_license_status(
     db: State<Database>,
     _session: State<SessionState>,
+    app: tauri::AppHandle,
 ) -> Result<LicenseStatus, AppError> {
+    if let Some(conn) = open_production_license_conn(&app)? {
+        return license_service::status(&conn);
+    }
     let guard = public_conn(&db)?;
     license_service::status(&guard)
 }
@@ -1528,8 +1575,17 @@ pub fn activate_license(
     db: State<Database>,
     _session: State<SessionState>,
     __actor: Option<i64>,
+    app: tauri::AppHandle,
     input: ActivateLicenseInput,
 ) -> Result<LicenseStatus, AppError> {
+    if is_demo_license_mode() {
+        return Err(AppError::validation(
+            "License activation is managed by the production installation. \
+             The development demo reads the existing local license and keeps \
+             only business data in its separate database.",
+        ));
+    }
+    let _ = &app;
     let guard = public_conn(&db)?;
     license_service::activate(&guard, None, input)
 }
@@ -1539,7 +1595,15 @@ pub fn deactivate_license(
     db: State<Database>,
     session: State<SessionState>,
     _actor: Option<i64>,
+    app: tauri::AppHandle,
 ) -> Result<LicenseStatus, AppError> {
+    if is_demo_license_mode() {
+        return Err(AppError::validation(
+            "License deactivation is managed by the production installation. \
+             The development demo never touches the production license.",
+        ));
+    }
+    let _ = &app;
     let guard = authorized_conn(&db, &session, "license:update")?;
     license_service::deactivate(&guard, Some(current_user_id(&session)?))
 }
@@ -1982,9 +2046,26 @@ pub fn delete_purchase(
     session: State<SessionState>,
     id: i64,
     reason: Option<String>,
+    force: Option<bool>,
 ) -> Result<(), AppError> {
+    let force = force.unwrap_or(false);
     let guard = authorized_conn(&db, &session, "purchases:delete")?;
-    purchase_service::delete_purchase(&guard, id, Some(current_user_id(&session)?), reason)
+    if force {
+        let uid = current_user_id(&session)?;
+        if !user_admin_repository::is_admin_user(&guard, uid)? {
+            return Err(AppError::PermissionDenied(
+                "Only the Owner/Admin can force-delete a purchase whose stock was already sold"
+                    .into(),
+            ));
+        }
+    }
+    purchase_service::delete_purchase(
+        &guard,
+        id,
+        Some(current_user_id(&session)?),
+        reason,
+        force,
+    )
 }
 
 // ---- Supplier payments & dues ----

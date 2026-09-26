@@ -9,7 +9,7 @@ interface PurchasesState {
   load: (search?: string) => Promise<void>;
   add: (input: CreatePurchaseInput, actor?: number | null) => Promise<void>;
   update: (id: number, input: CreatePurchaseInput) => Promise<void>;
-  remove: (id: number, reason: string) => Promise<void>;
+  remove: (id: number, reason: string, force?: boolean) => Promise<void>;
 }
 
 export const usePurchaseStore = create<PurchasesState>((set) => ({
@@ -51,10 +51,10 @@ export const usePurchaseStore = create<PurchasesState>((set) => ({
     }
   },
 
-  remove: async (id, reason) => {
+  remove: async (id, reason, force = false) => {
     set({ error: null });
     try {
-      await purchaseService.deletePurchase(id, reason);
+      await purchaseService.deletePurchase(id, reason, force);
       set((s) => ({
         purchases: s.purchases.filter((p) => p.id !== id),
       }));

@@ -16,6 +16,40 @@ use tauri::Manager;
 use tauri::WindowEvent;
 use utils::logging;
 
+/// Resolves the folder that holds app data (database + product images).
+/// Debug builds optionally redirect it to a separate folder through the
+/// `MSS_DEV_DATA_DIR` environment variable, so the connected demo data can be
+/// exercised on a fresh development database without ever touching real client
+/// data. If the configured folder is missing or not writable, the app falls
+/// back to the current user's temp directory instead of dying at startup with
+/// an "Access is denied" setup error. The override is compiled out of release
+/// builds, keeping the production EXE entirely free of the demo-data machinery.
+pub(crate) fn app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, tauri::Error> {
+    #[cfg(debug_assertions)]
+    {
+        if let Some(dir) = std::env::var_os("MSS_DEV_DATA_DIR") {
+            let candidate = std::path::PathBuf::from(&dir);
+            let usable = std::fs::create_dir_all(&candidate)
+                .and_then(|_| std::fs::write(candidate.join(".mss-write-probe"), b"ok"))
+                .is_ok();
+            let _ = std::fs::remove_file(candidate.join(".mss-write-probe"));
+            if usable {
+                log::info!(
+                    "Using MSS_DEV_DATA_DIR override: {}",
+                    candidate.display()
+                );
+                return Ok(candidate);
+            }
+            log::warn!(
+                "MSS_DEV_DATA_DIR '{}' is not writable; using temp folder instead",
+                dir.to_string_lossy()
+            );
+            return Ok(std::env::temp_dir().join("mss-demo-dev"));
+        }
+    }
+    app.path().app_data_dir()
+}
+
 /// Creates a single-file `.db` backup of the database into the configured backup folder
 /// (falls back to Desktop/Software Backup when none is selected) and records it
 /// in the backup history. Returns Ok(()) on success, Err(message) on failure.
@@ -68,7 +102,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_printer_v2::init())
         .setup(|app| {
-            let app_data_dir = app.path().app_data_dir()?;
+            let app_data_dir = crate::app_data_dir(app.handle())?;
             let db = Database::open(&app_data_dir)?;
             {
                 let conn = db.conn.lock().map_err(|_| {
@@ -77,6 +111,15 @@ pub fn run() {
                 database::migrations::run(&conn)?;
                 database::seed::seed(&conn)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                // Dev build only: connected demo data for testing the full
+                // Purchase → Stock → POS → Sales → Dues → Returns → Reports
+                // flow. Stripped entirely from release EXEs via cfg. Seeding is
+                // best-effort: a failure is logged in detail but never prevents
+                // or crashes startup.
+                #[cfg(debug_assertions)]
+                if let Err(e) = database::demo_seed::seed_demo(&conn) {
+                    log::error!("Demo data seeding failed: {e}");
+                }
             }
             app.manage(db);
             app.manage(SessionState::default());

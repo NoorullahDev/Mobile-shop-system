@@ -33,8 +33,8 @@ export async function updatePurchase(
   return invoke<Purchase>("update_purchase", { id, input });
 }
 
-export async function deletePurchase(id: number, reason?: string): Promise<void> {
-  return invoke<void>("delete_purchase", { id, reason: reason ?? null });
+export async function deletePurchase(id: number, reason?: string, force = false): Promise<void> {
+  return invoke<void>("delete_purchase", { id, reason: reason ?? null, force });
 }
 
 export async function createSupplierPayment(

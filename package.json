@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "clean:vite": "node scripts/clean-vite-port.mjs",
+    "predev": "npm run clean:vite",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

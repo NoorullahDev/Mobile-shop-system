@@ -788,15 +788,6 @@ pub fn soft_delete_supplier_payment(conn: &Connection, id: i64) -> Result<bool, 
     Ok(affected > 0)
 }
 
-pub fn decrement_stock(
-    conn: &Connection,
-    item_type: &str,
-    item_id: i64,
-    qty: i64,
-) -> Result<bool, AppError> {
-    super::inventory_repository::decrement_stock(conn, item_type, item_id, qty)
-}
-
 pub fn reverse_stock(
     conn: &Connection,
     item_type: &str,
@@ -824,6 +815,58 @@ pub fn delete_purchase_imeis(
         params.push(rusqlite::types::Value::from(imei.clone()));
     }
     stmt.execute(rusqlite::params_from_iter(params))?;
+    Ok(())
+}
+
+/// How many of this purchase line's physical units are still on stock. A
+/// forced deletion may only reverse these: sold units keep their sale history
+/// and must never be double-counted.
+#[allow(dead_code)]
+pub fn count_in_stock_imeis(
+    conn: &Connection,
+    phone_id: i64,
+    imeis: &[String],
+) -> Result<i64, AppError> {
+    if imeis.is_empty() {
+        return Ok(0);
+    }
+    let mut total: i64 = 0;
+    const BATCH: usize = 400;
+    for chunk in imeis.chunks(BATCH) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!(
+            "SELECT COUNT(*) FROM phone_imeis
+             WHERE phone_id = ?1 AND imei IN ({placeholders}) AND status = 'in_stock'"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut params: Vec<rusqlite::types::Value> =
+            vec![rusqlite::types::Value::from(phone_id)];
+        for s in chunk {
+            params.push(rusqlite::types::Value::from(s.clone()));
+        }
+        let n: i64 = stmt.query_row(rusqlite::params_from_iter(params), |r| r.get(0))?;
+        total += n;
+    }
+    Ok(total)
+}
+
+/// Reconcile a phone's aggregate `quantity` to its physical-unit truth: the
+/// sellable stock is exactly the number of `phone_imeis` rows still `in_stock`.
+///
+/// Purchase reversals use this so that deleting a purchase can never leave a
+/// phantom aggregate quantity behind (physical units are the single source of
+/// truth for phones that track IMEIs).
+pub fn sync_phone_quantity_to_imeis(
+    conn: &Connection,
+    phone_id: i64,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE phones SET quantity = (
+            SELECT COUNT(*) FROM phone_imeis WHERE phone_id = ?1 AND status = 'in_stock'
+         )
+         WHERE id = ?1",
+        [phone_id],
+    )?;
     Ok(())
 }
 

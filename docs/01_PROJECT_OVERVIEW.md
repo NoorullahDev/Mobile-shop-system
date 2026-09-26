@@ -8,11 +8,15 @@ Mobile Shop System
 
 ## 2. Project Description
 
-Mobile Shop System is a professional offline desktop application designed to help mobile phone shops manage their daily operations digitally.
+Mobile Shop System is a professional offline desktop application designed to
+help mobile phone shops manage their daily operations digitally.
 
-It combines mobile phone shop operations (phone stock/inventory, IMEI tracking, sales and receipts, suppliers/purchasing) with general business management (members/customers, payments, expenses, reports, settings).
+It combines mobile phone shop operations (phone stock/inventory, IMEI tracking,
+sales and receipts, suppliers/purchasing) with general business management
+(members/customers, payments, expenses, reports, settings).
 
-The application replaces manual registers, spreadsheets, and disconnected tools with a centralized, secure, and easy-to-use management platform.
+The application replaces manual registers, spreadsheets, and disconnected tools
+with a centralized, secure, and easy-to-use management platform.
 
 The system is built using:
 
@@ -21,13 +25,15 @@ The system is built using:
 - React + TypeScript Frontend
 - SQLite Database
 
-The application works completely offline and stores business data locally with strong security and reliability.
+The application works completely offline and stores business data locally with
+strong security and reliability.
 
 ---
 
-# 3. Project Vision
+## 3. Project Vision
 
-The vision is to create a lightweight, fast, secure, and professional desktop management solution for small and medium businesses.
+The vision is to create a lightweight, fast, secure, and professional desktop
+management solution for small and medium businesses.
 
 The software should provide:
 
@@ -39,10 +45,9 @@ The software should provide:
 - Customizable reports
 - Long-term maintainability
 
-
 ---
 
-# 4. Main Objectives
+## 4. Main Objectives
 
 The system should:
 
@@ -56,12 +61,11 @@ The system should:
 - Maintain data security
 - Work without internet dependency
 
-
 ---
 
-# 5. Target Users
+## 5. Target Users
 
-## Business Owner / Admin
+### Business Owner / Admin
 
 Responsibilities:
 
@@ -71,8 +75,7 @@ Responsibilities:
 - Configure settings
 - Monitor finances
 
-
-## Staff Users
+### Staff Users
 
 Responsibilities:
 
@@ -81,8 +84,7 @@ Responsibilities:
 - Receive payments
 - Update information according to permissions
 
-
-## Accountant
+### Accountant
 
 Responsibilities:
 
@@ -90,12 +92,11 @@ Responsibilities:
 - View income and expenses
 - Generate financial reports
 
-
 ---
 
-# 6. Core Application Modules
+## 6. Core Application Modules
 
-## Dashboard
+### Dashboard
 
 Purpose:
 
@@ -110,10 +111,9 @@ Main Features:
 - Recent activities
 - Charts and analytics
 
-
 ---
 
-## Members Management
+### Members Management
 
 Purpose:
 
@@ -129,10 +129,9 @@ Features:
 - View member details
 - Payment history
 
-
 ---
 
-## Finance Management
+### Finance Management
 
 Purpose:
 
@@ -146,10 +145,9 @@ Features:
 - Manage transactions
 - View financial summaries
 
-
 ---
 
-## Reports
+### Reports
 
 Purpose:
 
@@ -165,10 +163,9 @@ Features:
 - Print support
 - Custom templates
 
-
 ---
 
-## Settings
+### Settings
 
 Purpose:
 
@@ -182,14 +179,13 @@ Features:
 - Backup settings
 - Application preferences
 
-
 ---
 
-# 7. Development Philosophy
+## 7. Development Philosophy
 
 The project follows professional software engineering principles.
 
-## Main Rules:
+### Main Rules
 
 - Clean architecture
 - Modular development
@@ -199,13 +195,11 @@ The project follows professional software engineering principles.
 - Secure coding practices
 - Maintainable codebase
 
-
 ---
 
-# 8. Development Approach
+## 8. Development Approach
 
 Every feature must follow this workflow:
-
 
 Requirement
 
@@ -233,52 +227,45 @@ UI Review
 
 Documentation Update
 
-
-
 No feature is considered complete without:
 
 - Proper implementation
 - Testing
 - Documentation
 
-
 ---
 
-# 9. Quality Goals
+## 9. Quality Goals
 
 The application should achieve:
 
-## Performance
+### Performance
 
 - Fast startup
 - Smooth UI experience
 - Efficient database queries
 
-
-## Security
+### Security
 
 - Protected user data
 - Secure authentication
 - Permission-based access
 
-
-## Reliability
+### Reliability
 
 - No data corruption
 - Safe database operations
 - Backup and restore support
 
-
-## Maintainability
+### Maintainability
 
 - Clean code structure
 - Clear documentation
 - Easy future expansion
 
-
 ---
 
-# 10. Future Expansion
+## 10. Future Expansion
 
 The architecture should allow future features:
 
@@ -289,27 +276,26 @@ The architecture should allow future features:
 - Advanced accounting
 - Third-party integrations
 
+---
+
+## 11. Technology Summary
+
+| Layer             | Technology                  |
+| ----------------- | --------------------------- |
+| Desktop Framework | Tauri 2.0                   |
+| Backend           | Rust                        |
+| Frontend          | React + TypeScript          |
+| Styling           | Tailwind CSS                |
+| Database          | SQLite                      |
+| Testing           | Rust Tests + Frontend Tests |
+| Build System      | Tauri Bundler               |
 
 ---
 
-# 11. Technology Summary
+## 12. Documentation Rule
 
-| Layer | Technology |
-|---|---|
-| Desktop Framework | Tauri 2.0 |
-| Backend | Rust |
-| Frontend | React + TypeScript |
-| Styling | Tailwind CSS |
-| Database | SQLite |
-| Testing | Rust Tests + Frontend Tests |
-| Build System | Tauri Bundler |
-
-
----
-
-# 12. Documentation Rule
-
-Before modifying any major functionality, developers and AI assistants must review:
+Before modifying any major functionality, developers and AI assistants must
+review:
 
 - Technical Architecture
 - Product Requirements

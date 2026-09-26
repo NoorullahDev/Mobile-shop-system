@@ -2,7 +2,8 @@ use rusqlite::Connection;
 
 use crate::errors::AppError;
 use crate::models::purchase::{
-    CreatePurchaseInput, CreateSupplierPaymentInput, Purchase, SupplierBalance, SupplierPayment,
+    CreatePurchaseInput, CreateSupplierPaymentInput, Purchase, PurchaseItem, SupplierBalance,
+    SupplierPayment,
 };
 use crate::repositories::{purchase_repository, supplier_repository};
 use crate::services;
@@ -420,33 +421,66 @@ pub fn get(conn: &Connection, id: i64) -> Result<Purchase, AppError> {
         .ok_or_else(|| AppError::validation("Purchase not found"))
 }
 
+/// Reverse one purchase line's stock effect.
+///
+/// Unit-tracked phone lines (non-empty `serials`) delete their physical units
+/// and then reconcile the phone's aggregate `quantity` to the exact remaining
+/// `in_stock` IMEI count — physical units are the single source of truth, so a
+/// reversal can never leave phantom aggregate stock behind. Untracked aggregate
+/// stock (legacy phones with no IMEIs) and accessories keep the subtractive
+/// `reverse_stock(quantity)` behaviour, clamped by current stock.
+fn reverse_purchase_item_stock(conn: &Connection, item: &PurchaseItem) -> Result<(), AppError> {
+    if item.item_type == "phone" && !item.serials.is_empty() {
+        purchase_repository::delete_purchase_imeis(conn, item.item_id, &item.serials)?;
+        purchase_repository::sync_phone_quantity_to_imeis(conn, item.item_id)?;
+    } else {
+        purchase_repository::reverse_stock(conn, &item.item_type, item.item_id, item.quantity)?;
+    }
+    Ok(())
+}
+
 pub fn delete_purchase(
     conn: &Connection,
     id: i64,
     actor: Option<i64>,
     reason: Option<String>,
+    force: bool,
 ) -> Result<(), AppError> {
     let existing = get(conn, id)?;
+    let reason = reason.map(|r| r.trim().to_string()).filter(|r| !r.is_empty());
     let tx = conn.unchecked_transaction()?;
 
-    // Revert inventory effects for existing items
-    for item in &existing.items {
-        if let Some(reason) = purchase_repository::reversal_blocker(
-            &tx,
-            &item.item_type,
-            item.item_id,
-            item.quantity,
-            &item.serials,
-        )? {
-            return Err(AppError::validation(format!(
-                "Cannot delete this purchase: {reason}. Adjust inventory instead."
-            )));
+    if force {
+        // Owner/Admin forced deletion. Sold units keep their sale history and
+        // are never reversed; only physical units still on stock may roll back.
+        // Aggregate (untracked) lines reverse the full line quantity, clamped by
+        // the current stock like every other untracked rollback.
+        if reason.is_none() {
+            return Err(AppError::validation(
+                "A written reason is required to force-delete a purchase whose stock was already sold",
+            ));
         }
-        purchase_repository::reverse_stock(&tx, &item.item_type, item.item_id, item.quantity)?;
-        if item.item_type == "phone" {
-            purchase_repository::delete_purchase_imeis(&tx, item.item_id, &item.serials)?;
+        for item in &existing.items {
+            reverse_purchase_item_stock(&tx, item)?;
+            purchase_repository::revert_last_purchase_cost(&tx, &item.item_type, item.item_id)?;
         }
-        purchase_repository::revert_last_purchase_cost(&tx, &item.item_type, item.item_id)?;
+    } else {
+        // Revert inventory effects for existing items
+        for item in &existing.items {
+            if let Some(reason) = purchase_repository::reversal_blocker(
+                &tx,
+                &item.item_type,
+                item.item_id,
+                item.quantity,
+                &item.serials,
+            )? {
+                return Err(AppError::validation(format!(
+                    "Cannot delete this purchase: {reason}. Adjust inventory instead."
+                )));
+            }
+            reverse_purchase_item_stock(&tx, item)?;
+            purchase_repository::revert_last_purchase_cost(&tx, &item.item_type, item.item_id)?;
+        }
     }
 
     purchase_repository::delete_purchase(&tx, id)?;
@@ -560,10 +594,7 @@ pub fn update_purchase(
                 "Cannot edit this purchase: {reason}. Create a correction instead."
             )));
         }
-        purchase_repository::reverse_stock(&tx, &item.item_type, item.item_id, item.quantity)?;
-        if item.item_type == "phone" {
-            purchase_repository::delete_purchase_imeis(&tx, item.item_id, &item.serials)?;
-        }
+        reverse_purchase_item_stock(&tx, item)?;
     }
     purchase_repository::delete_purchase_items(&tx, id)?;
 
@@ -806,6 +837,7 @@ mod tests {
         phone_service, sale_service, supplier_service, test_utils::in_memory_conn,
     };
     use rusqlite::params;
+    use rusqlite::OptionalExtension;
 
     fn supplier(conn: &Connection) -> i64 {
         supplier_service::create(
@@ -1358,7 +1390,7 @@ mod tests {
 
         // Deleting the purchase after a partial sale must be rejected instead of
         // silently leaving phantom stock (quantity without matching IMEI units).
-        let err = delete_purchase(&conn, purchase.id, None, None).unwrap_err();
+        let err = delete_purchase(&conn, purchase.id, None, None, false).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
         assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 1);
         assert_eq!(phone_service::list_imei(&conn, phone_id).unwrap().len(), 2);
@@ -1407,7 +1439,7 @@ mod tests {
         )
         .unwrap();
 
-        delete_purchase(&conn, purchase.id, None, None).unwrap();
+        delete_purchase(&conn, purchase.id, None, None, false).unwrap();
         assert!(get(&conn, purchase.id).is_err());
         let qty: i64 = conn
             .query_row("SELECT quantity FROM phones WHERE id = ?1", [phone_id], |r| {
@@ -1462,7 +1494,7 @@ mod tests {
         .unwrap();
         assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 1);
 
-        let err = delete_purchase(&conn, purchase.id, None, None).unwrap_err();
+        let err = delete_purchase(&conn, purchase.id, None, None, false).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
         assert!(get(&conn, purchase.id).is_ok(), "purchase must survive");
         assert_eq!(phone_service::list_imei(&conn, phone_id).unwrap().len(), 2);
@@ -1485,7 +1517,7 @@ mod tests {
         conn.execute("UPDATE phones SET quantity = 1 WHERE id = ?1", [iid])
             .unwrap();
 
-        delete_purchase(&conn, purchase.id, None, None).unwrap();
+        delete_purchase(&conn, purchase.id, None, None, false).unwrap();
         assert!(get(&conn, purchase.id).is_err());
         let qty: i64 = conn
             .query_row("SELECT quantity FROM phones WHERE id = ?1", [iid], |r| {
@@ -1539,7 +1571,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = delete_purchase(&conn, purchase.id, None, None).unwrap_err();
+        let err = delete_purchase(&conn, purchase.id, None, None, false).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)));
         assert_eq!(
             phone_service::get(&conn, phone_id).unwrap().quantity,
@@ -1547,6 +1579,338 @@ mod tests {
         );
         assert_eq!(phone_service::list_imei(&conn, phone_id).unwrap().len(), 2);
         assert!(get(&conn, purchase.id).is_ok());
+    }
+
+    #[test]
+    fn forced_delete_requires_a_reason() {
+        // A blockable purchase (sold unit) must still refuse a forced deletion
+        // that carries no written reason, and nothing may change.
+        use crate::models::sale::{CreateSaleInput, SaleItemInput};
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Apple".into(),
+                model: "18PM".into(),
+                quantity: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+
+        let purchase = create_purchase(&conn, purchase_input(phone_id, None), None).unwrap();
+        let units = phone_service::list_imei(&conn, phone_id).unwrap();
+        sale_service::create(
+            &conn,
+            CreateSaleInput {
+                discount: 0.0,
+                paid_amount: None,
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: phone_id,
+                    quantity: 1,
+                    imei_id: Some(units[0].id),
+                    unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        let err = delete_purchase(&conn, purchase.id, None, None, true).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 1);
+        assert_eq!(phone_service::list_imei(&conn, phone_id).unwrap().len(), 2);
+        assert!(get(&conn, purchase.id).is_ok());
+    }
+
+    #[test]
+    fn forced_delete_reverses_only_unsold_units_and_preserves_sale() {
+        // Owner/Admin forced deletion of a blocked purchase: the sold unit and
+        // its invoice stay intact, only the still-in-stock unit is reversed.
+        use crate::models::sale::{CreateSaleInput, SaleItemInput};
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Apple".into(),
+                model: "18PM".into(),
+                quantity: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+
+        let purchase = create_purchase(&conn, purchase_input(phone_id, None), None).unwrap();
+        let units = phone_service::list_imei(&conn, phone_id).unwrap();
+        assert_eq!(units.len(), 2);
+
+        let sale = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                discount: 0.0,
+                paid_amount: None,
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: phone_id,
+                    quantity: 1,
+                    imei_id: Some(units[0].id),
+                    unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        let reason = "Owner approved removal of mis-entered purchase";
+        delete_purchase(&conn, purchase.id, None, Some(reason.into()), true).unwrap();
+
+        // The purchase is gone, the phone only lost the unsold in-stock unit,
+        // and the sold unit's history survives verbatim.
+        assert!(get(&conn, purchase.id).is_err());
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 0);
+        let remaining = phone_service::list_imei(&conn, phone_id).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].imei, "111111111111111"); // the sold unit
+        let historical = sale_service::get(&conn, sale.id).unwrap();
+        assert_eq!(historical.items[0].imei.as_deref(), Some("111111111111111"));
+
+        // The written reason is preserved in the activity log on the delete row.
+        let logged: Option<String> = conn
+            .query_row(
+                "SELECT new_value FROM activity_logs
+                 WHERE module = 'purchase' AND action = 'delete'
+                 ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(logged.as_deref(), Some(reason));
+    }
+
+    #[test]
+    fn forced_delete_does_not_wipe_other_purchases_stock() {
+        // Two purchases feed the same phone. Selling one unit of purchase A and
+        // then force-deleting A must leave purchase B's in-stock units intact.
+        use crate::models::sale::{CreateSaleInput, SaleItemInput};
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Samsung".into(),
+                model: "A55".into(),
+                quantity: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+
+        let mut input_a = purchase_input(phone_id, None);
+        input_a.items[0].imeis = vec!["100000000000000".into(), "100000000000001".into()];
+        let purchase_a = create_purchase(&conn, input_a, None).unwrap();
+
+        let mut input_b = purchase_input(phone_id, None);
+        input_b.items[0].imeis = vec!["200000000000000".into(), "200000000000001".into()];
+        let purchase_b = create_purchase(&conn, input_b, None).unwrap();
+
+        let units = phone_service::list_imei(&conn, phone_id).unwrap();
+        assert_eq!(units.len(), 4);
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 4);
+
+        let unit_a = units
+            .iter()
+            .find(|u| u.imei == "100000000000000")
+            .unwrap();
+        sale_service::create(
+            &conn,
+            CreateSaleInput {
+                discount: 0.0,
+                paid_amount: Some(150.0),
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: phone_id,
+                    quantity: 1,
+                    imei_id: Some(unit_a.id),
+                    unit_price: Some(150.0),
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 3);
+
+        delete_purchase(
+            &conn,
+            purchase_a.id,
+            None,
+            Some("removing batch A".into()),
+            true,
+        )
+        .unwrap();
+
+        // Purchase B is untouched; its two units remain on stock while the sold
+        // A unit stays linked to its invoice.
+        assert!(get(&conn, purchase_a.id).is_err());
+        assert!(get(&conn, purchase_b.id).is_ok());
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 2);
+        let remaining = phone_service::list_imei(&conn, phone_id).unwrap();
+        let mut imeis: Vec<String> = remaining.iter().map(|u| u.imei.clone()).collect();
+        imeis.sort();
+        assert_eq!(
+            imeis,
+            vec![
+                "100000000000000".to_string(), // sold A unit, kept for its invoice
+                "200000000000000".to_string(),
+                "200000000000001".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn forced_delete_of_legacy_untracked_deficit_reverses_line() {
+        // The client's PO-000003 case taken on by the Owner: legacy sale lines
+        // reference the phone but no specific units. Forced deletion wipes the
+        // line's remaining stock (clamped) while preserving the legacy invoice.
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Apple".into(),
+                model: "15PM".into(),
+                quantity: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+        let purchase = create_purchase(&conn, purchase_input(phone_id, None), None).unwrap();
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 2);
+
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method)
+             VALUES ('INV-LEGACY', 750, 750, 'cash')",
+            [],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO sale_items (sale_id, phone_id, imei_id, quantity, unit_price, cost_price)
+             VALUES (?1, ?2, NULL, 1, 750, 600)",
+            [sale_id, phone_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE phones SET quantity = quantity - 1 WHERE id = ?1",
+            [phone_id],
+        )
+        .unwrap();
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 1);
+
+        delete_purchase(
+            &conn,
+            purchase.id,
+            None,
+            Some("owner removed legacy batch".into()),
+            true,
+        )
+        .unwrap();
+
+        assert!(get(&conn, purchase.id).is_err());
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 0);
+        assert!(phone_service::list_imei(&conn, phone_id).unwrap().is_empty());
+        assert!(sale_service::get(&conn, sale_id).is_ok());
+    }
+
+    #[test]
+    fn delete_purchase_clears_phantom_stock_from_dummy_phone_quantity() {
+        // The live client DB's PO-00000X case: the phone carried a manually-set
+        // aggregate quantity (5) with a purchase added on top. Deleting the
+        // purchase must reconcile the phone to its physical units, not leave the
+        // dummy aggregate behind. Old behaviour left `quantity = 5` with zero
+        // units — phantom stock that showed up with no purchases.
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Samsung".into(),
+                model: "Galaxy S24".into(),
+                quantity: 5,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+        assert!(phone_service::list_imei(&conn, phone_id).unwrap().is_empty());
+
+        let purchase = create_purchase(&conn, purchase_input(phone_id, None), None).unwrap();
+        assert_eq!(phone_service::list_imei(&conn, phone_id).unwrap().len(), 2);
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 7);
+
+        delete_purchase(&conn, purchase.id, None, None, false).unwrap();
+        assert!(get(&conn, purchase.id).is_err());
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 0);
+        assert!(phone_service::list_imei(&conn, phone_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_purchase_preserves_other_purchases_units_on_normal_path() {
+        // Two tracked purchases feed the same phone. Deleting A on the normal
+        // path must leave exactly B's physical units behind AND reconcile the
+        // phone quantity to that count — physical units are the source of truth.
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Samsung".into(),
+                model: "A55".into(),
+                quantity: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+
+        let mut input_a = purchase_input(phone_id, None);
+        input_a.items[0].imeis = vec!["100000000000000".into(), "100000000000001".into()];
+        let purchase_a = create_purchase(&conn, input_a, None).unwrap();
+
+        let mut input_b = purchase_input(phone_id, None);
+        input_b.items[0].imeis = vec!["200000000000000".into(), "200000000000001".into()];
+        create_purchase(&conn, input_b, None).unwrap();
+
+        assert_eq!(phone_service::list_imei(&conn, phone_id).unwrap().len(), 4);
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 4);
+
+        delete_purchase(&conn, purchase_a.id, None, None, false).unwrap();
+        assert!(get(&conn, purchase_a.id).is_err());
+
+        let remaining = phone_service::list_imei(&conn, phone_id).unwrap();
+        let mut imeis: Vec<String> = remaining.iter().map(|u| u.imei.clone()).collect();
+        imeis.sort();
+        assert_eq!(
+            imeis,
+            vec![
+                "200000000000000".to_string(),
+                "200000000000001".to_string(),
+            ]
+        );
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 2);
     }
 
     #[test]
@@ -1591,7 +1955,7 @@ mod tests {
         conn.execute("UPDATE accessories SET quantity = 1 WHERE id = ?1", [aid])
             .unwrap();
 
-        delete_purchase(&conn, purchase.id, None, None).unwrap();
+        delete_purchase(&conn, purchase.id, None, None, false).unwrap();
         assert!(get(&conn, purchase.id).is_err());
         assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 0);
     }

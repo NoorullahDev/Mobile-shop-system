@@ -474,11 +474,10 @@ export function PurchaseForm({
       : (Number(l.quantity) || 0) * (Number(l.unitCost) || 0);
   };
 
-  // Fixed one-line label strip so every unit field sits on the same level and
-  // all controls share identical height and vertical alignment.
+  // Reserve a consistent label row while allowing long labels to display fully.
   const unitFieldLabel = (text: string) => (
     <div
-      className="flex h-[18px] items-center overflow-hidden whitespace-nowrap text-[13px] font-medium"
+      className="flex min-h-[18px] items-center text-[13px] font-medium leading-[18px]"
       style={{ color: "#334155" }}
     >
       {text}
@@ -863,7 +862,7 @@ export function PurchaseForm({
                           <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                             Unit {i + 1}
                           </div>
-                          <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="grid grid-cols-1 items-start gap-x-3 gap-y-3 sm:grid-cols-2">
                             <div className="flex min-w-0 flex-col gap-1">
                               {unitFieldLabel("IMEI 1")}
                               <Input

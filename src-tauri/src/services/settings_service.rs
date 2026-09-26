@@ -39,6 +39,39 @@ mod tests {
     }
 
     #[test]
+    fn branding_settings_persist_across_full_restart() {
+        let dir = std::env::temp_dir().join(format!("bms-settings-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.db");
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            crate::database::migrations::run(&conn).unwrap();
+            update_setting(&conn, Some(1), "business_name", "EagleNest Mobiles").unwrap();
+            update_setting(&conn, Some(1), "shop_logo", "data:image/png;base64,AAAA").unwrap();
+        }
+
+        // Simulate a full app restart: a fresh connection to the same file,
+        // with migrations and the default-seed re-run as on startup.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        crate::database::migrations::run(&conn).unwrap();
+        crate::database::seed::seed(&conn).unwrap();
+
+        let settings = get_all(&conn).unwrap();
+        let map: std::collections::HashMap<String, String> = settings
+            .into_iter()
+            .map(|s| (s.key, s.value.unwrap_or_default()))
+            .collect();
+        assert_eq!(map.get("business_name").map(String::as_str), Some("EagleNest Mobiles"));
+        assert_eq!(
+            map.get("shop_logo").map(String::as_str),
+            Some("data:image/png;base64,AAAA")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn update_creates_and_overwrites() {
         let conn = in_memory_conn();
         update_setting(&conn, Some(1), "currency", "USD").unwrap();
