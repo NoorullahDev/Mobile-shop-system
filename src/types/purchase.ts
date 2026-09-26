@@ -12,6 +12,8 @@ export interface PurchaseItemInput {
   imei_pta_statuses?: string[];
   imei_storages?: string[];
   imei_battery_healths?: Array<number | null>;
+  imei_unit_costs?: Array<number | null>;
+  imei_sale_prices?: Array<number | null>;
 }
 
 export interface CreatePurchaseInput {
@@ -43,6 +45,8 @@ export interface PurchaseItem {
   imei_pta_statuses?: string[];
   imei_storages?: string[];
   imei_battery_healths?: Array<number | null>;
+  imei_costs?: number[];
+  imei_sale_prices?: Array<number | null>;
 }
 
 export interface Purchase {

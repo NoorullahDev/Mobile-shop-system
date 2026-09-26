@@ -54,6 +54,12 @@ pub struct Line {
     pub imei_pta_statuses: Vec<Option<String>>,
     pub imei_storages: Vec<Option<String>>,
     pub imei_battery_healths: Vec<Option<i64>>,
+    /// Resolved unit cost per physical unit (phone lines only): the per-unit
+    /// override when present, otherwise the line's default unit cost.
+    pub imei_costs: Vec<f64>,
+    /// Resolved selling price per physical unit (phone lines only); `None`
+    /// entry falls back to the line's default selling price.
+    pub imei_sale_prices: Vec<Option<f64>>,
 }
 
 pub fn prepare_purchase_lines(
@@ -118,6 +124,8 @@ pub fn prepare_purchase_lines(
         let mut imei_pta_statuses: Vec<Option<String>> = Vec::new();
         let mut imei_storages: Vec<Option<String>> = Vec::new();
         let mut imei_battery_healths: Vec<Option<i64>> = Vec::new();
+        let mut imei_costs: Vec<f64> = Vec::new();
+        let mut imei_sale_prices: Vec<Option<f64>> = Vec::new();
         if item_type == "phone" {
             // Colours are indexed by the same position as the original IMEI input,
             // so blank (skipped) entries do not shift colour alignment.
@@ -188,6 +196,25 @@ pub fn prepare_purchase_lines(
                     }
                 }
                 imei_battery_healths.push(battery_health);
+                // Resolve this unit's prices: per-unit override when given,
+                // otherwise the line's default values keep "fast entry".
+                let per_unit_cost = item.imei_unit_costs.get(i).copied().flatten();
+                let unit_cost_i = match per_unit_cost {
+                    Some(c) if c.is_finite() && c > 0.0 => c,
+                    _ => unit_cost,
+                };
+                if unit_cost_i < 0.0 {
+                    return Err(AppError::validation(
+                        "Per-unit cost cannot be negative",
+                    ));
+                }
+                let per_unit_sale = item.imei_sale_prices.get(i).copied().flatten();
+                let sale_i = match per_unit_sale {
+                    Some(sp) if sp.is_finite() && sp >= 0.0 => Some(sp),
+                    _ => item.selling_price,
+                };
+                imei_costs.push(utils::round2(unit_cost_i));
+                imei_sale_prices.push(sale_i.map(utils::round2));
                 all_imeis.push(imei.clone());
             }
             if seen.len() != item.quantity as usize {
@@ -200,7 +227,24 @@ pub fn prepare_purchase_lines(
             }
         }
 
-        subtotal += utils::round2(unit_cost * item.quantity as f64);
+        // Purchase Line Total = the SUM of the actual individual unit costs for
+        // phone lines (breaking down PTA/JV/Non-PTA variants), otherwise the
+        // simple unit_cost * quantity for accessories.
+        let line_subtotal = if item_type == "phone" && !imei_costs.is_empty() {
+            utils::round2(imei_costs.iter().sum())
+        } else {
+            utils::round2(unit_cost * item.quantity as f64)
+        };
+        subtotal += line_subtotal;
+        // The stored per-line unit cost becomes the weighted average when the
+        // units carry different costs, so `last_purchase_cost` and reports keep
+        // one representative figure while the exact per-unit costs live on the
+        // physical units themselves.
+        let stored_unit_cost = if item_type == "phone" && !imei_costs.is_empty() {
+            utils::round2(imei_costs.iter().sum::<f64>() / imei_costs.len() as f64)
+        } else {
+            utils::round2(unit_cost)
+        };
         let trim = |s: &Option<String>| -> Option<String> {
             s.as_deref()
                 .map(|x| x.trim().to_string())
@@ -210,7 +254,7 @@ pub fn prepare_purchase_lines(
             item_type,
             item_id: item.item_id,
             quantity: item.quantity,
-            unit_cost: utils::round2(unit_cost),
+            unit_cost: stored_unit_cost,
             selling_price: item.selling_price.map(utils::round2),
             warranty: trim(&item.warranty),
             condition: trim(&item.condition),
@@ -220,6 +264,8 @@ pub fn prepare_purchase_lines(
             imei_pta_statuses,
             imei_storages,
             imei_battery_healths,
+            imei_costs,
+            imei_sale_prices,
         });
     }
 
@@ -348,8 +394,8 @@ pub fn create_purchase(
                 &line.imei_pta_statuses,
                 &line.imei_storages,
                 &line.imei_battery_healths,
-                Some(line.unit_cost),
-                line.selling_price,
+                Some(&line.imei_costs),
+                Some(&line.imei_sale_prices),
             )?;
         }
     }
@@ -573,8 +619,8 @@ pub fn update_purchase(
                 &line.imei_pta_statuses,
                 &line.imei_storages,
                 &line.imei_battery_healths,
-                Some(line.unit_cost),
-                line.selling_price,
+                Some(&line.imei_costs),
+                Some(&line.imei_sale_prices),
             )?;
         }
     }
@@ -807,6 +853,8 @@ mod tests {
                 imei_pta_statuses: Vec::new(),
                 imei_storages: Vec::new(),
                 imei_battery_healths: Vec::new(),
+                imei_unit_costs: Vec::new(),
+                imei_sale_prices: Vec::new(),
             }],
         }
     }
@@ -1074,6 +1122,123 @@ mod tests {
         assert_eq!(sale.items[0].cost_price, 250_000.0);
         assert_eq!(sale.total_amount, 250_000.0);
         assert_eq!(sale.total_amount - sale.items[0].cost_price, 0.0);
+    }
+
+    #[test]
+    fn purchase_totals_sum_individual_unit_costs_and_sale_uses_the_exact_unit() {
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Samsung".into(),
+                model: "S25 Ultra".into(),
+                quantity: 0,
+                cost_price: 0.0,
+                sale_price: 0.0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+
+        let mut input = purchase_input(phone_id, None);
+        input.paid_amount = Some(530_000.0);
+        input.items[0].quantity = 3;
+        input.items[0].unit_cost = Some(220_000.0); // default for fast entry
+        input.items[0].selling_price = Some(260_000.0);
+        input.items[0].imeis = vec![
+            "253000000000001".into(),
+            "253000000000002".into(),
+            "253000000000003".into(),
+        ];
+        input.items[0].imei_pta_statuses =
+            vec!["PTA Approved".into(), "Non-PTA".into(), "JV".into()];
+        input.items[0].imei_unit_costs = vec![Some(220_000.0), Some(170_000.0), Some(140_000.0)];
+        input.items[0].imei_sale_prices = vec![Some(260_000.0), Some(205_000.0), Some(170_000.0)];
+
+        let purchase = create_purchase(&conn, input, None).unwrap();
+
+        // Purchase Line Total === SUM of the actual individual unit costs.
+        assert_eq!(purchase.total_amount, 530_000.0);
+        assert_eq!(purchase.items[0].line_total, 530_000.0);
+        // Weighted average is what the transaction line and product row use.
+        let avg = (530_000.0_f64 / 3.0 * 100.0).round() / 100.0;
+        assert_eq!(purchase.items[0].unit_cost, avg);
+        assert_eq!(purchase.items[0].imei_costs, vec![220_000.0, 170_000.0, 140_000.0]);
+        assert_eq!(
+            purchase.items[0].imei_sale_prices,
+            vec![Some(260_000.0), Some(205_000.0), Some(170_000.0)]
+        );
+
+        // Each physical unit keeps its OWN cost and selling price.
+        let units = phone_service::list_imei(&conn, phone_id).unwrap();
+        assert_eq!(units[0].pta_status.as_deref(), Some("PTA Approved"));
+        assert_eq!(units[0].cost_price, Some(220_000.0));
+        assert_eq!(units[0].sale_price, Some(260_000.0));
+        assert_eq!(units[1].pta_status.as_deref(), Some("Non-PTA"));
+        assert_eq!(units[1].cost_price, Some(170_000.0));
+        assert_eq!(units[1].sale_price, Some(205_000.0));
+        assert_eq!(units[2].pta_status.as_deref(), Some("JV"));
+        assert_eq!(units[2].cost_price, Some(140_000.0));
+        assert_eq!(units[2].sale_price, Some(170_000.0));
+
+        // The phone row reflects the weighted-average cost and the line's
+        // default selling price.
+        let phone = phone_service::get(&conn, phone_id).unwrap();
+        assert_eq!(phone.cost_price, avg);
+        assert_eq!(phone.sale_price, 260_000.0);
+        let lpc: Option<f64> = conn
+            .query_row(
+                "SELECT last_purchase_cost FROM phones WHERE id = ?1",
+                params![phone_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(lpc, Some(avg));
+
+        // POS/profit must use the exact unit selected: sell the Non-PTA unit.
+        let sale = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                discount: 0.0,
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: phone_id,
+                    quantity: 1,
+                    imei_id: Some(units[1].id),
+                    unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(sale.items[0].unit_price, 205_000.0);
+        assert_eq!(sale.items[0].cost_price, 170_000.0);
+        assert_eq!(sale.total_amount, 205_000.0);
+    }
+
+    #[test]
+    fn per_unit_prices_fall_back_to_line_defaults_when_blank() {
+        let conn = in_memory_conn();
+        let iid = phone_item(&conn, None);
+        // purchase_input helper sends no per-unit arrays: every unit must be
+        // priced with the line defaults and the line total stays unit_cost*qty.
+        let purchase = create_purchase(&conn, purchase_input(iid, None), None).unwrap();
+        assert_eq!(purchase.items[0].unit_cost, 100.0);
+        assert_eq!(purchase.items[0].line_total, 200.0);
+        assert_eq!(purchase.items[0].imei_costs, vec![100.0, 100.0]);
+        assert_eq!(
+            purchase.items[0].imei_sale_prices,
+            vec![Some(150.0), Some(150.0)]
+        );
+        for unit in phone_service::list_imei(&conn, iid).unwrap() {
+            assert_eq!(unit.cost_price, Some(100.0));
+            assert_eq!(unit.sale_price, Some(150.0));
+        }
     }
 
     #[test]
@@ -1449,6 +1614,8 @@ mod tests {
                 imei_pta_statuses: Vec::new(),
                 imei_storages: Vec::new(),
                 imei_battery_healths: Vec::new(),
+                imei_unit_costs: Vec::new(),
+                imei_sale_prices: Vec::new(),
             }],
         };
         let p = create_purchase(&conn, input, None).unwrap();

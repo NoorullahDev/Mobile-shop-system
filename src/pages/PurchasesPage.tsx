@@ -517,6 +517,12 @@ export function PurchasesPage() {
                                     {it.imei_battery_healths?.[index] != null && (
                                       <span> · Battery {it.imei_battery_healths[index]}%</span>
                                     )}
+                                    {it.imei_costs?.[index] != null && (
+                                      <span> · Cost {formatMoney(it.imei_costs[index])}</span>
+                                    )}
+                                    {it.imei_sale_prices?.[index] != null && (
+                                      <span> · Sell {formatMoney(it.imei_sale_prices[index]!)}</span>
+                                    )}
                                   </div>
                                 ))}
                               </div>

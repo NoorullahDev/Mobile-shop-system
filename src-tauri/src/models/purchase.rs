@@ -30,9 +30,19 @@ pub struct PurchaseItemInput {
     /// Per-unit storage aligned positionally with `imeis`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imei_storages: Vec<String>,
-    /// Per-unit numeric battery health aligned positionally with `imeis`.
+/// Per-unit numeric battery health aligned positionally with `imeis`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imei_battery_healths: Vec<Option<i64>>,
+    /// Per-unit unit cost aligned positionally with `imeis` (phone lines only).
+    /// A missing or non-positive value makes that unit fall back to the line's
+    /// default unit cost, so blank entries keep the "fast entry" behaviour.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_unit_costs: Vec<Option<f64>>,
+    /// Per-unit selling price aligned positionally with `imeis` (phone lines
+    /// only). A missing value makes that unit fall back to the line's default
+    /// selling price.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_sale_prices: Vec<Option<f64>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -82,8 +92,16 @@ pub struct PurchaseItem {
     pub imei_pta_statuses: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imei_storages: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+#[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imei_battery_healths: Vec<Option<i64>>,
+    /// Resolved per-unit unit costs aligned with `serials` (phone lines only).
+    /// Their sum is the line total shown for the purchase.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_costs: Vec<f64>,
+    /// Resolved per-unit selling prices aligned with `serials` (phone lines
+    /// only). Entries are `None` when the unit had no individual price.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_sale_prices: Vec<Option<f64>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

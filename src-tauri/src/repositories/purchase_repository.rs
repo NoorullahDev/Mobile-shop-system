@@ -231,6 +231,10 @@ pub fn imeis_in_use(
 /// Inserts several IMEIs for one phone, batched to stay within
 /// SQLite's default 999-variable parameter limit. Every row is one physical
 /// handset; the optional second IMEI never creates another stock unit.
+///
+/// `unit_costs` and `sale_prices` carry the resolved per-unit prices aligned
+/// with `imeis`. When absent (or when an element is missing) the unit falls
+/// back to the phone's own cost/sale price for that row.
 pub fn insert_imeis(
     conn: &Connection,
     phone_id: i64,
@@ -240,8 +244,8 @@ pub fn insert_imeis(
     pta_statuses: &[Option<String>],
     storages: &[Option<String>],
     battery_healths: &[Option<i64>],
-    unit_cost: Option<f64>,
-    selling_price: Option<f64>,
+    unit_costs: Option<&[f64]>,
+    sale_prices: Option<&[Option<f64>]>,
 ) -> Result<(), AppError> {
     if imeis.is_empty() {
         return Ok(());
@@ -273,11 +277,10 @@ pub fn insert_imeis(
             params.push(storage.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
             let battery = battery_healths.get(offset + j).copied().flatten();
             params.push(battery.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
-            params
-                .push(unit_cost.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
-            params.push(
-                selling_price.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from),
-            );
+            let unit_cost = unit_costs.and_then(|s| s.get(offset + j)).copied();
+            params.push(unit_cost.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
+            let sale_price = sale_prices.and_then(|s| s.get(offset + j)).copied().flatten();
+            params.push(sale_price.map_or(rusqlite::types::Value::Null, rusqlite::types::Value::from));
         }
         conn.execute(&sql, rusqlite::params_from_iter(params.iter()))?;
     }
@@ -360,22 +363,28 @@ fn list_items(conn: &Connection, purchase_id: i64) -> Result<Vec<PurchaseItem>, 
             imei_pta_statuses: Vec::new(),
             imei_storages: Vec::new(),
             imei_battery_healths: Vec::new(),
+            imei_costs: Vec::new(),
+            imei_sale_prices: Vec::new(),
         })
     })?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
     }
-    // Enrich phone lines with the current unit colours (from phone_imeis) so
-    // an edited purchase preserves each unit's colour identity.
+    // Enrich phone lines with the current per-unit details (colours, prices)
+    // so an edited purchase preserves each unit's identity and line totals
+    // reflect the actual individual unit costs.
     if !out.is_empty() {
-        attach_imei_colors(conn, &mut out)?;
+        attach_imei_details(conn, &mut out)?;
     }
     Ok(out)
 }
 
-/// Fills `imei_colors` on phone lines from the registered IMEI units.
-fn attach_imei_colors(conn: &Connection, items: &mut Vec<PurchaseItem>) -> Result<(), AppError> {
+/// Enriches phone lines with each physical unit's live identity (colours,
+/// second IMEI, PTA status, storage, battery) and its own cost/sale price from
+/// `phone_imeis`. For phone lines the line total becomes the SUM of the actual
+/// per-unit costs, so mixed-price purchases keep an accurate line total.
+fn attach_imei_details(conn: &Connection, items: &mut [PurchaseItem]) -> Result<(), AppError> {
     for it in items.iter_mut() {
         if it.item_type != "phone" || it.serials.is_empty() {
             continue;
@@ -385,10 +394,13 @@ fn attach_imei_colors(conn: &Connection, items: &mut Vec<PurchaseItem>) -> Resul
         let mut pta_statuses: Vec<String> = vec![String::new(); it.serials.len()];
         let mut storages: Vec<String> = vec![String::new(); it.serials.len()];
         let mut battery_healths: Vec<Option<i64>> = vec![None; it.serials.len()];
+        let mut costs: Vec<f64> = vec![0.0; it.serials.len()];
+        let mut sale_prices: Vec<Option<f64>> = vec![None; it.serials.len()];
+        let mut matched = 0usize;
         const BATCH: usize = 400;
         for chunk in it.serials.chunks(BATCH) {
             let placeholders = vec!["?"; chunk.len()].join(",");
-            let sql = format!("SELECT imei, imei2, color, pta_status, storage, battery_health_pct FROM phone_imeis WHERE imei IN ({placeholders})");
+            let sql = format!("SELECT imei, imei2, color, pta_status, storage, battery_health_pct, cost_price, sale_price FROM phone_imeis WHERE imei IN ({placeholders})");
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(
                 rusqlite::params_from_iter(chunk.iter().map(|s| s.as_str())),
@@ -400,17 +412,22 @@ fn attach_imei_colors(conn: &Connection, items: &mut Vec<PurchaseItem>) -> Resul
                         r.get::<_, Option<String>>(3)?,
                         r.get::<_, Option<String>>(4)?,
                         r.get::<_, Option<i64>>(5)?,
+                        r.get::<_, Option<f64>>(6)?,
+                        r.get::<_, Option<f64>>(7)?,
                     ))
                 },
             )?;
-            for r in rows {
-                let (imei, imei2, color, pta_status, storage, battery_health) = r?;
+            for row in rows {
+                let (imei, imei2, color, pta_status, storage, battery_health, cost, sale) = row?;
                 if let Some(idx) = it.serials.iter().position(|s| *s == imei) {
+                    matched += 1;
                     imei2s[idx] = imei2.unwrap_or_default();
                     colors[idx] = color.unwrap_or_default();
                     pta_statuses[idx] = pta_status.unwrap_or_default();
                     storages[idx] = storage.unwrap_or_default();
                     battery_healths[idx] = battery_health;
+                    costs[idx] = cost.unwrap_or(0.0);
+                    sale_prices[idx] = sale;
                 }
             }
         }
@@ -419,6 +436,13 @@ fn attach_imei_colors(conn: &Connection, items: &mut Vec<PurchaseItem>) -> Resul
         it.imei_pta_statuses = pta_statuses;
         it.imei_storages = storages;
         it.imei_battery_healths = battery_healths;
+        it.imei_costs = costs;
+        it.imei_sale_prices = sale_prices;
+        // Only trust the summed unit costs when every physical unit resolved;
+        // legacy lines with missing/deleted IMEI rows keep unit_cost * quantity.
+        if matched == it.serials.len() {
+            it.line_total = crate::utils::round2(it.imei_costs.iter().sum::<f64>());
+        }
     }
     Ok(())
 }
@@ -456,6 +480,8 @@ fn item_from_r(r: &rusqlite::Row) -> rusqlite::Result<PurchaseItem> {
         imei_pta_statuses: Vec::new(),
         imei_storages: Vec::new(),
         imei_battery_healths: Vec::new(),
+        imei_costs: Vec::new(),
+        imei_sale_prices: Vec::new(),
     })
 }
 
@@ -518,6 +544,18 @@ pub fn list_purchases(conn: &Connection, search: Option<&str>) -> Result<Vec<Pur
     let items = list_items_for_purchases(conn, ids)?;
     for p in out.iter_mut() {
         p.items = items.get(&p.id).cloned().unwrap_or_default();
+    }
+    // Resolve per-unit costs/sale prices and accurate line totals for phone
+    // lines so list payloads match the detail view.
+    let mut all_items: Vec<PurchaseItem> = out.iter_mut().flat_map(|p| p.items.drain(..)).collect();
+    attach_imei_details(conn, &mut all_items)?;
+    let mut restarted: std::collections::HashMap<i64, Vec<PurchaseItem>> =
+        std::collections::HashMap::new();
+    for it in all_items {
+        restarted.entry(it.purchase_id).or_default().push(it);
+    }
+    for p in out.iter_mut() {
+        p.items = restarted.get(&p.id).cloned().unwrap_or_default();
     }
     Ok(out)
 }

@@ -44,6 +44,8 @@ interface PhoneDraftLine {
   imeiPtaStatuses: string[];
   imeiStorages: string[];
   imeiBatteryHealths: string[];
+  imeiUnitCosts: string[];
+  imeiSalePrices: string[];
 }
 
 const CUSTOM_PTA_STATUS = "__custom__";
@@ -86,6 +88,8 @@ function newPhoneLine(quantity = 1): PhoneDraftLine {
     imeiPtaStatuses: Array.from({ length: quantity }, () => "PTA Approved"),
     imeiStorages: Array.from({ length: quantity }, () => ""),
     imeiBatteryHealths: Array.from({ length: quantity }, () => ""),
+    imeiUnitCosts: Array.from({ length: quantity }, () => ""),
+    imeiSalePrices: Array.from({ length: quantity }, () => ""),
   };
 }
 
@@ -156,6 +160,10 @@ export function PurchaseForm({
             return value == null ? "" : String(value);
           },
         ),
+        imeiUnitCosts:
+          i.imei_costs?.map((c) => String(c)) ?? [],
+        imeiSalePrices:
+          (i.imei_sale_prices ?? []).map((sp) => (sp == null ? "" : String(sp))) ?? [],
       }));
   }, [initial]);
 
@@ -228,12 +236,37 @@ export function PurchaseForm({
       .slice(0, 50);
   }, [accessories, accessorySearch]);
 
-  const updatePhoneLine = (key: number, patch: Partial<PhoneDraftLine>) => {
-    setPhoneLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  };
-
   const updateAccessoryLine = (key: number, patch: Partial<AccessoryDraftLine>) => {
     setAccessoryLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  };
+
+  // The top-of-line prices are the *defaults* for fast entry. Every time they
+  // change, units that are still blank or that only carry the previous default
+  // adopt the new value; units with an intentional override keep their own.
+  const setPhoneDefaultCost = (key: number, value: string) => {
+    setPhoneLines((ls) =>
+      ls.map((l) => {
+        if (l.key !== key) return l;
+        const prev = l.unitCost;
+        const imeiUnitCosts = l.imeiUnitCosts.map((v) =>
+          value === "" ? v : v === "" || v === prev ? value : v,
+        );
+        return { ...l, unitCost: value, imeiUnitCosts };
+      }),
+    );
+  };
+
+  const setPhoneDefaultSellingPrice = (key: number, value: string) => {
+    setPhoneLines((ls) =>
+      ls.map((l) => {
+        if (l.key !== key) return l;
+        const prev = l.sellingPrice;
+        const imeiSalePrices = l.imeiSalePrices.map((v) =>
+          value === "" ? v : v === "" || v === prev ? value : v,
+        );
+        return { ...l, sellingPrice: value, imeiSalePrices };
+      }),
+    );
   };
 
   const setPhoneQuantity = (key: number, quantity: number) => {
@@ -247,8 +280,42 @@ export function PurchaseForm({
         const imeiPtaStatuses = Array.from({ length: n }, (_, i) => l.imeiPtaStatuses[i] ?? "PTA Approved");
         const imeiStorages = Array.from({ length: n }, (_, i) => l.imeiStorages[i] ?? "");
         const imeiBatteryHealths = Array.from({ length: n }, (_, i) => l.imeiBatteryHealths[i] ?? "");
-        return { ...l, quantity: String(n), imeis, imei2s, imeiColors, imeiPtaStatuses, imeiStorages, imeiBatteryHealths };
+        // New units created by raising the quantity inherit the line defaults.
+        const imeiUnitCosts = Array.from({ length: n }, (_, i) => l.imeiUnitCosts[i] ?? l.unitCost);
+        const imeiSalePrices = Array.from({ length: n }, (_, i) => l.imeiSalePrices[i] ?? l.sellingPrice);
+        return {
+          ...l,
+          quantity: String(n),
+          imeis,
+          imei2s,
+          imeiColors,
+          imeiPtaStatuses,
+          imeiStorages,
+          imeiBatteryHealths,
+          imeiUnitCosts,
+          imeiSalePrices,
+        };
       }),
+    );
+  };
+
+  const setPhoneUnitCost = (key: number, index: number, value: string) => {
+    setPhoneLines((ls) =>
+      ls.map((l) =>
+        l.key === key
+          ? { ...l, imeiUnitCosts: l.imeiUnitCosts.map((v, i) => (i === index ? value : v)) }
+          : l,
+      ),
+    );
+  };
+
+  const setPhoneUnitSalePrice = (key: number, index: number, value: string) => {
+    setPhoneLines((ls) =>
+      ls.map((l) =>
+        l.key === key
+          ? { ...l, imeiSalePrices: l.imeiSalePrices.map((v, i) => (i === index ? value : v)) }
+          : l,
+      ),
     );
   };
 
@@ -311,6 +378,8 @@ export function PurchaseForm({
     if (phone) {
       line.unitCost = String(phone.cost_price || "");
       line.sellingPrice = String(phone.sale_price || "");
+      line.imeiUnitCosts = line.imeiUnitCosts.map(() => line.unitCost);
+      line.imeiSalePrices = line.imeiSalePrices.map(() => line.sellingPrice);
     }
     setPhoneLines((ls) => [...ls, line]);
     setPhoneSearch("");
@@ -333,6 +402,8 @@ export function PurchaseForm({
       line.productId = String(created.id);
       line.unitCost = created.cost_price ? String(created.cost_price) : "";
       line.sellingPrice = created.sale_price ? String(created.sale_price) : "";
+      line.imeiUnitCosts = line.imeiUnitCosts.map(() => line.unitCost);
+      line.imeiSalePrices = line.imeiSalePrices.map(() => line.sellingPrice);
       setPhoneLines((ls) => [...ls, line]);
       setShowAddPhone(false);
     } catch (e) {
@@ -350,11 +421,34 @@ export function PurchaseForm({
     }
   };
 
-  const subtotal = [...phoneLines, ...accessoryLines].reduce((sum, l) => {
-    const qty = Number(l.quantity) || 0;
-    const cost = Number(l.unitCost) || 0;
-    return sum + qty * cost;
-  }, 0);
+  // A phone line's cost is the SUM of each physical unit's own cost (blank or
+  // zero unit costs fall back to the line default). Accessories stay simple.
+  const phoneLineEffectiveCosts = (l: PhoneDraftLine): number[] => {
+    const qty = Math.max(0, Number(l.quantity) || 0);
+    const def = Number(l.unitCost) || 0;
+    return Array.from({ length: qty }, (_, i) => {
+      const v = (l.imeiUnitCosts[i] ?? "").trim();
+      if (v === "") return def;
+      const n = Number(v);
+      return isFinite(n) && n > 0 ? n : def;
+    });
+  };
+
+  const phoneLineTotal = (l: PhoneDraftLine): number => {
+    const hasUnits = l.imeis.some((s) => s.trim() !== "");
+    return hasUnits
+      ? phoneLineEffectiveCosts(l).reduce((a, b) => a + b, 0)
+      : (Number(l.quantity) || 0) * (Number(l.unitCost) || 0);
+  };
+
+  const subtotal = roundMoney(
+    phoneLines.reduce((sum, l) => sum + phoneLineTotal(l), 0) +
+      accessoryLines.reduce((sum, l) => {
+        const qty = Number(l.quantity) || 0;
+        const cost = Number(l.unitCost) || 0;
+        return sum + qty * cost;
+      }, 0),
+  );
   const discount = Number(discountStr) || 0;
   const total = roundMoney(Math.max(0, subtotal - discount));
   const paid = Number(paidStr) || 0;
@@ -398,6 +492,8 @@ export function PurchaseForm({
           ptaStatus: (l.imeiPtaStatuses[i] ?? "PTA Approved").trim(),
           storage: (l.imeiStorages[i] ?? "").trim(),
           batteryHealth: (l.imeiBatteryHealths[i] ?? "").trim(),
+          unitCost: (l.imeiUnitCosts[i] ?? "").trim(),
+          salePrice: (l.imeiSalePrices[i] ?? "").trim(),
         }))
         .filter((u) => u.imei.length > 0);
       const imeis = units.map((u) => u.imei);
@@ -443,6 +539,18 @@ export function PurchaseForm({
         errs.push("Battery health must be a whole number from 0 to 100 when entered.");
         continue;
       }
+      if (
+        units.some((u) => u.unitCost !== "" && (!isFinite(Number(u.unitCost)) || Number(u.unitCost) < 0))
+      ) {
+        errs.push("Every unit Unit Cost must be a non-negative number when entered.");
+        continue;
+      }
+      if (
+        units.some((u) => u.salePrice !== "" && (!isFinite(Number(u.salePrice)) || Number(u.salePrice) < 0))
+      ) {
+        errs.push("Every unit Selling Price must be a non-negative number when entered.");
+        continue;
+      }
       items.push({
         item_type: "phone",
         item_id: Number(l.productId),
@@ -461,6 +569,17 @@ export function PurchaseForm({
         imei_battery_healths: units.map((u) =>
           u.batteryHealth === "" ? null : Number(u.batteryHealth),
         ),
+        // Blank or zero enters fall back to the line default on the backend.
+        imei_unit_costs: units.map((u) => {
+          if (u.unitCost === "") return null;
+          const n = Number(u.unitCost);
+          return n > 0 ? roundMoney(n) : null;
+        }),
+        imei_sale_prices: units.map((u) => {
+          if (u.salePrice === "") return null;
+          const n = Number(u.salePrice);
+          return isFinite(n) && n >= 0 ? roundMoney(n) : null;
+        }),
       });
     }
 
@@ -659,32 +778,36 @@ export function PurchaseForm({
                       onChange={(e) => setPhoneQuantity(l.key, Number(e.target.value))}
                     />
                     <Input
-                      label="Unit Cost"
+                      label="Default Unit Cost"
                       type="number"
                       min="0"
                       step="0.01"
                       value={l.unitCost}
                       placeholder="0.00"
                       disabled={saving}
-                      onChange={(e) => updatePhoneLine(l.key, { unitCost: e.target.value })}
+                      onChange={(e) => setPhoneDefaultCost(l.key, e.target.value)}
                     />
                     <Input
-                      label="Selling Price"
+                      label="Default Selling Price"
                       type="number"
                       min="0"
                       step="0.01"
                       value={l.sellingPrice}
                       placeholder="0.00"
                       disabled={saving}
-                      onChange={(e) => updatePhoneLine(l.key, { sellingPrice: e.target.value })}
+                      onChange={(e) => setPhoneDefaultSellingPrice(l.key, e.target.value)}
                     />
                     <div className="flex flex-col justify-end pb-1">
                       <div className="text-[12px] font-medium text-slate-500">Line Total</div>
                       <div className="text-[15px] font-bold text-slate-800">
-                        Rs. {roundMoney((Number(l.quantity) || 0) * (Number(l.unitCost) || 0)).toLocaleString("en-PK")}
+                        Rs. {roundMoney(phoneLineTotal(l)).toLocaleString("en-PK")}
                       </div>
                     </div>
                   </div>
+                  <p className="mb-2 mt-2 text-[11px] text-slate-500">
+                    Default prices auto-copy into every unit; each unit can override them. Line
+                    total = sum of the per-unit Unit Costs.
+                  </p>
                   <div className="mt-3">
                     <div className="mb-1 text-[12px] font-medium text-slate-500">
                       Physical Phone Units{" "}
@@ -698,7 +821,7 @@ export function PurchaseForm({
                           <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                             Unit {i + 1}
                           </div>
-                          <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2 lg:grid-cols-4">
                             <div className="min-w-0">
                               <Input
                                 label="IMEI 1"
@@ -781,6 +904,30 @@ export function PurchaseForm({
                                 value={l.imeiStorages[i] ?? ""}
                                 disabled={saving}
                                 onChange={(e) => setPhoneStorage(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <Input
+                                label="Unit Cost"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder={l.unitCost || "0.00"}
+                                value={l.imeiUnitCosts[i] ?? ""}
+                                disabled={saving}
+                                onChange={(e) => setPhoneUnitCost(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <Input
+                                label="Selling Price"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder={l.sellingPrice || "0.00"}
+                                value={l.imeiSalePrices[i] ?? ""}
+                                disabled={saving}
+                                onChange={(e) => setPhoneUnitSalePrice(l.key, i, e.target.value)}
                               />
                             </div>
                           </div>
