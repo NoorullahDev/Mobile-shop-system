@@ -268,6 +268,8 @@ mod tests {
                     imei_pta_statuses: vec!["PTA Approved".into()],
                     imei_storages: vec!["128GB".into()],
                     imei_battery_healths: vec![Some(90)],
+                    imei_rams: Vec::new(),
+                    imei_conditions: Vec::new(),
                     imei_unit_costs: vec![Some(100.0)],
                     imei_sale_prices: vec![Some(200.0)],
                 }],

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Select } from "../components/Select";
@@ -50,6 +51,7 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
   const [typeError, setTypeError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     loadOptions();
@@ -119,9 +121,12 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
         sku: form.sku ? form.sku.trim() : "",
         serial_number: form.serial_number?.trim() || "",
         image_paths: form.image_paths ?? [],
-        cost_price: Number(form.cost_price) || 0,
-        sale_price: Number(form.sale_price) || 0,
-        quantity: Number(form.quantity) || 0,
+        // Stock quantity, cost and sale price are owned by Record Purchase /
+        // Restock now. Preserve the existing values on edit so saving the form
+        // never resets them; a new accessory simply starts at zero.
+        cost_price: initial?.cost_price ?? 0,
+        sale_price: initial?.sale_price ?? 0,
+        quantity: initial?.quantity ?? 0,
         supplier_id: form.supplier_id ? Number(form.supplier_id) : null,
         low_stock_threshold: Number(form.low_stock_threshold) || 0,
       });
@@ -173,162 +178,126 @@ export function AccessoryForm({ onSubmit, onCancel, initial, suppliers }: Access
             onChange={(e) => set("product_name", e.target.value)}
             disabled={saving}
           />
-          <Input
-            name="compatible_models"
-            label="Model / Compatibility"
-            hint="e.g. Samsung Galaxy S24, iPhone 15"
-            value={form.compatible_models ?? ""}
-            onChange={(e) => set("compatible_models", e.target.value)}
-            disabled={saving}
-          />
-        </div>
-      </section>
-
-      {/* Section: Specifications */}
-      <section className="flex flex-col gap-1">
-        <h3 className="text-[15px] font-semibold" style={{ color: "#0F172A" }}>
-          Specifications
-        </h3>
-        <p className="text-[12px]" style={{ color: "#94A3B8" }}>
-          Colour, condition, connector, and warranty details.
-        </p>
-        <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Select
-            name="color"
-            label="Color"
-            options={colorOptions}
-            value={form.color ?? ""}
-            onChange={(e) => set("color", e.target.value)}
-            disabled={saving}
-          />
-          <Select
-            name="condition"
-            label="Condition"
-            options={conditionOptions}
-            value={form.condition ?? ""}
-            onChange={(e) => set("condition", e.target.value)}
-            disabled={saving}
-          />
-          <Select
-            name="connector_type"
-            label="Connector Type"
-            options={connectorOptions}
-            value={form.connector_type ?? ""}
-            onChange={(e) => set("connector_type", e.target.value)}
-            disabled={saving}
-          />
-          <Select
-            name="warranty"
-            label="Warranty"
-            options={warrantyOptions}
-            value={form.warranty ?? ""}
-            onChange={(e) => set("warranty", e.target.value)}
-            disabled={saving}
-          />
-          <Input
-            name="features"
-            label="Features"
-            hint="Comma-separated, e.g. Fast Charging, Braided Cable"
-            value={form.features ?? ""}
-            onChange={(e) => set("features", e.target.value)}
-            disabled={saving}
-          />
-          <Input
-            name="sku"
-            label="SKU"
-            hint="Optional internal code"
-            value={form.sku ?? ""}
-            onChange={(e) => set("sku", e.target.value)}
-            disabled={saving}
-          />
-          <Input name="serial_number" label="Serial Number" hint="Optional for individually serialized accessories" value={form.serial_number ?? ""} onChange={(e)=>set("serial_number",e.target.value)} disabled={saving}/>
-        </div>
-        <div className="mt-4">
-          <Input
-            name="description"
-            label="Description"
-            hint="Optional"
-            value={form.description ?? ""}
-            onChange={(e) => set("description", e.target.value)}
-            disabled={saving}
-          />
         </div>
       </section>
 
       <ProductImageInput value={form.image_paths ?? []} onChange={(paths)=>setForm(f=>({...f,image_paths:paths}))} disabled={saving}/>
 
-      {/* Section: Inventory & Stock */}
+      {/* Section: Advanced Details (optional, collapsible) */}
       <section className="flex flex-col gap-1">
-        <h3 className="text-[15px] font-semibold" style={{ color: "#0F172A" }}>
-          Inventory &amp; Stock
-        </h3>
-        <p className="text-[12px]" style={{ color: "#94A3B8" }}>
-          Track quantity and low-stock alerts.
-        </p>
-        <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Input
-            name="quantity"
-            label="Quantity / Stock"
-            type="number"
-            min="0"
-            value={form.quantity}
-            onChange={(e) => set("quantity", e.target.value)}
-            disabled={saving}
-          />
-          <Input
-            name="low_stock_threshold"
-            label="Low Stock Alert At"
-            type="number"
-            min="0"
-            value={form.low_stock_threshold}
-            onChange={(e) => set("low_stock_threshold", e.target.value)}
-            disabled={saving}
-          />
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-[15px] font-semibold" style={{ color: "#0F172A" }}>
+              Advanced Details
+            </h3>
+            <p className="text-[12px]" style={{ color: "#94A3B8" }}>
+              Optional — compatibility, specifications, description and stock alert.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setAdvancedOpen((o) => !o)}
+            icon={
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+              />
+            }
+          >
+            {advancedOpen ? "Hide" : "Show"}
+          </Button>
         </div>
-      </section>
-
-      {/* Section: Pricing & Supplier */}
-      <section className="flex flex-col gap-1">
-        <h3 className="text-[15px] font-semibold" style={{ color: "#0F172A" }}>
-          Pricing &amp; Supplier
-        </h3>
-        <p className="text-[12px]" style={{ color: "#94A3B8" }}>
-          Cost and sale prices, plus the supplier.
-        </p>
-        <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Input
-            name="cost_price"
-            label="Purchase Price"
-            prefix="Rs"
-            type="number"
-            step="0.01"
-            min="0"
-            value={form.cost_price}
-            onChange={(e) => set("cost_price", e.target.value)}
-            disabled={saving}
-          />
-          <Input
-            name="sale_price"
-            label="Sale Price"
-            prefix="Rs"
-            type="number"
-            step="0.01"
-            min="0"
-            value={form.sale_price}
-            onChange={(e) => set("sale_price", e.target.value)}
-            disabled={saving}
-          />
-        </div>
-        <div className="mt-4">
-          <Select
-            name="supplier_id"
-            label="Supplier"
-            options={supplierOptions}
-            value={form.supplier_id ? String(form.supplier_id) : ""}
-            onChange={(e) => set("supplier_id", e.target.value)}
-            disabled={saving}
-          />
-        </div>
+        {advancedOpen && (
+          <>
+            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Input
+                name="compatible_models"
+                label="Model / Compatibility"
+                hint="e.g. Samsung Galaxy S24, iPhone 15"
+                value={form.compatible_models ?? ""}
+                onChange={(e) => set("compatible_models", e.target.value)}
+                disabled={saving}
+              />
+              <Select
+                name="color"
+                label="Color"
+                options={colorOptions}
+                value={form.color ?? ""}
+                onChange={(e) => set("color", e.target.value)}
+                disabled={saving}
+              />
+              <Select
+                name="condition"
+                label="Condition"
+                options={conditionOptions}
+                value={form.condition ?? ""}
+                onChange={(e) => set("condition", e.target.value)}
+                disabled={saving}
+              />
+              <Select
+                name="connector_type"
+                label="Connector Type"
+                options={connectorOptions}
+                value={form.connector_type ?? ""}
+                onChange={(e) => set("connector_type", e.target.value)}
+                disabled={saving}
+              />
+              <Select
+                name="warranty"
+                label="Warranty"
+                options={warrantyOptions}
+                value={form.warranty ?? ""}
+                onChange={(e) => set("warranty", e.target.value)}
+                disabled={saving}
+              />
+              <Input
+                name="features"
+                label="Features"
+                hint="Comma-separated, e.g. Fast Charging, Braided Cable"
+                value={form.features ?? ""}
+                onChange={(e) => set("features", e.target.value)}
+                disabled={saving}
+              />
+              <Input
+                name="sku"
+                label="SKU"
+                hint="Optional internal code"
+                value={form.sku ?? ""}
+                onChange={(e) => set("sku", e.target.value)}
+                disabled={saving}
+              />
+              <Input name="serial_number" label="Serial Number" hint="Optional for individually serialized accessories" value={form.serial_number ?? ""} onChange={(e)=>set("serial_number",e.target.value)} disabled={saving}/>
+              <Input
+                name="low_stock_threshold"
+                label="Low Stock Alert At"
+                type="number"
+                min="0"
+                value={form.low_stock_threshold}
+                onChange={(e) => set("low_stock_threshold", e.target.value)}
+                disabled={saving}
+              />
+              <Select
+                name="supplier_id"
+                label="Supplier"
+                options={supplierOptions}
+                value={form.supplier_id ? String(form.supplier_id) : ""}
+                onChange={(e) => set("supplier_id", e.target.value)}
+                disabled={saving}
+              />
+            </div>
+            <div className="mt-4">
+              <Input
+                name="description"
+                label="Description"
+                hint="Optional"
+                value={form.description ?? ""}
+                onChange={(e) => set("description", e.target.value)}
+                disabled={saving}
+              />
+            </div>
+          </>
+        )}
       </section>
 
       <div className="flex justify-end gap-2">

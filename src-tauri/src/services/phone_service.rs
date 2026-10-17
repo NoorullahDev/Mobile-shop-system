@@ -245,6 +245,8 @@ pub fn restock(
             &[],
             &[],
             &[],
+            &[],
+            &[],
             None,
             None,
         )?;
@@ -339,6 +341,8 @@ pub fn add_imei(conn: &Connection, input: AddPhoneImeiInput) -> Result<PhoneImei
         pta_status,
         storage,
         battery_health_pct: input.battery_health_pct,
+        ram: None,
+        condition: None,
         cost_price: Some(phone.cost_price),
         sale_price: Some(phone.sale_price),
         sold_at: None,
@@ -688,5 +692,45 @@ mod tests {
             get(&conn, p.id).unwrap().category.as_deref(),
             Some("Charger")
         );
+    }
+
+    #[test]
+    fn list_reports_live_unit_stock_and_price_range() {
+        let conn = in_memory_conn();
+        let p = create(&conn, sample()).unwrap();
+        conn.execute(
+            "INSERT INTO phone_imeis (phone_id, imei, status, cost_price, sale_price, ram, condition) VALUES
+             (?1, '111111111111111', 'in_stock', 600.0, 700.0, '8GB', 'New'),
+             (?1, '222222222222222', 'in_stock', 600.0, 800.0, '12GB', 'Open Box'),
+             (?1, '333333333333333', 'sold', 600.0, 750.0, NULL, NULL)",
+            [p.id],
+        )
+        .unwrap();
+
+        let listed = list(&conn, None).unwrap();
+        let phone = listed.iter().find(|x| x.id == p.id).unwrap();
+        assert_eq!(phone.unit_in_stock, 2);
+        assert_eq!(phone.unit_sold, 1);
+        assert_eq!(phone.unit_sale_min, Some(700.0));
+        assert_eq!(phone.unit_sale_max, Some(800.0));
+
+        let units = list_imei(&conn, p.id).unwrap();
+        assert_eq!(units.len(), 3);
+        let first = units.iter().find(|u| u.imei == "111111111111111").unwrap();
+        assert_eq!(first.ram.as_deref(), Some("8GB"));
+        assert_eq!(first.condition.as_deref(), Some("New"));
+        assert_eq!(first.sale_price, Some(700.0));
+    }
+
+    #[test]
+    fn list_without_units_reports_zero_units_and_no_price_range() {
+        let conn = in_memory_conn();
+        let p = create(&conn, sample()).unwrap();
+        let listed = list(&conn, None).unwrap();
+        let phone = listed.iter().find(|x| x.id == p.id).unwrap();
+        assert_eq!(phone.unit_in_stock, 0);
+        assert_eq!(phone.unit_sold, 0);
+        assert_eq!(phone.unit_sale_min, None);
+        assert_eq!(phone.unit_sale_max, None);
     }
 }

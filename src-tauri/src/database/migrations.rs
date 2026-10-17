@@ -1459,6 +1459,24 @@ const MIGRATIONS: &[(&str, &str)] = &[
         WHERE cost_price IS NULL OR sale_price IS NULL;
         "#,
     ),
+    (
+        "0044_phone_unit_ram_condition",
+        r#"
+        -- RAM and condition describe the individual received handset, entered
+        -- on the purchase line. They are optional (older units stay NULL).
+        ALTER TABLE phone_imeis ADD COLUMN ram TEXT;
+        ALTER TABLE phone_imeis ADD COLUMN condition TEXT;
+        "#,
+    ),
+    (
+        "0045_sale_item_condition",
+        r#"
+        -- Condition of the exact physical unit at sale time, snapshotted onto
+        -- the invoice line so historical invoices stay correct even if the
+        -- product or unit is edited later. Optional (older lines stay NULL).
+        ALTER TABLE sale_items ADD COLUMN condition TEXT;
+        "#,
+    ),
 ];
 
 fn apply_range(conn: &Connection, upto: usize) -> Result<(), AppError> {

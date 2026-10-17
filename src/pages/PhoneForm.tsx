@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings } from "lucide-react";
+import { ChevronDown, Settings } from "lucide-react";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Select } from "../components/Select";
@@ -52,6 +52,7 @@ function Section({
 export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
   const { load: loadOptions, getOptionsByType } = usePhoneOptionStore();
   const [optionsModalOpen, setOptionsModalOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     loadOptions();
@@ -60,15 +61,6 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
   const brands = getOptionsByType("brand");
   const rams = getOptionsByType("ram");
   const networkTypes = getOptionsByType("network_type");
-  const conditions = getOptionsByType("condition");
-  const conditionRatings = getOptionsByType("condition_rating");
-  const bodyConditions = getOptionsByType("body_condition");
-  const screenConditions = getOptionsByType("screen_condition");
-  const cameraConditions = getOptionsByType("camera_condition");
-  const faceIds = getOptionsByType("face_id");
-  const speakers = getOptionsByType("speaker");
-  const chargers = getOptionsByType("charger");
-  const boxes = getOptionsByType("box_condition");
 
   const [form, setForm] = useState<CreatePhoneInput>({
     brand: initial?.brand ?? "",
@@ -108,8 +100,6 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
 
   const set = (key: keyof CreatePhoneInput, value: string | number | null) =>
     setForm((f) => ({ ...f, [key]: value }));
-
-  const showConditionDetails = !!form.condition && form.condition.trim() !== "New";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,227 +193,107 @@ export function PhoneForm({ onSubmit, onCancel, initial }: PhoneFormProps) {
             error={modelError ?? undefined}
             disabled={saving}
           />
-          <Input
-            name="variant"
-            label="Variant"
-            placeholder="e.g. Ultra, Pro Max"
-            value={form.variant ?? ""}
-            onChange={(e) => set("variant", e.target.value)}
-            disabled={saving}
-          />
-          <Select
-            name="condition"
-            label="Condition"
-            placeholder="— Select condition —"
-            options={mapOptions(conditions, "— Select condition —")}
-            value={form.condition ?? ""}
-            onChange={(e) => set("condition", e.target.value)}
-            disabled={saving}
-          />
-        </Section>
-
-        <Section index="2" title="Specifications">
-          <Select
-            name="ram"
-            label="RAM"
-            placeholder="— Select RAM —"
-            options={mapOptions(rams, "— Select RAM —")}
-            value={form.ram ?? ""}
-            onChange={(e) => set("ram", e.target.value)}
-            disabled={saving}
-          />
-          <Input
-            name="processor"
-            label="Processor"
-            placeholder="e.g. Octa-core"
-            value={form.processor ?? ""}
-            onChange={(e) => set("processor", e.target.value)}
-            disabled={saving}
-          />
-          <Input
-            name="chipset"
-            label="Chipset"
-            placeholder="e.g. Snapdragon 8 Gen 3"
-            value={form.chipset ?? ""}
-            onChange={(e) => set("chipset", e.target.value)}
-            disabled={saving}
-          />
-          <Select
-            name="network_type"
-            label="Network Type"
-            placeholder="— Select network —"
-            options={mapOptions(networkTypes, "— Select network —")}
-            value={form.network_type ?? ""}
-            onChange={(e) => set("network_type", e.target.value)}
-            disabled={saving}
-          />
-          <Input
-            name="battery_capacity"
-            label="Battery Capacity"
-            placeholder="e.g. 5000 mAh"
-            value={form.battery_capacity ?? ""}
-            onChange={(e) => set("battery_capacity", e.target.value)}
-            disabled={saving}
-          />
-        </Section>
-
-        <Section
-          index="3"
-          title="Device Condition"
-          description={
-            showConditionDetails
-              ? "Inspection details for this used / refurbished / open-box unit."
-              : 'Not required for new devices — switch Condition above to "Used", "Refurbished" or "Open Box" to inspect the unit.'
-          }
-        >
-          {showConditionDetails ? (
-            <>
-              <Select
-                name="condition_rating"
-                label="Overall Condition Rating"
-                placeholder="— Select rating —"
-                options={mapOptions(conditionRatings, "— Select rating —")}
-                value={form.condition_rating ?? ""}
-                onChange={(e) => set("condition_rating", e.target.value)}
-                disabled={saving}
-              />
-              <Select
-                name="body_condition"
-                label="Body Condition"
-                placeholder="— Select —"
-                options={mapOptions(bodyConditions, "— Select —")}
-                value={form.body_condition ?? ""}
-                onChange={(e) => set("body_condition", e.target.value)}
-                disabled={saving}
-              />
-              <Select
-                name="screen_condition"
-                label="Screen Condition"
-                placeholder="— Select —"
-                options={mapOptions(screenConditions, "— Select —")}
-                value={form.screen_condition ?? ""}
-                onChange={(e) => set("screen_condition", e.target.value)}
-                disabled={saving}
-              />
-              <Select
-                name="camera_condition"
-                label="Camera Condition"
-                placeholder="— Select —"
-                options={mapOptions(cameraConditions, "— Select —")}
-                value={form.camera_condition ?? ""}
-                onChange={(e) => set("camera_condition", e.target.value)}
-                disabled={saving}
-              />
-              <Select
-                name="face_id"
-                label="Face ID / Fingerprint"
-                placeholder="— Select —"
-                options={mapOptions(faceIds, "— Select —")}
-                value={form.face_id ?? ""}
-                onChange={(e) => set("face_id", e.target.value)}
-                disabled={saving}
-              />
-              <Select
-                name="speaker"
-                label="Speaker"
-                placeholder="— Select —"
-                options={mapOptions(speakers, "— Select —")}
-                value={form.speaker ?? ""}
-                onChange={(e) => set("speaker", e.target.value)}
-                disabled={saving}
-              />
-              <Select
-                name="charger"
-                label="Charger"
-                placeholder="— Select —"
-                options={mapOptions(chargers, "— Select —")}
-                value={form.charger ?? ""}
-                onChange={(e) => set("charger", e.target.value)}
-                disabled={saving}
-              />
-              <Select
-                name="box_condition"
-                label="Box"
-                placeholder="— Select —"
-                options={mapOptions(boxes, "— Select —")}
-                value={form.box_condition ?? ""}
-                onChange={(e) => set("box_condition", e.target.value)}
-                disabled={saving}
-              />
-              <div className="flex flex-col gap-1 md:col-span-2">
-                <label
-                  htmlFor="condition_notes"
-                  style={{ fontSize: "13px", fontWeight: 500, color: "#334155" }}
-                >
-                  Condition Notes
-                </label>
-                <textarea
-                  id="condition_notes"
-                  name="condition_notes"
-                  rows={3}
-                  placeholder="e.g. Charger cable slightly worn, small mark on the frame."
-                  value={form.condition_notes ?? ""}
-                  onChange={(e) => set("condition_notes", e.target.value)}
-                  disabled={saving}
-                  className="w-full rounded border bg-white px-3 py-2 text-[14px] outline-none transition-all placeholder:text-[#94A3B8]"
-                  style={{ borderColor: "#CBD5E1", color: "#0F172A", resize: "vertical" }}
-                />
-              </div>
-            </>
-          ) : (
-            <p className="text-[13px] text-slate-500 italic md:col-span-2">
-              No inspection needed — this device is catalogued as new.
-            </p>
-          )}
-        </Section>
-
-        <Section index="4" title="Product Code & Stock Alert">
-          <Input
-            name="sku"
-            label="SKU / Product Code"
-            placeholder="Optional"
-            value={form.sku ?? ""}
-            onChange={(e) => set("sku", e.target.value)}
-            disabled={saving}
-          />
-          <Input
-            name="low_stock_threshold"
-            label="Low Stock Alert At"
-            type="number"
-            min="0"
-            required
-            value={form.low_stock_threshold}
-            onChange={(e) => set("low_stock_threshold", parseInt(e.target.value) || 0)}
-            disabled={saving}
-          />
         </Section>
 
         <ProductImageInput value={form.image_paths ?? []} onChange={(paths)=>setForm(f=>({...f,image_paths:paths}))} disabled={saving}/>
 
-        <Section index="5" title="Pricing">
-          <Input
-            name="cost_price"
-            label="Purchase Price"
-            type="number"
-            min="0"
-            required
-            prefix="Rs."
-            value={form.cost_price}
-            onChange={(e) => set("cost_price", parseFloat(e.target.value) || 0)}
-            disabled={saving}
-          />
-          <Input
-            name="sale_price"
-            label="Sale Price"
-            type="number"
-            min="0"
-            required
-            prefix="Rs."
-            value={form.sale_price}
-            onChange={(e) => set("sale_price", parseFloat(e.target.value) || 0)}
-            disabled={saving}
-          />
-        </Section>
+        <section className="rounded-xl border border-[#E2E8F0] bg-white p-4">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-0.5">
+              <h3 className="text-[13px] font-bold uppercase tracking-wide text-[#0F172A]">
+                <span className="mr-2 text-blue-600">2</span>
+                Advanced Details
+              </h3>
+              <p className="text-[12px] text-slate-500">
+                Optional — variant, technical specifications, product code and stock alert.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              icon={
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+                />
+              }
+            >
+              {advancedOpen ? "Hide" : "Show"}
+            </Button>
+          </div>
+          {advancedOpen && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                name="variant"
+                label="Variant"
+                placeholder="e.g. Ultra, Pro Max"
+                value={form.variant ?? ""}
+                onChange={(e) => set("variant", e.target.value)}
+                disabled={saving}
+              />
+              <Select
+                name="ram"
+                label="RAM"
+                placeholder="— Select RAM —"
+                options={mapOptions(rams, "— Select RAM —")}
+                value={form.ram ?? ""}
+                onChange={(e) => set("ram", e.target.value)}
+                disabled={saving}
+              />
+              <Input
+                name="processor"
+                label="Processor"
+                placeholder="e.g. Octa-core"
+                value={form.processor ?? ""}
+                onChange={(e) => set("processor", e.target.value)}
+                disabled={saving}
+              />
+              <Input
+                name="chipset"
+                label="Chipset"
+                placeholder="e.g. Snapdragon 8 Gen 3"
+                value={form.chipset ?? ""}
+                onChange={(e) => set("chipset", e.target.value)}
+                disabled={saving}
+              />
+              <Select
+                name="network_type"
+                label="Network Type"
+                placeholder="— Select network —"
+                options={mapOptions(networkTypes, "— Select network —")}
+                value={form.network_type ?? ""}
+                onChange={(e) => set("network_type", e.target.value)}
+                disabled={saving}
+              />
+              <Input
+                name="battery_capacity"
+                label="Battery Capacity"
+                placeholder="e.g. 5000 mAh"
+                value={form.battery_capacity ?? ""}
+                onChange={(e) => set("battery_capacity", e.target.value)}
+                disabled={saving}
+              />
+              <Input
+                name="sku"
+                label="SKU / Product Code"
+                placeholder="Optional"
+                value={form.sku ?? ""}
+                onChange={(e) => set("sku", e.target.value)}
+                disabled={saving}
+              />
+              <Input
+                name="low_stock_threshold"
+                label="Low Stock Alert At"
+                type="number"
+                min="0"
+                value={form.low_stock_threshold}
+                onChange={(e) => set("low_stock_threshold", parseInt(e.target.value) || 0)}
+                disabled={saving}
+              />
+            </div>
+          )}
+        </section>
 
         <div className="mt-4 flex justify-end gap-3">
           <Button type="button" variant="secondary" onClick={onCancel} disabled={saving}>

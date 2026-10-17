@@ -1,10 +1,9 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::errors::AppError;
 use crate::models::accessory::{Accessory, CreateAccessoryInput};
 use crate::repositories::accessory_repository;
 use crate::services;
-use crate::services::product_category_service;
 
 fn normalize(input: CreateAccessoryInput) -> Result<CreateAccessoryInput, AppError> {
     let brand = input.brand.trim().to_string();
@@ -45,13 +44,43 @@ fn normalize(input: CreateAccessoryInput) -> Result<CreateAccessoryInput, AppErr
     })
 }
 
+/// Validates that the chosen accessory category exists in the `phone_options`
+/// table (option_type = 'accessory_category') or `product_categories`.
+/// The dropdown in AccessoryForm is populated from `phone_options`, while
+/// legacy data / seeds may reference `product_categories`.
 fn validate_category(conn: &Connection, category: &str) -> Result<(), AppError> {
-    if !product_category_service::category_exists(conn, category)? {
-        return Err(AppError::validation(
-            "Selected category does not exist. Add it under 'Manage Categories'.",
-        ));
+    let exists_in_options: bool = conn
+        .query_row(
+            "SELECT 1 FROM phone_options \
+             WHERE option_type = 'accessory_category' AND value = ?1 COLLATE NOCASE LIMIT 1",
+            [category],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(AppError::from)?
+        .unwrap_or(false);
+
+    if exists_in_options {
+        return Ok(());
     }
-    Ok(())
+
+    let exists_in_categories: bool = conn
+        .query_row(
+            "SELECT 1 FROM product_categories WHERE name = ?1 COLLATE NOCASE LIMIT 1",
+            [category],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(AppError::from)?
+        .unwrap_or(false);
+
+    if exists_in_categories {
+        return Ok(());
+    }
+
+    Err(AppError::validation(
+        "Selected category does not exist. Add it under 'Manage Dropdown Options'.",
+    ))
 }
 
 pub fn create(conn: &Connection, input: CreateAccessoryInput) -> Result<Accessory, AppError> {
@@ -131,7 +160,7 @@ pub fn restock(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::test_utils::{in_memory_conn, seed_product_categories};
+    use crate::services::test_utils::{in_memory_conn, seed_accessory_categories};
 
     fn sample() -> CreateAccessoryInput {
         CreateAccessoryInput {
@@ -159,7 +188,7 @@ mod tests {
     #[test]
     fn create_and_get() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let a = create(&conn, sample()).unwrap();
         let got = get(&conn, a.id).unwrap();
         assert_eq!(got.brand, "Spigen");
@@ -170,7 +199,7 @@ mod tests {
     #[test]
     fn accepts_empty_brand() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let mut i = sample();
         i.brand = "  ".into();
         let accessory = create(&conn, i).unwrap();
@@ -181,7 +210,7 @@ mod tests {
     #[test]
     fn requires_product_and_type() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let mut i = sample();
         i.product_name = "".into();
         assert!(matches!(
@@ -199,7 +228,7 @@ mod tests {
     #[test]
     fn trims_fields() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let mut i = sample();
         i.accessory_type = "  Power Bank ".into();
         i.compatible_models = Some("  Samsung  ".into());
@@ -211,7 +240,7 @@ mod tests {
     #[test]
     fn list_filters_by_search() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         create(&conn, sample()).unwrap();
         let mut c = sample();
         c.product_name = "USB Cable".into();
@@ -223,7 +252,7 @@ mod tests {
     #[test]
     fn optional_serial_is_unique_and_searchable() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let mut first = sample();
         first.serial_number = Some(" ear-001 ".into());
         create(&conn, first).unwrap();
@@ -240,7 +269,7 @@ mod tests {
     #[test]
     fn soft_delete_hides() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let a = create(&conn, sample()).unwrap();
         soft_delete(&conn, a.id, None).unwrap();
         assert!(get(&conn, a.id).is_err());
@@ -250,7 +279,7 @@ mod tests {
     #[test]
     fn restock_adds_quantity() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let a = create(&conn, sample()).unwrap();
         restock(&conn, a.id, 5, None).unwrap();
         assert_eq!(get(&conn, a.id).unwrap().quantity, 15);
@@ -259,7 +288,7 @@ mod tests {
     #[test]
     fn unknown_category_rejected() {
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let mut i = sample();
         i.accessory_type = "Gadget Hub".into();
         let err = create(&conn, i).unwrap_err();

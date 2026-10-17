@@ -1477,7 +1477,7 @@ mod tests {
             let versions: i64 = v2
                 .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(versions, 43);
+            assert_eq!(versions, 45);
 
             // License preserved: the backup cannot replace this machine's activation.
             let license_key: String = v2

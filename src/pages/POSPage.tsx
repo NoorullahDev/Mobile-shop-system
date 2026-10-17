@@ -46,6 +46,21 @@ function loadPosProductImage(path: string) {
   return pending;
 }
 
+function formatUnitPriceRange(
+  prices: Array<number | null | undefined>,
+  fallback: number,
+) {
+  const positive = prices.filter(
+    (price): price is number => price != null && price > 0,
+  );
+  if (positive.length === 0) return formatMoneyCompact(fallback);
+  const min = Math.min(...positive);
+  const max = Math.max(...positive);
+  return min === max
+    ? formatMoneyCompact(min)
+    : `${formatMoneyCompact(min)} – ${formatMoneyCompact(max)}`;
+}
+
 function POSProductThumbnail({ product }: { product: Product }) {
   const imagePath = product.image_paths?.[0];
   const [src, setSrc] = useState<string | null>(null);
@@ -456,7 +471,7 @@ export function POSPage() {
         item_id: l.item_id,
         quantity: l.quantity,
         imei_id: l.imei_id ?? null,
-        unit_price: l.unit_price > 0 ? l.unit_price : null,
+        unit_price: l.unit_price,
         warranty: l.warranty || null,
         warranty_expiry: l.warranty === "custom" ? l.custom_warranty_expiry || null : l.warranty_expiry,
       })),
@@ -609,6 +624,10 @@ export function POSPage() {
                   (unit) => !cart.some((line) => line.imei_id === unit.id),
                 );
                 const trackedPhone = p.item_type === "phone" && trackedPhoneByItem[p.item_id] === true;
+                const priceLabel = formatUnitPriceRange(
+                  phoneUnits.map((unit) => unit.sale_price),
+                  p.sale_price,
+                );
                 const availableCount = trackedPhone
                   ? remainingPhoneUnits.length
                   : Math.max(0, p.quantity - inCartQuantity);
@@ -659,7 +678,7 @@ export function POSPage() {
                     <div className="mt-2 flex items-end justify-between px-3 pb-3">
                       <div>
                         <div className="text-[15px] font-bold" style={{ color: "#0F172A" }}>
-                          {formatMoneyCompact(p.sale_price)}
+                          {priceLabel}
                         </div>
                         {inCart && (
                           <div className="text-[11px]" style={{ color: "#3B6FD4" }}>
@@ -737,7 +756,7 @@ export function POSPage() {
                           <div className="truncate text-[13px] font-semibold" style={{ color: "#0F172A" }}>
                             {product ? `${product.brand} ${product.model}` : "Product"}
                           </div>
-                          {!trackedPhone && (
+                          {!canApplyDiscount && (
                             <div className="text-[11px]" style={{ color: "#94A3B8" }}>
                               {formatMoney(l.unit_price)} each
                             </div>
@@ -823,6 +842,22 @@ export function POSPage() {
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
+
+                      {canApplyDiscount && (
+                        <div className="mt-2">
+                          <Input
+                            label="Unit Price (Rs)"
+                            type="number"
+                            min={0}
+                            value={l.unit_price}
+                            onChange={(e) =>
+                              updateLine(l.key, {
+                                unit_price: Math.max(0, roundMoney(Number(e.target.value) || 0)),
+                              })
+                            }
+                          />
+                        </div>
+                      )}
 
                       {l.item_type === "phone" && (
                         <>

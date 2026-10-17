@@ -26,6 +26,7 @@ struct Line {
     pta_status: Option<String>,
     storage: Option<String>,
     battery_health_pct: Option<i64>,
+    condition: Option<String>,
     product_name_snapshot: Option<String>,
     variant_snapshot: Option<String>,
 }
@@ -149,7 +150,7 @@ fn prepare(
             None
         };
         let unit_price = match item.unit_price {
-            Some(p) if p > 0.0 => p,
+            Some(p) if p.is_finite() && p >= 0.0 => p,
             _ => {
                 let p = unit_pricing
                     .and_then(|(_, sale_price)| sale_price)
@@ -266,13 +267,13 @@ fn prepare(
         } else {
             None
         };
-        let (storage, battery_health_pct) = if item_type == "phone" {
+        let (storage, battery_health_pct, condition) = if item_type == "phone" {
             match line_imei {
                 Some(imei_id) => sale_repository::imei_unit_details(conn, imei_id)?,
-                None => (None, None),
+                None => (None, None, None),
             }
         } else {
-            (None, None)
+            (None, None, None)
         };
         let (product_name_snapshot, variant_snapshot) =
             sale_repository::item_sale_identity(conn, &item_type, item.item_id)?;
@@ -292,6 +293,7 @@ fn prepare(
             pta_status,
             storage,
             battery_health_pct,
+            condition,
             product_name_snapshot,
             variant_snapshot,
         });
@@ -449,6 +451,7 @@ pub fn create_tx(
             line.battery_health_pct,
             line.product_name_snapshot.as_deref(),
             line.variant_snapshot.as_deref(),
+            line.condition.as_deref(),
         )?;
 
         if !sale_repository::decrement_stock(tx, &line.item_type, line.item_id, line.quantity)? {
@@ -561,6 +564,7 @@ pub fn update(
             line.pta_status = old_line.pta_status.clone();
             line.storage = old_line.storage.clone();
             line.battery_health_pct = old_line.battery_health_pct;
+            line.condition = old_line.condition.clone();
             line.product_name_snapshot = old_line.product_name.clone();
             line.variant_snapshot = old_line.variant.clone();
         }
@@ -636,6 +640,7 @@ pub fn update(
                 line.battery_health_pct,
                 line.product_name_snapshot.as_deref(),
                 line.variant_snapshot.as_deref(),
+                line.condition.as_deref(),
             )?;
         } else {
             sale_repository::insert_sale_item(
@@ -657,6 +662,7 @@ pub fn update(
                 line.battery_health_pct,
                 line.product_name_snapshot.as_deref(),
                 line.variant_snapshot.as_deref(),
+                line.condition.as_deref(),
             )?;
         }
         if !sale_repository::decrement_stock(&tx, &line.item_type, line.item_id, line.quantity)? {
@@ -714,9 +720,18 @@ pub fn delete(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppE
 
 pub fn delete_tx(tx: &rusqlite::Transaction, id: i64) -> Result<(), AppError> {
     let sale = get(tx, id)?;
+    // Exchange sales that were funded by this sale's returns must be reversed
+    // too. Otherwise deleting the original sale removes the returns but leaves
+    // the exchange sale standing with an unmatched exchange_credit payment.
+    let exchange_sale_ids = product_return_repository::exchange_sale_ids_for_sale(tx, id)?;
     let sale_item_ids: Vec<i64> = sale.items.iter().map(|item| item.id).collect();
     let restocked = product_return_repository::restocked_qty_by_sale_items(tx, &sale_item_ids)?;
     product_return_repository::delete_for_sale(tx, id)?;
+    for exchange_id in exchange_sale_ids {
+        if exchange_id != id {
+            delete_tx(tx, exchange_id)?;
+        }
+    }
     sale_payment_repository::delete_payments_for_sale(tx, id)?;
     for item in &sale.items {
         let net_restore = item.quantity - restocked.get(&item.id).copied().unwrap_or(0);
@@ -1259,9 +1274,9 @@ mod tests {
     fn sells_accessory_and_reduces_stock() {
         use crate::models::accessory::CreateAccessoryInput;
         use crate::services::accessory_service;
-        use crate::services::test_utils::seed_product_categories;
+        use crate::services::test_utils::seed_accessory_categories;
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let aid = accessory_service::create(
             &conn,
             CreateAccessoryInput {

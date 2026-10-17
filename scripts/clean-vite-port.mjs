@@ -21,8 +21,10 @@
 //   MSS_VITE_PORT            port to inspect (default 1420)
 //   MSS_VITE_CLEAN_DRY_RUN   "1" prints what would be killed without killing
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import net from "node:net";
+import readline from "node:readline";
 
 const PORT = Number(process.env.MSS_VITE_PORT || 1420);
 const DRY_RUN = process.env.MSS_VITE_CLEAN_DRY_RUN === "1";
@@ -38,30 +40,57 @@ function portOfLocalAddress(local) {
   return Number(local.split(":").pop());
 }
 
-function listenerPids() {
-  const pids = new Set();
-  if (WINDOWS) {
-    const out = execFileSync("netstat", ["-ano"], { encoding: "utf8" });
-    for (const line of out.split(/\r?\n/)) {
-      const m = line.trim().match(/^TCP\s+(\S+)\s+(\S+)\s+LISTENING\s+(\d+)$/i);
-      if (!m) continue;
-      const pid = Number(m[3]);
-      if (pid > 0 && portOfLocalAddress(m[1]) === PORT) pids.add(pid);
-    }
-  } else {
-    try {
-      const out = execFileSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"], {
-        encoding: "utf8",
-      });
-      for (const line of out.split(/\r?\n/).slice(1)) {
-        const pid = Number(line.trim().split(/\s+/)[1]);
-        if (Number.isFinite(pid) && pid > 0) pids.add(pid);
+function checkPortFree(port) {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        resolve(false);
+      } else {
+        reject(err);
       }
-    } catch {
-      /* lsof unavailable: nothing detected */
-    }
+    });
+    s.listen(port, () => {
+      s.close(() => resolve(true));
+    });
+  });
+}
+
+function listenerPids() {
+  if (WINDOWS) {
+    return new Promise((resolve) => {
+      const pids = new Set();
+      try {
+        const cp = spawn("netstat", ["-ano"]);
+        const rl = readline.createInterface({ input: cp.stdout });
+        rl.on("line", (line) => {
+          const m = line.trim().match(/^TCP\s+(\S+)\s+(\S+)\s+LISTENING\s+(\d+)$/i);
+          if (!m) return;
+          const pid = Number(m[3]);
+          if (pid > 0 && portOfLocalAddress(m[1]) === PORT) pids.add(pid);
+        });
+        cp.on("error", () => resolve([...pids]));
+        rl.on("close", () => resolve([...pids]));
+      } catch {
+        resolve([...pids]);
+      }
+    });
   }
-  return [...pids];
+
+  const pids = new Set();
+  try {
+    const out = execFileSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    for (const line of out.split(/\r?\n/).slice(1)) {
+      const pid = Number(line.trim().split(/\s+/)[1]);
+      if (Number.isFinite(pid) && pid > 0) pids.add(pid);
+    }
+  } catch {
+    /* lsof unavailable: nothing detected */
+  }
+  return Promise.resolve([...pids]);
 }
 
 function commandLineOf(pid) {
@@ -109,31 +138,44 @@ function killTree(pid) {
   }
 }
 
-const pids = listenerPids();
-if (pids.length === 0) {
-  console.log(`clean-vite-port: port ${PORT} is free`);
+async function main() {
+  const isFree = await checkPortFree(PORT);
+  if (isFree) {
+    console.log(`clean-vite-port: port ${PORT} is free`);
+    process.exit(0);
+  }
+
+  const pids = await listenerPids();
+  if (pids.length === 0) {
+    console.log(`clean-vite-port: port ${PORT} is free`);
+    process.exit(0);
+  }
+
+  let killed = 0;
+  let waiting = 0;
+  for (const pid of pids) {
+    const cmd = commandLineOf(pid);
+    if (!IS_VITE.test(cmd)) {
+      console.warn(`clean-vite-port: NOT touching PID ${pid} on port ${PORT} (command line is not Vite: ${cmd.slice(0, 60)})`);
+      continue;
+    }
+    waiting++;
+    if (DRY_RUN) {
+      console.log(`clean-vite-port: [dry run] would kill stale Vite PID ${pid} on port ${PORT}`);
+      continue;
+    }
+    if (killTree(pid)) {
+      console.log(`clean-vite-port: killed stale Vite PID ${pid} on port ${PORT}`);
+      killed++;
+    } else {
+      console.warn(`clean-vite-port: FAILED to kill PID ${pid} on port ${PORT} — it may be running elevated`);
+    }
+  }
+
+  process.exit(waiting === killed ? 0 : 1);
+}
+
+main().catch((err) => {
+  console.warn(`clean-vite-port: non-fatal warning (${err?.message || err}), continuing dev startup`);
   process.exit(0);
-}
-
-let killed = 0;
-let waiting = 0;
-for (const pid of pids) {
-  const cmd = commandLineOf(pid);
-  if (!IS_VITE.test(cmd)) {
-    console.warn(`clean-vite-port: NOT touching PID ${pid} on port ${PORT} (command line is not Vite: ${cmd.slice(0, 60)})`);
-    continue;
-  }
-  waiting++;
-  if (DRY_RUN) {
-    console.log(`clean-vite-port: [dry run] would kill stale Vite PID ${pid} on port ${PORT}`);
-    continue;
-  }
-  if (killTree(pid)) {
-    console.log(`clean-vite-port: killed stale Vite PID ${pid} on port ${PORT}`);
-    killed++;
-  } else {
-    console.warn(`clean-vite-port: FAILED to kill PID ${pid} on port ${PORT} — it may be running elevated`);
-  }
-}
-
-process.exit(waiting === killed ? 0 : 1);
+});

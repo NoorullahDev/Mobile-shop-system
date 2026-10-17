@@ -651,7 +651,7 @@ mod tests {
     use crate::repositories::phone_repository;
     use crate::services::{
         accessory_service, phone_service, sale_service,
-        test_utils::{in_memory_conn, seed_product_categories},
+        test_utils::{in_memory_conn, seed_accessory_categories},
     };
 
     fn phone(conn: &Connection, qty: i64, price: f64) -> i64 {
@@ -763,7 +763,7 @@ mod tests {
     }
 
     fn accessory(conn: &Connection) -> i64 {
-        seed_product_categories(conn);
+        seed_accessory_categories(conn);
         accessory_service::create(
             conn,
             CreateAccessoryInput {
@@ -1431,5 +1431,53 @@ mod tests {
         let again = get(&conn, created.id).unwrap();
         assert_eq!(again.total_sale_price, 150.0);
         assert_eq!(again.refund_amount, 30.0);
+    }
+
+    #[test]
+    fn deleting_original_sale_also_reverses_its_exchange_sale() {
+        let conn = in_memory_conn();
+        let (_, iid_a) = sell_imei_phone(&conn);
+        let sale =
+            sale_service::get(&conn, sale_service::list(&conn, None).unwrap()[0].id).unwrap();
+        let sale_item_id = sale.items[0].id;
+
+        let pid_b = phone(&conn, 3, 120.0);
+        let iid_b = add_imei_to(&conn, pid_b, "222222222222222");
+        let stock_before = phone_service::get(&conn, pid_b).unwrap().quantity;
+
+        let mut exchange = return_input(sale.id, sale_item_id, 1, "sellable");
+        exchange.items[0].imei_id = Some(iid_a);
+        exchange.return_type = "exchange".into();
+        exchange.exchange_item = Some(CreateSaleInput {
+            member_id: None,
+            discount: 0.0,
+            paid_amount: None,
+            payment_method: Some("cash".into()),
+            notes: None,
+            payments: vec![],
+            items: vec![SaleItemInput {
+                sale_item_id: None,
+                item_type: "phone".into(),
+                item_id: pid_b,
+                quantity: 1,
+                imei_id: Some(iid_b),
+                unit_price: None,
+                warranty: None,
+                warranty_expiry: None,
+            }],
+        });
+
+        let created = create(&conn, exchange, None).unwrap();
+        let exchange_sale_id = created.exchange_sale_id.expect("exchange sale created");
+        assert!(sale_service::get(&conn, exchange_sale_id).is_ok());
+        assert_eq!(phone_service::get(&conn, pid_b).unwrap().quantity, stock_before - 1);
+
+        sale_service::delete(&conn, sale.id, None).unwrap();
+
+        assert!(sale_service::get(&conn, sale.id).is_err());
+        assert!(sale_service::get(&conn, exchange_sale_id).is_err());
+        assert!(list(&conn, None).unwrap().is_empty());
+        assert_eq!(phone_service::get(&conn, pid_b).unwrap().quantity, stock_before);
+        assert_eq!(imei_status_of(&conn, iid_b), "in_stock");
     }
 }

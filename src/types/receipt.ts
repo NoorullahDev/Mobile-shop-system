@@ -69,6 +69,7 @@ export interface ReceiptItemData {
   pta_status?: string | null;
   storage?: string | null;
   battery_health_pct?: number | null;
+  condition?: string | null;
   qty: number;
   price: number;
   total: number;

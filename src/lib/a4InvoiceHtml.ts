@@ -18,6 +18,7 @@ export function buildA4InvoiceInner(data: ReceiptData): string {
           ${it.storage ? `<br><span style="font-size:11px;color:#6B7280">Storage: ${esc(it.storage)}</span>` : ""}
           ${it.battery_health_pct != null ? `<br><span style="font-size:11px;color:#6B7280">Battery Health: ${it.battery_health_pct}%</span>` : ""}
           ${it.pta_status ? `<br><span style="font-size:11px;color:#6B7280">PTA Status: ${esc(it.pta_status)}</span>` : ""}
+          ${it.condition ? `<br><span style="font-size:11px;color:#6B7280">Condition: ${esc(it.condition)}</span>` : ""}
           ${it.serial ? `<br><span style="font-size:11px;color:#6B7280">Serial: ${esc(it.serial)}</span>` : ""}
           ${it.imei ? `<br><span style="font-size:11px;color:#6B7280">IMEI 1: ${esc(it.imei)}</span>` : ""}
           ${it.imei2 ? `<br><span style="font-size:11px;color:#6B7280">IMEI 2: ${esc(it.imei2)}</span>` : ""}

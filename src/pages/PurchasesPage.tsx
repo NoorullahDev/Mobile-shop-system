@@ -544,6 +544,10 @@ export function PurchasesPage() {
                                     {it.imei_colors?.[index] && <span> · {it.imei_colors[index]}</span>}
                                     {it.imei_pta_statuses?.[index] && <span> · {it.imei_pta_statuses[index]}</span>}
                                     {it.imei_storages?.[index] && <span> · {it.imei_storages[index]}</span>}
+                                    {it.imei_rams?.[index] && <span> · RAM {it.imei_rams[index]}</span>}
+                                    {it.imei_conditions?.[index] && (
+                                      <span> · {it.imei_conditions[index]}</span>
+                                    )}
                                     {it.imei_battery_healths?.[index] != null && (
                                       <span> · Battery {it.imei_battery_healths[index]}%</span>
                                     )}

@@ -79,6 +79,9 @@ pub struct SaleItem {
     /// Battery health of the exact physical unit, snapshotted at sale time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub battery_health_pct: Option<i64>,
+    /// Condition of the exact physical unit, snapshotted at sale time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

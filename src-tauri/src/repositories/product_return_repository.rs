@@ -329,6 +329,25 @@ pub fn recalculate_for_sale(conn: &Connection, sale_id: i64) -> Result<(), AppEr
     Ok(())
 }
 
+/// Exchange sales that were created from returns of the given sale. Deleting
+/// the original sale must reverse these too, otherwise they would survive with
+/// an unmatched `exchange_credit` payment and never-reversed inventory effects.
+pub fn exchange_sale_ids_for_sale(
+    conn: &Connection,
+    sale_id: i64,
+) -> Result<Vec<i64>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT exchange_sale_id FROM returns
+         WHERE sale_id = ?1 AND exchange_sale_id IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([sale_id], |r| r.get::<_, i64>(0))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
 pub fn delete_for_sale(conn: &Connection, sale_id: i64) -> Result<(), AppError> {
     conn.execute(
         "DELETE FROM return_items WHERE return_id IN (SELECT id FROM returns WHERE sale_id = ?1)",

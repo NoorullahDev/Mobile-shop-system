@@ -440,6 +440,8 @@ fn seed_all(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
                 imei_pta_statuses: vec!["approved".to_string(); *qty as usize],
                 imei_storages: vec![spec.storage.to_string(); *qty as usize],
                 imei_battery_healths: vec![Some(100); *qty as usize],
+                imei_rams: vec![spec.ram.to_string(); *qty as usize],
+                imei_conditions: vec!["New".to_string(); *qty as usize],
                 imei_unit_costs: Vec::new(),
                 imei_sale_prices: Vec::new(),
             });
@@ -461,6 +463,8 @@ fn seed_all(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
                 imei_pta_statuses: Vec::new(),
                 imei_storages: Vec::new(),
                 imei_battery_healths: Vec::new(),
+                imei_rams: Vec::new(),
+                imei_conditions: Vec::new(),
                 imei_unit_costs: Vec::new(),
                 imei_sale_prices: Vec::new(),
             });

@@ -55,6 +55,10 @@ pub struct Line {
     pub imei_pta_statuses: Vec<Option<String>>,
     pub imei_storages: Vec<Option<String>>,
     pub imei_battery_healths: Vec<Option<i64>>,
+    /// Unit RAM aligned positionally with `imeis` (phone lines only).
+    pub imei_rams: Vec<Option<String>>,
+    /// Unit condition aligned positionally with `imeis` (phone lines only).
+    pub imei_conditions: Vec<Option<String>>,
     /// Resolved unit cost per physical unit (phone lines only): the per-unit
     /// override when present, otherwise the line's default unit cost.
     pub imei_costs: Vec<f64>,
@@ -125,6 +129,8 @@ pub fn prepare_purchase_lines(
         let mut imei_pta_statuses: Vec<Option<String>> = Vec::new();
         let mut imei_storages: Vec<Option<String>> = Vec::new();
         let mut imei_battery_healths: Vec<Option<i64>> = Vec::new();
+        let mut imei_rams: Vec<Option<String>> = Vec::new();
+        let mut imei_conditions: Vec<Option<String>> = Vec::new();
         let mut imei_costs: Vec<f64> = Vec::new();
         let mut imei_sale_prices: Vec<Option<f64>> = Vec::new();
         if item_type == "phone" {
@@ -197,6 +203,18 @@ pub fn prepare_purchase_lines(
                     }
                 }
                 imei_battery_healths.push(battery_health);
+                imei_rams.push(
+                    item.imei_rams
+                        .get(i)
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty()),
+                );
+                imei_conditions.push(
+                    item.imei_conditions
+                        .get(i)
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty()),
+                );
                 // Resolve this unit's prices: per-unit override when given,
                 // otherwise the line's default values keep "fast entry".
                 let per_unit_cost = item.imei_unit_costs.get(i).copied().flatten();
@@ -265,6 +283,8 @@ pub fn prepare_purchase_lines(
             imei_pta_statuses,
             imei_storages,
             imei_battery_healths,
+            imei_rams,
+            imei_conditions,
             imei_costs,
             imei_sale_prices,
         });
@@ -395,6 +415,8 @@ pub fn create_purchase(
                 &line.imei_pta_statuses,
                 &line.imei_storages,
                 &line.imei_battery_healths,
+                &line.imei_rams,
+                &line.imei_conditions,
                 Some(&line.imei_costs),
                 Some(&line.imei_sale_prices),
             )?;
@@ -650,6 +672,8 @@ pub fn update_purchase(
                 &line.imei_pta_statuses,
                 &line.imei_storages,
                 &line.imei_battery_healths,
+                &line.imei_rams,
+                &line.imei_conditions,
                 Some(&line.imei_costs),
                 Some(&line.imei_sale_prices),
             )?;
@@ -896,6 +920,8 @@ mod tests {
                 imei_pta_statuses: Vec::new(),
                 imei_storages: Vec::new(),
                 imei_battery_healths: Vec::new(),
+                imei_rams: Vec::new(),
+                imei_conditions: Vec::new(),
                 imei_unit_costs: Vec::new(),
                 imei_sale_prices: Vec::new(),
             }],
@@ -995,6 +1021,93 @@ mod tests {
     }
 
     #[test]
+    fn purchase_stores_per_unit_ram_and_condition_with_mixed_prices() {
+        let conn = in_memory_conn();
+        let iid = phone_item(&conn, None);
+        let mut input = purchase_input(iid, None);
+        input.items[0].quantity = 3;
+        input.items[0].imeis = vec![
+            "700000000000001".into(),
+            "700000000000002".into(),
+            "700000000000003".into(),
+        ];
+        input.items[0].imei_colors = vec!["Black".into(), "Blue".into(), "Black".into()];
+        input.items[0].imei_storages = vec!["128GB".into(), "256GB".into(), "256GB".into()];
+        input.items[0].imei_rams = vec!["6GB".into(), "8GB".into(), "8GB".into()];
+        input.items[0].imei_conditions =
+            vec!["New".into(), "Refurbished".into(), "Used".into()];
+        input.items[0].imei_unit_costs = vec![Some(100.0), Some(150.0), Some(80.0)];
+        input.items[0].imei_sale_prices = vec![Some(140.0), Some(200.0), Some(120.0)];
+        input.paid_amount = Some(330.0);
+
+        let purchase = create_purchase(&conn, input, None).unwrap();
+
+        // Purchase line total === sum of each unit's own cost.
+        assert_eq!(purchase.total_amount, 330.0);
+        assert_eq!(purchase.items[0].line_total, 330.0);
+        assert_eq!(purchase.items[0].imei_rams, vec!["6GB", "8GB", "8GB"]);
+        assert_eq!(
+            purchase.items[0].imei_conditions,
+            vec!["New", "Refurbished", "Used"]
+        );
+        assert_eq!(
+            purchase.items[0].imei_costs,
+            vec![100.0, 150.0, 80.0]
+        );
+
+        // Each physical unit keeps its own RAM/condition in the inventory table.
+        let stored: Vec<(String, Option<String>, Option<String>, Option<f64>)> = conn
+            .prepare("SELECT imei, ram, condition, sale_price FROM phone_imeis WHERE phone_id = ?1 ORDER BY imei")
+            .unwrap()
+            .query_map(params![iid], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(stored[0].1.as_deref(), Some("6GB"));
+        assert_eq!(stored[0].2.as_deref(), Some("New"));
+        assert_eq!(stored[0].3, Some(140.0));
+        assert_eq!(stored[1].1.as_deref(), Some("8GB"));
+        assert_eq!(stored[1].2.as_deref(), Some("Refurbished"));
+        assert_eq!(stored[1].3, Some(200.0));
+        assert_eq!(stored[2].2.as_deref(), Some("Used"));
+
+        // Editing the purchase round-trips the per-unit RAM/condition.
+        let mut edited = purchase_input(iid, None);
+        edited.items[0].quantity = 3;
+        edited.items[0].imeis = vec![
+            "700000000000001".into(),
+            "700000000000002".into(),
+            "700000000000003".into(),
+        ];
+        edited.items[0].imei_storages = vec!["128GB".into(), "256GB".into(), "256GB".into()];
+        edited.items[0].imei_rams = vec!["6GB".into(), "12GB".into(), "8GB".into()];
+        edited.items[0].imei_conditions =
+            vec!["New".into(), "Open Box".into(), "Used".into()];
+        edited.items[0].imei_unit_costs = vec![Some(100.0), Some(160.0), Some(80.0)];
+        edited.items[0].imei_sale_prices = vec![Some(140.0), Some(210.0), Some(120.0)];
+        edited.paid_amount = Some(340.0);
+        let updated = update_purchase(&conn, purchase.id, edited, None).unwrap();
+
+        assert_eq!(updated.items[0].imei_rams, vec!["6GB", "12GB", "8GB"]);
+        assert_eq!(
+            updated.items[0].imei_conditions,
+            vec!["New", "Open Box", "Used"]
+        );
+        assert_eq!(updated.items[0].line_total, 340.0);
+
+        let re_stored: Option<String> = conn
+            .query_row(
+                "SELECT condition FROM phone_imeis WHERE phone_id = ?1 AND imei = '700000000000002'",
+                params![iid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(re_stored.as_deref(), Some("Open Box"));
+    }
+
+    #[test]
     fn phone_master_purchase_and_sale_share_the_same_physical_units() {
         let conn = in_memory_conn();
         let phone = phone_service::create(
@@ -1030,6 +1143,7 @@ mod tests {
             vec!["PTA Approved".into(), "Non-PTA".into(), "JV".into()];
         input.items[0].imei_storages = vec!["256GB".into(), "128GB".into(), "256GB".into()];
         input.items[0].imei_battery_healths = vec![Some(92), Some(88), Some(78)];
+        input.items[0].imei_conditions = vec!["New".into(), "Open Box".into(), "Used".into()];
 
         let purchase = create_purchase(&conn, input, None).unwrap();
         assert_eq!(purchase.items[0].item_id, phone.id);
@@ -1041,10 +1155,12 @@ mod tests {
         assert_eq!(units[0].pta_status.as_deref(), Some("PTA Approved"));
         assert_eq!(units[0].storage.as_deref(), Some("256GB"));
         assert_eq!(units[0].battery_health_pct, Some(92));
+        assert_eq!(units[0].condition.as_deref(), Some("New"));
         assert_eq!(units[1].color.as_deref(), Some("Green"));
         assert_eq!(units[1].pta_status.as_deref(), Some("Non-PTA"));
         assert_eq!(units[1].storage.as_deref(), Some("128GB"));
         assert_eq!(units[1].battery_health_pct, Some(88));
+        assert_eq!(units[1].condition.as_deref(), Some("Open Box"));
 
         let sold_unit_id = units[1].id;
         let sale = sale_service::create(
@@ -1083,11 +1199,12 @@ mod tests {
         assert_eq!(sale.items[0].pta_status.as_deref(), Some("Non-PTA"));
         assert_eq!(sale.items[0].storage.as_deref(), Some("128GB"));
         assert_eq!(sale.items[0].battery_health_pct, Some(88));
+        assert_eq!(sale.items[0].condition.as_deref(), Some("Open Box"));
 
         // Completed invoices must keep their sale-time unit snapshot even if
         // the inventory unit is edited later.
         conn.execute(
-            "UPDATE phone_imeis SET imei = '159999999999999', imei2 = NULL, color = 'Gold', pta_status = 'JV', storage = '1TB', battery_health_pct = 50 WHERE id = ?1",
+            "UPDATE phone_imeis SET imei = '159999999999999', imei2 = NULL, color = 'Gold', pta_status = 'JV', storage = '1TB', battery_health_pct = 50, condition = 'Refurbished' WHERE id = ?1",
             [sold_unit_id],
         )
         .unwrap();
@@ -1099,6 +1216,7 @@ mod tests {
         assert_eq!(historical_unit.pta_status.as_deref(), Some("Non-PTA"));
         assert_eq!(historical_unit.storage.as_deref(), Some("128GB"));
         assert_eq!(historical_unit.battery_health_pct, Some(88));
+        assert_eq!(historical_unit.condition.as_deref(), Some("Open Box"));
     }
 
     #[test]
@@ -1700,6 +1818,103 @@ mod tests {
     }
 
     #[test]
+    fn force_delete_keeps_returned_unit_linked_to_its_history() {
+        // A unit sold and then returned (sellable) is back `in_stock` yet its
+        // invoice and return rows still reference it. Force-deleting the
+        // purchase must reverse only the untouched unit and leave the returned
+        // unit on stock, so those historical records are never orphaned.
+        use crate::models::product_return::{CreateReturnInput, ReturnItemInput};
+        use crate::models::sale::{CreateSaleInput, SaleItemInput};
+        use crate::services::product_return_service;
+
+        let conn = in_memory_conn();
+        let phone_id = phone_service::create(
+            &conn,
+            CreatePhoneInput {
+                brand: "Apple".into(),
+                model: "16PM".into(),
+                quantity: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id;
+
+        let purchase = create_purchase(&conn, purchase_input(phone_id, None), None).unwrap();
+        let units = phone_service::list_imei(&conn, phone_id).unwrap();
+        assert_eq!(units.len(), 2);
+        let sold_unit = units
+            .iter()
+            .find(|u| u.imei == "111111111111111")
+            .unwrap();
+
+        let sale = sale_service::create(
+            &conn,
+            CreateSaleInput {
+                discount: 0.0,
+                paid_amount: None,
+                items: vec![SaleItemInput {
+                    sale_item_id: None,
+                    item_type: "phone".into(),
+                    item_id: phone_id,
+                    quantity: 1,
+                    imei_id: Some(sold_unit.id),
+                    unit_price: None,
+                    warranty: None,
+                    warranty_expiry: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        product_return_service::create(
+            &conn,
+            CreateReturnInput {
+                sale_id: sale.id,
+                return_type: "return".into(),
+                return_charge_percent: 0.0,
+                fixed_deduction: None,
+                refund_method: Some("cash".into()),
+                return_date: None,
+                reference: None,
+                notes: None,
+                items: vec![ReturnItemInput {
+                    sale_item_id: sale.items[0].id,
+                    quantity: 1,
+                    imei_id: Some(sold_unit.id),
+                    reason: None,
+                    condition: "sellable".into(),
+                }],
+                exchange_item: None,
+            },
+            None,
+        )
+        .unwrap();
+
+        // Returned unit is back on stock alongside the untouched unit.
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 2);
+
+        let reason = "Owner removed a mis-entered purchase";
+        delete_purchase(&conn, purchase.id, None, Some(reason.into()), true).unwrap();
+
+        // Only the untouched unit was reversed; the returned unit survives so
+        // its invoice and return history stay intact.
+        assert!(get(&conn, purchase.id).is_err());
+        let remaining = phone_service::list_imei(&conn, phone_id).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].imei, "111111111111111");
+        assert_eq!(remaining[0].status, "in_stock");
+        assert_eq!(phone_service::get(&conn, phone_id).unwrap().quantity, 1);
+
+        // Historical sale and return still resolve to the surviving unit.
+        let historical = sale_service::get(&conn, sale.id).unwrap();
+        assert_eq!(historical.items[0].imei.as_deref(), Some("111111111111111"));
+        assert_eq!(product_return_service::list(&conn, None).unwrap().len(), 1);
+    }
+
+    #[test]
     fn forced_delete_does_not_wipe_other_purchases_stock() {
         // Two purchases feed the same phone. Selling one unit of purchase A and
         // then force-deleting A must leave purchase B's in-stock units intact.
@@ -1916,9 +2131,9 @@ mod tests {
     #[test]
     fn accessory_purchase_delete_allowed_when_quantity_drifted_without_sales() {
         use crate::models::accessory::CreateAccessoryInput;
-        use crate::services::{accessory_service, test_utils::seed_product_categories};
+        use crate::services::{accessory_service, test_utils::seed_accessory_categories};
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let aid = accessory_service::create(
             &conn,
             CreateAccessoryInput {
@@ -1989,6 +2204,8 @@ mod tests {
                 imei_pta_statuses: Vec::new(),
                 imei_storages: Vec::new(),
                 imei_battery_healths: Vec::new(),
+                imei_rams: Vec::new(),
+                imei_conditions: Vec::new(),
                 imei_unit_costs: Vec::new(),
                 imei_sale_prices: Vec::new(),
             }],
@@ -2054,9 +2271,9 @@ mod tests {
     fn accessory_purchase_ignores_imeis() {
         use crate::models::accessory::CreateAccessoryInput;
         use crate::services::accessory_service;
-        use crate::services::test_utils::seed_product_categories;
+        use crate::services::test_utils::seed_accessory_categories;
         let conn = in_memory_conn();
-        seed_product_categories(&conn);
+        seed_accessory_categories(&conn);
         let aid = accessory_service::create(
             &conn,
             CreateAccessoryInput {
@@ -2089,6 +2306,121 @@ mod tests {
         let p = create_purchase(&conn, input, None).unwrap();
         assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 7);
         assert_eq!(p.items[0].item_type, "accessory");
+    }
+
+    #[test]
+    fn accessory_purchase_updates_stock_supplier_and_totals() {
+        // The complete quantity-based accessory flow: record a purchase with no
+        // IMEIs, confirm stock/totals/supplier ledger, then edit and delete it
+        // and confirm everything reverses cleanly.
+        use crate::models::accessory::CreateAccessoryInput;
+        use crate::services::{accessory_service, test_utils::seed_accessory_categories};
+        let conn = in_memory_conn();
+        seed_accessory_categories(&conn);
+        let sid = supplier(&conn);
+        let aid = accessory_service::create(
+            &conn,
+            CreateAccessoryInput {
+                accessory_type: "Charger".into(),
+                brand: "Spigen".into(),
+                product_name: "Fast Charger".into(),
+                compatible_models: None,
+                color: None,
+                condition: None,
+                connector_type: None,
+                warranty: None,
+                features: None,
+                description: None,
+                sku: None,
+                serial_number: None,
+                image_paths: vec![],
+                cost_price: 8.0,
+                sale_price: 20.0,
+                quantity: 5,
+                supplier_id: Some(sid),
+                low_stock_threshold: 0,
+            },
+        )
+        .unwrap()
+        .id;
+
+        let line = |qty: i64, cost: f64, price: f64| PurchaseItemInput {
+            item_type: "accessory".into(),
+            item_id: aid,
+            quantity: qty,
+            unit_cost: Some(cost),
+            selling_price: Some(price),
+            warranty: Some("12 months".into()),
+            condition: None,
+            imeis: Vec::new(),
+            imei2s: Vec::new(),
+            imei_colors: Vec::new(),
+            imei_pta_statuses: Vec::new(),
+            imei_storages: Vec::new(),
+            imei_battery_healths: Vec::new(),
+            imei_rams: Vec::new(),
+            imei_conditions: Vec::new(),
+            imei_unit_costs: Vec::new(),
+            imei_sale_prices: Vec::new(),
+        };
+        let input = |items: Vec<PurchaseItemInput>, paid: f64| CreatePurchaseInput {
+            supplier_id: Some(sid),
+            discount: 0.0,
+            paid_amount: Some(paid),
+            payment_method: Some("cash".into()),
+            purchase_date: Some("2026-02-01".into()),
+            invoice_reference: Some("ACC-1".into()),
+            notes: None,
+            items,
+        };
+        let last_cost = |conn: &Connection| -> Option<f64> {
+            conn.query_row(
+                "SELECT last_purchase_cost FROM accessories WHERE id = ?1",
+                [aid],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+
+        let p = create_purchase(&conn, input(vec![line(3, 12.5, 25.0)], 0.0), None).unwrap();
+
+        // Totals: quantity-based line total = unit_cost * quantity; no IMEIs.
+        assert_eq!(p.total_amount, 37.5);
+        assert_eq!(p.items[0].item_type, "accessory");
+        assert_eq!(p.items[0].quantity, 3);
+        assert_eq!(p.items[0].line_total, 37.5);
+        assert!(p.items[0].serials.is_empty());
+        assert_eq!(p.items[0].warranty.as_deref(), Some("12 months"));
+
+        // Inventory: 5 + 3, with cost/sale/last-purchase synced from the line.
+        let acc = accessory_service::get(&conn, aid).unwrap();
+        assert_eq!(acc.quantity, 8);
+        assert_eq!(acc.cost_price, 12.5);
+        assert_eq!(acc.sale_price, 25.0);
+        assert_eq!(last_cost(&conn), Some(12.5));
+
+        // Supplier ledger reflects the purchase total while unpaid.
+        let bal = supplier_balance(&conn, sid).unwrap();
+        assert_eq!(bal.total_purchases, 37.5);
+        assert_eq!(bal.total_paid, 0.0);
+        assert_eq!(bal.balance, 37.5);
+
+        // Editing replaces the line: the old 3 are reversed and the new 5 applied.
+        let updated = update_purchase(&conn, p.id, input(vec![line(5, 10.0, 22.0)], 50.0), None)
+            .unwrap();
+        assert_eq!(updated.total_amount, 50.0);
+        assert_eq!(updated.items[0].quantity, 5);
+        assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 10);
+        assert_eq!(last_cost(&conn), Some(10.0));
+        let bal = supplier_balance(&conn, sid).unwrap();
+        assert_eq!(bal.total_purchases, 50.0);
+        assert_eq!(bal.total_paid, 50.0);
+        assert_eq!(bal.balance, 0.0);
+
+        // Deleting reverses the stock and clears the supplier ledger.
+        delete_purchase(&conn, p.id, None, None, false).unwrap();
+        assert_eq!(accessory_service::get(&conn, aid).unwrap().quantity, 5);
+        assert_eq!(supplier_balance(&conn, sid).unwrap().total_purchases, 0.0);
     }
 
     #[test]
@@ -2243,6 +2575,8 @@ mod tests {
             imei_pta_statuses: Vec::new(),
             imei_storages: Vec::new(),
             imei_battery_healths: Vec::new(),
+            imei_rams: Vec::new(),
+            imei_conditions: Vec::new(),
             imei_unit_costs: Vec::new(),
             imei_sale_prices: Vec::new(),
         });

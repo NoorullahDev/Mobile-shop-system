@@ -44,6 +44,7 @@ export function buildReceiptData(
     pta_status: it.pta_status ?? null,
     storage: it.storage ?? null,
     battery_health_pct: it.battery_health_pct ?? null,
+    condition: it.condition ?? null,
     qty: it.quantity,
     price: roundMoney(it.unit_price),
     total: roundMoney(it.unit_price * it.quantity),

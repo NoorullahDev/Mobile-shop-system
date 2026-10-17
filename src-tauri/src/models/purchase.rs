@@ -33,6 +33,12 @@ pub struct PurchaseItemInput {
 /// Per-unit numeric battery health aligned positionally with `imeis`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imei_battery_healths: Vec<Option<i64>>,
+    /// Per-unit RAM aligned positionally with `imeis`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_rams: Vec<String>,
+    /// Per-unit condition aligned positionally with `imeis`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_conditions: Vec<String>,
     /// Per-unit unit cost aligned positionally with `imeis` (phone lines only).
     /// A missing or non-positive value makes that unit fall back to the line's
     /// default unit cost, so blank entries keep the "fast entry" behaviour.
@@ -94,6 +100,12 @@ pub struct PurchaseItem {
     pub imei_storages: Vec<String>,
 #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imei_battery_healths: Vec<Option<i64>>,
+    /// Unit RAM aligned positionally with `serials` (phone item type only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_rams: Vec<String>,
+    /// Unit condition aligned positionally with `serials` (phone item type only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imei_conditions: Vec<String>,
     /// Resolved per-unit unit costs aligned with `serials` (phone lines only).
     /// Their sum is the line total shown for the purchase.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

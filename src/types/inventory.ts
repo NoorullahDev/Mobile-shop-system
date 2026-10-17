@@ -76,6 +76,10 @@ export interface Phone {
   created_at: string;
   updated_at: string;
   stock_by_color?: Array<{ color?: string | null; count: number }>;
+  unit_in_stock?: number;
+  unit_sold?: number;
+  unit_sale_min?: number | null;
+  unit_sale_max?: number | null;
 }
 
 export interface CreatePhoneInput {
@@ -125,6 +129,8 @@ export interface PhoneImei {
   pta_status?: string | null;
   storage?: string | null;
   battery_health_pct?: number | null;
+  ram?: string | null;
+  condition?: string | null;
   cost_price?: number | null;
   sale_price?: number | null;
   sold_at?: string | null;

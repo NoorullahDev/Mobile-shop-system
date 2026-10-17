@@ -46,6 +46,10 @@ fn phone_from_row(r: &rusqlite::Row) -> rusqlite::Result<Phone> {
         created_at: r.get("created_at")?,
         updated_at: r.get("updated_at")?,
         stock_by_color: Vec::new(),
+        unit_in_stock: 0,
+        unit_sold: 0,
+        unit_sale_min: None,
+        unit_sale_max: None,
     })
 }
 
@@ -60,6 +64,8 @@ fn imei_from_row(r: &rusqlite::Row) -> rusqlite::Result<PhoneImei> {
         pta_status: r.get("pta_status")?,
         storage: r.get("storage")?,
         battery_health_pct: r.get("battery_health_pct")?,
+        ram: r.get("ram")?,
+        condition: r.get("condition")?,
         cost_price: r.get("cost_price")?,
         sale_price: r.get("sale_price")?,
         sold_at: r.get("sold_at")?,
@@ -101,6 +107,7 @@ pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<Phone>, AppError> 
     let row = conn.query_row(&sql, [id], phone_from_row).optional()?;
     if let Some(mut phone) = row {
         phone.stock_by_color = stock_by_color(conn, id)?;
+        apply_unit_summary(&mut phone, unit_summary(conn, id)?);
         return Ok(Some(phone));
     }
     Ok(None)
@@ -145,6 +152,13 @@ pub fn list(conn: &Connection, search: Option<&str>) -> Result<Vec<Phone>, AppEr
     for phone in out.iter_mut() {
         if let Some(cc) = colors.get(&phone.id) {
             phone.stock_by_color = cc.clone();
+        }
+    }
+    let summaries =
+        unit_summary_map(conn, &out.iter().map(|p| p.id).collect::<Vec<_>>())?;
+    for phone in out.iter_mut() {
+        if let Some(summary) = summaries.get(&phone.id) {
+            apply_unit_summary(phone, *summary);
         }
     }
     Ok(out)
@@ -262,7 +276,7 @@ pub fn insert_imei(conn: &Connection, input: &AddPhoneImeiInput) -> Result<i64, 
 pub fn list_imei(conn: &Connection, phone_id: i64) -> Result<Vec<PhoneImei>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, phone_id, imei, imei2, status, color, pta_status, storage, battery_health_pct,
-                cost_price, sale_price, sold_at, created_at
+                ram, condition, cost_price, sale_price, sold_at, created_at
          FROM phone_imeis WHERE phone_id = ?1 ORDER BY id",
     )?;
     let rows = stmt.query_map([phone_id], imei_from_row)?;
@@ -325,6 +339,80 @@ pub fn stock_by_color_map(
         for r in rows {
             let (phone_id, cc) = r?;
             map.entry(phone_id).or_default().push(cc);
+        }
+    }
+    Ok(map)
+}
+
+/// Live stock counts and in-stock selling-price range for a phone, computed
+/// from its physical units: `(in_stock, sold, lowest sale, highest sale)`.
+pub type UnitSummary = (i64, i64, Option<f64>, Option<f64>);
+
+fn apply_unit_summary(phone: &mut Phone, summary: UnitSummary) {
+    phone.unit_in_stock = summary.0;
+    phone.unit_sold = summary.1;
+    phone.unit_sale_min = summary.2;
+    phone.unit_sale_max = summary.3;
+}
+
+pub fn unit_summary(conn: &Connection, phone_id: i64) -> Result<UnitSummary, AppError> {
+    let summary = conn.query_row(
+        "SELECT
+            SUM(CASE WHEN status = 'in_stock' THEN 1 ELSE 0 END) AS in_stock,
+            SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) AS sold,
+            MIN(CASE WHEN status = 'in_stock' THEN sale_price END) AS sale_min,
+            MAX(CASE WHEN status = 'in_stock' THEN sale_price END) AS sale_max
+         FROM phone_imeis WHERE phone_id = ?1",
+        [phone_id],
+        |r| {
+            Ok((
+                r.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                r.get::<_, Option<f64>>(2)?,
+                r.get::<_, Option<f64>>(3)?,
+            ))
+        },
+    )?;
+    Ok(summary)
+}
+
+/// Same as [`unit_summary`] but for many phones at once.
+pub fn unit_summary_map(
+    conn: &Connection,
+    phone_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, UnitSummary>, AppError> {
+    let mut map: std::collections::HashMap<i64, UnitSummary> = std::collections::HashMap::new();
+    if phone_ids.is_empty() {
+        return Ok(map);
+    }
+    const BATCH: usize = 400;
+    for ids in phone_ids.chunks(BATCH) {
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT phone_id,
+                SUM(CASE WHEN status = 'in_stock' THEN 1 ELSE 0 END) AS in_stock,
+                SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) AS sold,
+                MIN(CASE WHEN status = 'in_stock' THEN sale_price END) AS sale_min,
+                MAX(CASE WHEN status = 'in_stock' THEN sale_price END) AS sale_max
+             FROM phone_imeis
+             WHERE phone_id IN ({placeholders})
+             GROUP BY phone_id"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+            Ok((
+                r.get::<_, i64>("phone_id")?,
+                (
+                    r.get::<_, i64>("in_stock")?,
+                    r.get::<_, i64>("sold")?,
+                    r.get::<_, Option<f64>>("sale_min")?,
+                    r.get::<_, Option<f64>>("sale_max")?,
+                ),
+            ))
+        })?;
+        for r in rows {
+            let (phone_id, summary) = r?;
+            map.insert(phone_id, summary);
         }
     }
     Ok(map)

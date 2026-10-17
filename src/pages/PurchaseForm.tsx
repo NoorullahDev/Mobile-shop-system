@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Trash2, Plus, Search, Smartphone, Headphones } from "lucide-react";
 import { Button } from "../components/Button";
@@ -8,6 +8,7 @@ import { Alert } from "../components/Alert";
 import { Modal } from "../components/Modal";
 import { PhoneForm } from "./PhoneForm";
 import { AccessoryForm } from "./AccessoryForm";
+import { usePhoneOptionStore } from "../store/phoneOptions";
 import type {
   Phone,
   Accessory,
@@ -27,7 +28,7 @@ interface PurchaseFormProps {
   phones: Phone[];
   accessories: Accessory[];
   addPhone: (input: CreatePhoneInput) => Promise<Phone>;
-  addAccessory: (input: CreateAccessoryInput) => Promise<void>;
+  addAccessory: (input: CreateAccessoryInput) => Promise<Accessory>;
 }
 
 interface PhoneDraftLine {
@@ -43,6 +44,8 @@ interface PhoneDraftLine {
   imeiColors: string[];
   imeiPtaStatuses: string[];
   imeiStorages: string[];
+  imeiRams: string[];
+  imeiConditions: string[];
   imeiBatteryHealths: string[];
   imeiUnitCosts: string[];
   imeiSalePrices: string[];
@@ -63,6 +66,9 @@ const DEFAULT_PTA_STATUSES = new Set(
     .filter((option) => option.value !== CUSTOM_PTA_STATUS)
     .map((option) => option.value),
 );
+
+const DEFAULT_CONDITION = "New";
+const DEFAULT_CONDITIONS = ["New", "Used", "Refurbished", "Open Box"];
 
 interface AccessoryDraftLine {
   key: number;
@@ -96,6 +102,8 @@ function newPhoneLine(quantity = 1): PhoneDraftLine {
     imeiColors: Array.from({ length: quantity }, () => ""),
     imeiPtaStatuses: Array.from({ length: quantity }, () => "PTA Approved"),
     imeiStorages: Array.from({ length: quantity }, () => ""),
+    imeiRams: Array.from({ length: quantity }, () => ""),
+    imeiConditions: Array.from({ length: quantity }, () => DEFAULT_CONDITION),
     imeiBatteryHealths: Array.from({ length: quantity }, () => ""),
     imeiUnitCosts: Array.from({ length: quantity }, () => ""),
     imeiSalePrices: Array.from({ length: quantity }, () => ""),
@@ -164,6 +172,16 @@ export function PurchaseForm({
           { length: i.serials?.length ?? 0 },
           (_, k) => i.imei_storages?.[k] ?? "",
         ),
+        imeiRams: Array.from(
+          { length: i.serials?.length ?? 0 },
+          (_, k) => i.imei_rams?.[k] ?? "",
+        ),
+        // Older purchases stored a single line-level condition. Fall back to it
+        // per unit so editing historical purchases keeps their original value.
+        imeiConditions: Array.from(
+          { length: i.serials?.length ?? 0 },
+          (_, k) => i.imei_conditions?.[k]?.trim() || i.condition || "",
+        ),
         imeiBatteryHealths: Array.from(
           { length: i.serials?.length ?? 0 },
           (_, k) => {
@@ -219,6 +237,22 @@ export function PurchaseForm({
   const [showAddPhone, setShowAddPhone] = useState(false);
   const [showAddAccessory, setShowAddAccessory] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  // Condition choices come from the same managed options as the phone form, so
+  // any custom condition the shop has added shows up here too. The built-in
+  // defaults guarantee the picker is never empty on a fresh install.
+  const { load: loadPhoneOptions, getOptionsByType, options: phoneOptions } =
+    usePhoneOptionStore();
+  useEffect(() => {
+    void loadPhoneOptions();
+  }, [loadPhoneOptions]);
+  const conditionOptions = useMemo(() => {
+    const stored = getOptionsByType("condition").map((o) => o.value);
+    return Array.from(new Set([...stored, ...DEFAULT_CONDITIONS])).map((value) => ({
+      value,
+      label: value,
+    }));
+  }, [getOptionsByType, phoneOptions]);
 
   const supplierOptions = [
     { value: "", label: "— None —" },
@@ -303,6 +337,8 @@ export function PurchaseForm({
         const imeiColors = grow(l.imeiColors, "");
         const imeiPtaStatuses = grow(l.imeiPtaStatuses, "PTA Approved");
         const imeiStorages = grow(l.imeiStorages, "");
+        const imeiRams = grow(l.imeiRams, "");
+        const imeiConditions = grow(l.imeiConditions, DEFAULT_CONDITION);
         const imeiBatteryHealths = grow(l.imeiBatteryHealths, "");
         // New units created by raising the quantity inherit the line defaults;
         // existing units keep whatever the user already typed.
@@ -316,6 +352,8 @@ export function PurchaseForm({
           imeiColors,
           imeiPtaStatuses,
           imeiStorages,
+          imeiRams,
+          imeiConditions,
           imeiBatteryHealths,
           imeiUnitCosts,
           imeiSalePrices,
@@ -394,6 +432,26 @@ export function PurchaseForm({
     );
   };
 
+  const setPhoneRam = (key: number, index: number, value: string) => {
+    setPhoneLines((ls) =>
+      ls.map((l) =>
+        l.key === key
+          ? { ...l, imeiRams: l.imeiRams.map((v, i) => (i === index ? value : v)) }
+          : l,
+      ),
+    );
+  };
+
+  const setPhoneCondition = (key: number, index: number, value: string) => {
+    setPhoneLines((ls) =>
+      ls.map((l) =>
+        l.key === key
+          ? { ...l, imeiConditions: l.imeiConditions.map((v, i) => (i === index ? value : v)) }
+          : l,
+      ),
+    );
+  };
+
   const setPhoneBatteryHealth = (key: number, index: number, value: string) => {
     setPhoneLines((ls) =>
       ls.map((l) =>
@@ -422,6 +480,11 @@ export function PurchaseForm({
   const addAccessoryById = (id: number) => {
     const line = newAccessoryLine();
     line.productId = String(id);
+    const accessory = accessories.find((a) => a.id === id);
+    if (accessory) {
+      line.unitCost = accessory.cost_price ? String(accessory.cost_price) : "";
+      line.sellingPrice = accessory.sale_price ? String(accessory.sale_price) : "";
+    }
     setAccessoryLines((ls) => [...ls, line]);
     setAccessorySearch("");
     setAccessoryDropOpen(false);
@@ -447,7 +510,12 @@ export function PurchaseForm({
   const handleAddAccessory = async (input: CreateAccessoryInput) => {
     setAddError(null);
     try {
-      await addAccessory(input);
+      const created = await addAccessory(input);
+      const line = newAccessoryLine();
+      line.productId = String(created.id);
+      line.unitCost = created.cost_price ? String(created.cost_price) : "";
+      line.sellingPrice = created.sale_price ? String(created.sale_price) : "";
+      setAccessoryLines((ls) => [...ls, line]);
       setShowAddAccessory(false);
     } catch (e) {
       setAddError(String(e));
@@ -533,6 +601,8 @@ export function PurchaseForm({
         color: (l.imeiColors[i] ?? "").trim(),
         ptaStatus: (l.imeiPtaStatuses[i] ?? "PTA Approved").trim(),
         storage: (l.imeiStorages[i] ?? "").trim(),
+        ram: (l.imeiRams[i] ?? "").trim(),
+        condition: (l.imeiConditions[i] ?? "").trim(),
         batteryHealth: (l.imeiBatteryHealths[i] ?? "").trim(),
         unitCost: (l.imeiUnitCosts[i] ?? "").trim(),
         salePrice: (l.imeiSalePrices[i] ?? "").trim(),
@@ -568,6 +638,10 @@ export function PurchaseForm({
       }
       if (units.some((u) => !u.storage)) {
         errs.push("Enter storage for every physical phone unit.");
+        continue;
+      }
+      if (units.some((u) => !u.condition)) {
+        errs.push("Select a condition for every physical phone unit.");
         continue;
       }
       if (
@@ -610,6 +684,8 @@ export function PurchaseForm({
         imei_battery_healths: units.map((u) =>
           u.batteryHealth === "" ? null : Number(u.batteryHealth),
         ),
+        imei_rams: units.map((u) => u.ram),
+        imei_conditions: units.map((u) => u.condition),
         // Blank or zero enters fall back to the line default on the backend.
         imei_unit_costs: units.map((u) => {
           if (u.unitCost === "") return null;
@@ -895,6 +971,26 @@ export function PurchaseForm({
                               />
                             </div>
                             <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("Storage")}
+                              <Input
+                                list={`phone-unit-storage-suggestions-${l.key}`}
+                                placeholder="e.g. 256GB"
+                                value={l.imeiStorages[i] ?? ""}
+                                disabled={saving}
+                                onChange={(e) => setPhoneStorage(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("RAM (Optional)")}
+                              <Input
+                                list={`phone-unit-ram-suggestions-${l.key}`}
+                                placeholder="e.g. 8GB"
+                                value={l.imeiRams[i] ?? ""}
+                                disabled={saving}
+                                onChange={(e) => setPhoneRam(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="flex min-w-0 flex-col gap-1">
                               {unitFieldLabel("PTA Status")}
                               <Select
                                 name={`pta-${l.key}-${i}`}
@@ -924,6 +1020,16 @@ export function PurchaseForm({
                               )}
                             </div>
                             <div className="flex min-w-0 flex-col gap-1">
+                              {unitFieldLabel("Condition")}
+                              <Select
+                                name={`condition-${l.key}-${i}`}
+                                options={conditionOptions}
+                                value={l.imeiConditions[i] ?? DEFAULT_CONDITION}
+                                disabled={saving}
+                                onChange={(e) => setPhoneCondition(l.key, i, e.target.value)}
+                              />
+                            </div>
+                            <div className="flex min-w-0 flex-col gap-1">
                               {unitFieldLabel("Battery Health % (Optional)")}
                               <Input
                                 type="number"
@@ -935,16 +1041,6 @@ export function PurchaseForm({
                                 value={l.imeiBatteryHealths[i] ?? ""}
                                 disabled={saving}
                                 onChange={(e) => setPhoneBatteryHealth(l.key, i, e.target.value)}
-                              />
-                            </div>
-                            <div className="flex min-w-0 flex-col gap-1">
-                              {unitFieldLabel("Storage")}
-                              <Input
-                                list={`phone-unit-storage-suggestions-${l.key}`}
-                                placeholder="e.g. 256GB"
-                                value={l.imeiStorages[i] ?? ""}
-                                disabled={saving}
-                                onChange={(e) => setPhoneStorage(l.key, i, e.target.value)}
                               />
                             </div>
                             <div className="flex min-w-0 flex-col gap-1">
@@ -981,6 +1077,15 @@ export function PurchaseForm({
                       <option value="256GB" />
                       <option value="512GB" />
                       <option value="1TB" />
+                    </datalist>
+                    <datalist id={`phone-unit-ram-suggestions-${l.key}`}>
+                      <option value="2GB" />
+                      <option value="3GB" />
+                      <option value="4GB" />
+                      <option value="6GB" />
+                      <option value="8GB" />
+                      <option value="12GB" />
+                      <option value="16GB" />
                     </datalist>
                   </div>
                 </div>

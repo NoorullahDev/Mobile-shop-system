@@ -253,12 +253,13 @@ export function SaleDetailModal({ open, saleId, onClose, onEdit, onDelete }: Sal
                     <tr key={it.id}>
                       <td>
                         <div style={{ color: "#0F172A", fontSize: "13px" }}>{it.product_name ?? "—"}</div>
-                        {(it.color || it.storage || it.battery_health_pct != null || it.pta_status) && (
+                        {(it.color || it.storage || it.battery_health_pct != null || it.pta_status || it.condition) && (
                           <div className="flex flex-wrap gap-x-2 text-[11px]" style={{ color: "#64748B" }}>
                             {it.color && <span>Color: {it.color}</span>}
                             {it.storage && <span>Storage: {it.storage}</span>}
                             {it.battery_health_pct != null && <span>Battery: {it.battery_health_pct}%</span>}
                             {it.pta_status && <span>PTA: {it.pta_status}</span>}
+                            {it.condition && <span>Condition: {it.condition}</span>}
                           </div>
                         )}
                         {it.imei && (

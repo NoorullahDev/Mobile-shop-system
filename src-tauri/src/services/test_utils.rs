@@ -151,6 +151,7 @@ CREATE TABLE phone_imeis (
     id INTEGER PRIMARY KEY AUTOINCREMENT, phone_id INTEGER NOT NULL,
     imei TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'in_stock', sold_at DATETIME,
     color TEXT, imei2 TEXT UNIQUE, pta_status TEXT, storage TEXT, battery_health_pct INTEGER,
+    ram TEXT, condition TEXT,
     cost_price REAL, sale_price REAL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -167,7 +168,7 @@ CREATE TABLE sale_items (
     cost_price REAL NOT NULL DEFAULT 0,
     warranty TEXT, warranty_expiry TEXT, color TEXT, imei_snapshot TEXT,
     imei2_snapshot TEXT, pta_status TEXT, product_name_snapshot TEXT, variant_snapshot TEXT,
-    storage TEXT, battery_health_pct INTEGER
+    storage TEXT, battery_health_pct INTEGER, condition TEXT
 );
 CREATE TABLE purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_no TEXT NOT NULL UNIQUE, supplier_id INTEGER,
@@ -263,6 +264,30 @@ pub fn seed_product_categories(conn: &Connection) {
         conn.execute(
             "INSERT OR IGNORE INTO product_categories (name) VALUES (?1)",
             [name],
+        )
+        .unwrap();
+    }
+}
+
+/// Seeds accessory category options into `phone_options`
+/// (option_type = 'accessory_category'). Required by tests that create
+/// accessories, because `accessory_service::validate_category` queries that
+/// table -- matching exactly what the AccessoryForm dropdown shows.
+pub fn seed_accessory_categories(conn: &Connection) {
+    for (value, sort_order) in [
+        ("Charger", 1i32),
+        ("Cover", 2),
+        ("Cable", 3),
+        ("Earphones", 4),
+        ("Power Bank", 5),
+        ("Screen Protector", 6),
+        ("Holder", 7),
+        ("Other", 8),
+    ] {
+        conn.execute(
+            "INSERT OR IGNORE INTO phone_options (option_type, value, sort_order) \
+             VALUES ('accessory_category', ?1, ?2)",
+            rusqlite::params![value, sort_order],
         )
         .unwrap();
     }

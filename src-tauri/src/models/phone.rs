@@ -73,6 +73,19 @@ pub struct Phone {
     /// In-stock units grouped by physical unit (IMEI) colour.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stock_by_color: Vec<ColorCount>,
+    /// Live physical-unit counts derived from `phone_imeis` (0 when the phone
+    /// is not IMEI-tracked).
+    #[serde(default)]
+    pub unit_in_stock: i64,
+    #[serde(default)]
+    pub unit_sold: i64,
+    /// Lowest/highest selling price across units still in stock, so a model
+    /// with mixed unit prices can be shown as a range. `None` when no in-stock
+    /// unit carries a price.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_sale_min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_sale_max: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -138,6 +151,10 @@ pub struct PhoneImei {
     pub storage: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub battery_health_pct: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ram: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_price: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

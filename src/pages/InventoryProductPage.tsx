@@ -43,6 +43,28 @@ export interface InventoryRow {
   supplier_name?: string | null;
   imei?: string | null;
   image_paths?: string[];
+  unit_in_stock?: number;
+  unit_sold?: number;
+  unit_sale_min?: number | null;
+  unit_sale_max?: number | null;
+}
+
+/**
+ * Selling price shown for a row. Prefers the live per-unit selling prices from
+ * the physical units: a range when the same model has mixed unit prices, the
+ * single unit price when uniform, and only falls back to the product master
+ * price when no in-stock unit carries one.
+ */
+function unitSaleDisplay(item: InventoryRow): { text: string; isRange: boolean } {
+  const min = item.unit_sale_min;
+  const max = item.unit_sale_max;
+  if (min != null && max != null) {
+    if (Math.abs(max - min) >= 0.005) {
+      return { text: `${formatMoneyCompact(min)} – ${formatMoneyCompact(max)}`, isRange: true };
+    }
+    return { text: formatMoneyCompact(min), isRange: false };
+  }
+  return { text: formatMoneyCompact(item.sale_price), isRange: false };
 }
 
 const imageCache = new Map<string, Promise<string>>();
@@ -436,6 +458,7 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                   <th className="text-right">Cost Price</th>
                   <th className="text-right">Sale Price</th>
                   <th className="text-center">Stock</th>
+                  <th className="text-right">Stock Value</th>
                   {showImeiCol && <th className="text-center">IMEI</th>}
                   <th className="text-right">Actions</th>
                 </tr>
@@ -444,6 +467,8 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                 {visibleRows.map((item) => {
                   const isLow =
                     item.low_stock_threshold > 0 && item.quantity <= item.low_stock_threshold;
+                  const sale = unitSaleDisplay(item);
+                  const sold = item.unit_sold ?? 0;
                   return (
                     <tr key={item.id}>
                       <td>
@@ -475,8 +500,12 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                         </span>
                       </td>
                       <td className="text-right">
-                        <span className="amount text-[13px] font-semibold" style={{ color: "#0F172A" }}>
-                          {formatMoneyCompact(item.sale_price)}
+                        <span
+                          className="amount text-[13px] font-semibold"
+                          style={{ color: sale.isRange ? "#1D4ED8" : "#0F172A" }}
+                          title={sale.isRange ? "Selling price varies between units of this model" : undefined}
+                        >
+                          {sale.text}
                         </span>
                       </td>
                       <td className="text-center">
@@ -494,7 +523,17 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                             {item.quantity}
                           </span>
                           <StockBadge item={item} />
+                          {sold > 0 && (
+                            <span className="text-[10px] font-medium" style={{ color: "#94A3B8" }}>
+                              {sold} sold
+                            </span>
+                          )}
                         </div>
+                      </td>
+                      <td className="text-right">
+                        <span className="amount text-[13px]" style={{ color: "#475569" }}>
+                          {formatMoneyCompact(item.quantity * item.cost_price)}
+                        </span>
                       </td>
                       {showImeiCol && (
                         <td className="text-center">
@@ -620,6 +659,22 @@ export function InventoryProductPage<T extends InventoryRow, I>({
           </p>
         ) : (
           <div className="flex flex-col gap-2">
+            <div
+              className="flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
+              style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}
+            >
+              <span className="text-[11px] font-semibold" style={{ color: "#16A34A" }}>
+                {imeis.filter((u) => u.status === "in_stock").length} in stock
+              </span>
+              <span className="text-[11px] font-semibold" style={{ color: "#64748B" }}>
+                {imeis.filter((u) => u.status === "sold").length} sold
+              </span>
+              {imeis.some((u) => u.status === "defective") && (
+                <span className="text-[11px] font-semibold" style={{ color: "#DC2626" }}>
+                  {imeis.filter((u) => u.status === "defective").length} defective
+                </span>
+              )}
+            </div>
             {imeis.map((i) => (
               <div
                 key={i.id}
@@ -645,6 +700,14 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                       {i.color}
                     </span>
                   )}
+                  {i.ram && (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      style={{ background: "#F1F5F9", color: "#475569" }}
+                    >
+                      {i.ram}
+                    </span>
+                  )}
                   {i.pta_status && (
                     <StatusBadge status={i.pta_status} />
                   )}
@@ -662,6 +725,14 @@ export function InventoryProductPage<T extends InventoryRow, I>({
                       style={{ background: "#F1F5F9", color: "#475569" }}
                     >
                       Battery {i.battery_health_pct}%
+                    </span>
+                  )}
+                  {i.condition && (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      style={{ background: "#FEF3C7", color: "#B45309" }}
+                    >
+                      {i.condition}
                     </span>
                   )}
                   {i.sale_price != null && (

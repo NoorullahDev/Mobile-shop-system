@@ -104,6 +104,7 @@ pub fn insert_sale_item(
     battery_health_pct: Option<i64>,
     product_name_snapshot: Option<&str>,
     variant_snapshot: Option<&str>,
+    condition: Option<&str>,
 ) -> Result<(), AppError> {
     let (col, val) = if item_type == "phone" {
         ("phone_id", rusqlite::types::Value::from(item_id))
@@ -112,8 +113,8 @@ pub fn insert_sale_item(
     };
     conn.execute(
         &format!(
-            "INSERT INTO sale_items (sale_id, {col}, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color, imei_snapshot, imei2_snapshot, pta_status, storage, battery_health_pct, product_name_snapshot, variant_snapshot)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+            "INSERT INTO sale_items (sale_id, {col}, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color, imei_snapshot, imei2_snapshot, pta_status, storage, battery_health_pct, product_name_snapshot, variant_snapshot, condition)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
         ),
         rusqlite::params![
             sale_id,
@@ -131,7 +132,8 @@ pub fn insert_sale_item(
             storage,
             battery_health_pct,
             product_name_snapshot,
-            variant_snapshot
+            variant_snapshot,
+            condition
         ],
     )?;
     Ok(())
@@ -184,15 +186,15 @@ pub fn imei_pta_status(conn: &Connection, imei_id: i64) -> Result<Option<String>
 pub fn imei_unit_details(
     conn: &Connection,
     imei_id: i64,
-) -> Result<(Option<String>, Option<i64>), AppError> {
+) -> Result<(Option<String>, Option<i64>, Option<String>), AppError> {
     let value = conn
         .query_row(
-            "SELECT storage, battery_health_pct FROM phone_imeis WHERE id = ?1",
+            "SELECT storage, battery_health_pct, condition FROM phone_imeis WHERE id = ?1",
             [imei_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?;
-    Ok(value.unwrap_or((None, None)))
+    Ok(value.unwrap_or((None, None, None)))
 }
 
 /// Purchase-batch pricing attached to the exact physical handset.
@@ -361,6 +363,7 @@ pub fn update_sale_item(
     battery_health_pct: Option<i64>,
     product_name_snapshot: Option<&str>,
     variant_snapshot: Option<&str>,
+    condition: Option<&str>,
 ) -> Result<(), AppError> {
     let (phone_id, accessory_id) = if item_type == "phone" {
         (Some(item_id), None)
@@ -368,8 +371,8 @@ pub fn update_sale_item(
         (None, Some(item_id))
     };
     conn.execute(
-        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6, cost_price = ?7, warranty = ?8, warranty_expiry = ?9, color = ?10, imei_snapshot = ?11, imei2_snapshot = ?12, pta_status = ?13, storage = ?14, battery_health_pct = ?15, product_name_snapshot = ?16, variant_snapshot = ?17 WHERE id = ?1",
-        params![id, phone_id, accessory_id, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color, imei_snapshot, imei2_snapshot, pta_status, storage, battery_health_pct, product_name_snapshot, variant_snapshot],
+        "UPDATE sale_items SET phone_id = ?2, accessory_id = ?3, imei_id = ?4, quantity = ?5, unit_price = ?6, cost_price = ?7, warranty = ?8, warranty_expiry = ?9, color = ?10, imei_snapshot = ?11, imei2_snapshot = ?12, pta_status = ?13, storage = ?14, battery_health_pct = ?15, product_name_snapshot = ?16, variant_snapshot = ?17, condition = ?18 WHERE id = ?1",
+        params![id, phone_id, accessory_id, imei_id, quantity, unit_price, cost_price, warranty, warranty_expiry, color, imei_snapshot, imei2_snapshot, pta_status, storage, battery_health_pct, product_name_snapshot, variant_snapshot, condition],
     )?;
     Ok(())
 }
@@ -466,6 +469,7 @@ fn list_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItem>, AppError
                 si.imei_id, si.quantity, si.unit_price, si.cost_price, si.color, si.pta_status,
                 CASE WHEN si.product_name_snapshot IS NOT NULL THEN si.storage ELSE im.storage END AS storage,
                 CASE WHEN si.product_name_snapshot IS NOT NULL THEN si.battery_health_pct ELSE im.battery_health_pct END AS battery_health_pct,
+                CASE WHEN si.product_name_snapshot IS NOT NULL THEN si.condition ELSE im.condition END AS condition,
                 COALESCE(si.product_name_snapshot, p.brand || ' ' || p.model, a.brand || ' ' || a.product_name) AS product_name,
                 CASE WHEN si.product_name_snapshot IS NOT NULL THEN si.imei_snapshot ELSE im.imei END AS imei,
                 CASE WHEN si.product_name_snapshot IS NOT NULL THEN si.imei2_snapshot ELSE im.imei2 END AS imei2,
@@ -499,6 +503,7 @@ fn list_items(conn: &Connection, sale_id: i64) -> Result<Vec<SaleItem>, AppError
             pta_status: r.get("pta_status")?,
             storage: r.get("storage")?,
             battery_health_pct: r.get("battery_health_pct")?,
+            condition: r.get("condition")?,
         })
     })?;
     let mut out = Vec::new();

@@ -86,6 +86,7 @@ export function buildReceiptInner(data: ReceiptData, settings: ReceiptSettings):
     if (it.storage) detail.push(`Storage: ${esc(it.storage)}`);
     if (it.battery_health_pct != null) detail.push(`Battery: ${it.battery_health_pct}%`);
     if (it.pta_status) detail.push(`PTA: ${esc(it.pta_status)}`);
+    if (it.condition) detail.push(`Condition: ${esc(it.condition)}`);
     if (settings.showSerial && it.serial) detail.push(`Serial: ${esc(it.serial)}`);
     if (it.imei) detail.push(`IMEI 1: ${esc(it.imei)}`);
     if (it.imei2) detail.push(`IMEI 2: ${esc(it.imei2)}`);
