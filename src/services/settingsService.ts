@@ -5,6 +5,10 @@ export async function getAllSettings(): Promise<Setting[]> {
   return invoke<Setting[]>("get_all_settings");
 }
 
+export async function getPublicSettings(): Promise<Setting[]> {
+  return invoke<Setting[]>("get_public_settings");
+}
+
 export async function updateSetting(
   key: string,
   value: string,

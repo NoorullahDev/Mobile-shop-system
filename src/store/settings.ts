@@ -18,6 +18,7 @@ const DEFAULT_WHATSAPP_TEMPLATE =
 
 interface SettingsState extends BusinessProfile {
   loaded: boolean;
+  loadPublic: () => Promise<void>;
   load: () => Promise<void>;
   applyChanges: (patch: Partial<BusinessProfile>) => void;
 }
@@ -32,6 +33,21 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   currency: "PKR",
   whatsappTemplate: DEFAULT_WHATSAPP_TEMPLATE,
   loaded: false,
+
+  loadPublic: async () => {
+    try {
+      const settings = await settingsService.getPublicSettings();
+      const map = new Map(settings.map((s) => [s.key, s.value ?? ""]));
+      set({
+        businessName: map.get("business_name") ?? "",
+        logo: map.get("shop_logo") || null,
+        loaded: true,
+      });
+    } catch (e) {
+      console.error("Failed to load public settings:", e);
+      set({ loaded: true });
+    }
+  },
 
   load: async () => {
     try {

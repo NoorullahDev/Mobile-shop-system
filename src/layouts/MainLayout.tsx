@@ -77,7 +77,7 @@ export function MainLayout() {
 
   return (
     <div className={`app-shell${isDashboard ? " dashboard-shell" : ""}`}>
-      <Sidebar username="" role="" dashboardStyle={isDashboard} />
+      <Sidebar username="" role="" dashboardStyle />
       <div className="app-main">
         <Header dashboardStyle={isDashboard} />
         {showLicenseWarning && (

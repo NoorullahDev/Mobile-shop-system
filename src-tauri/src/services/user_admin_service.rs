@@ -53,6 +53,61 @@ fn is_primary_admin(conn: &Connection, actor: Option<i64>) -> Result<bool, AppEr
     }
 }
 
+fn ensure_actor_can_assign_permissions(
+    conn: &Connection,
+    actor: Option<i64>,
+    permissions: &[String],
+) -> Result<(), AppError> {
+    let Some(actor_id) = actor else {
+        // Internal service calls have no renderer-controlled identity. Tauri
+        // commands always pass the authenticated session user here.
+        return Ok(());
+    };
+    if repo::is_primary_admin(conn, actor_id)? {
+        return Ok(());
+    }
+    let actor_role = repo::get_user(conn, actor_id)?
+        .ok_or_else(|| AppError::PermissionDenied("The current user no longer exists".into()))?
+        .role_id;
+    let granted = repo::role_permissions(conn, actor_role)?;
+    if let Some(permission) = permissions
+        .iter()
+        .find(|permission| !granted.contains(permission))
+    {
+        return Err(AppError::PermissionDenied(format!(
+            "You cannot assign a permission you do not have: {permission}",
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_actor_can_manage_role(
+    conn: &Connection,
+    actor: Option<i64>,
+    role_id: i64,
+) -> Result<(), AppError> {
+    let current_permissions = repo::role_permissions(conn, role_id)?;
+    ensure_actor_can_assign_permissions(conn, actor, &current_permissions)
+}
+
+fn ensure_actor_can_manage_user(
+    conn: &Connection,
+    actor: Option<i64>,
+    user_id: i64,
+) -> Result<(), AppError> {
+    let target =
+        repo::get_user(conn, user_id)?.ok_or_else(|| AppError::validation("User not found"))?;
+    if actor.is_some()
+        && role_is_builtin_admin(conn, target.role_id)?
+        && !is_primary_admin(conn, actor)?
+    {
+        return Err(AppError::PermissionDenied(
+            "Only the primary admin can manage an Admin account".into(),
+        ));
+    }
+    ensure_actor_can_manage_role(conn, actor, target.role_id)
+}
+
 // ----- Users -----
 
 pub fn create_user(
@@ -72,6 +127,7 @@ pub fn create_user(
     if !repo::role_exists(conn, input.role_id)? {
         return Err(AppError::validation("Role not found"));
     }
+    ensure_actor_can_manage_role(conn, actor, input.role_id)?;
     let target_is_admin = role_is_builtin_admin(conn, input.role_id)?;
     if target_is_admin && !is_primary_admin(conn, actor)? {
         return Err(AppError::validation(
@@ -120,11 +176,13 @@ pub fn update_user(
 ) -> Result<UserDetail, AppError> {
     let current =
         repo::get_user(conn, id)?.ok_or_else(|| AppError::validation("User not found"))?;
+    ensure_actor_can_manage_user(conn, actor, id)?;
 
     let role_id = input.role_id.unwrap_or(current.role_id);
     if !repo::role_exists(conn, role_id)? {
         return Err(AppError::validation("Role not found"));
     }
+    ensure_actor_can_manage_role(conn, actor, role_id)?;
 
     // A user must never be able to promote themselves by editing their own account.
     if let Some(actor) = actor {
@@ -210,6 +268,7 @@ pub fn set_user_status(
     actor: Option<i64>,
 ) -> Result<UserDetail, AppError> {
     let status = normalize_status(Some(status.into()))?;
+    ensure_actor_can_manage_user(conn, actor, id)?;
     if status == "disabled" && repo::is_primary_admin(conn, id)? {
         return Err(AppError::validation(
             "The primary admin account cannot be disabled",
@@ -248,6 +307,7 @@ pub fn reset_password(
     new_password: &str,
     actor: Option<i64>,
 ) -> Result<(), AppError> {
+    ensure_actor_can_manage_user(conn, actor, id)?;
     if repo::is_primary_admin(conn, id)? {
         return Err(AppError::validation(
             "Reset is disabled for the primary admin; use Change Password with the current password",
@@ -267,6 +327,7 @@ pub fn reset_password(
 }
 
 pub fn delete_user(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
+    ensure_actor_can_manage_user(conn, actor, id)?;
     if repo::is_primary_admin(conn, id)? {
         return Err(AppError::validation(
             "The primary admin account cannot be deleted",
@@ -331,6 +392,7 @@ pub fn create_role(
         return Err(AppError::validation("A role with this name already exists"));
     }
     validate_permissions(conn, &input.permissions)?;
+    ensure_actor_can_assign_permissions(conn, actor, &input.permissions)?;
     let description = clean_opt(input.description);
     let tx = conn.unchecked_transaction()?;
     let id = repo::insert_role(&tx, &name, description.as_deref())?;
@@ -376,6 +438,8 @@ pub fn update_role(
         ));
     }
     validate_permissions(conn, &input.permissions)?;
+    ensure_actor_can_manage_role(conn, actor, id)?;
+    ensure_actor_can_assign_permissions(conn, actor, &input.permissions)?;
     let previous_permissions = repo::role_permissions(conn, id)?;
     let description = clean_opt(input.description);
 
@@ -396,6 +460,7 @@ pub fn update_role(
 
 pub fn delete_role(conn: &Connection, id: i64, actor: Option<i64>) -> Result<(), AppError> {
     let role = repo::get_role(conn, id)?.ok_or_else(|| AppError::validation("Role not found"))?;
+    ensure_actor_can_manage_role(conn, actor, id)?;
     if role.is_builtin {
         return Err(AppError::validation("Built-in roles cannot be deleted"));
     }
@@ -732,18 +797,63 @@ mod tests {
             vec!["users:manage"]
         );
 
-        // Editing a role they do NOT hold is still allowed.
+        // Editing a role they do NOT hold is still allowed, but only with a
+        // subset of the permissions the actor already possesses.
         update_role(
             &conn,
             2,
             UpdateRoleInput {
                 name: "Staff".into(),
                 description: None,
-                permissions: vec!["sales:create".into()],
+                permissions: vec![],
             },
             Some(u.id),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn delegated_user_manager_cannot_grant_missing_permissions_or_manage_admins() {
+        let conn = in_memory_conn();
+        seed_roles(&conn);
+        let manager_role = create_role(
+            &conn,
+            CreateRoleInput {
+                name: "User Manager".into(),
+                description: None,
+                permissions: vec!["users:manage".into()],
+            },
+            None,
+        )
+        .unwrap();
+        let manager = create_user(
+            &conn,
+            CreateUserInput {
+                username: "manager".into(),
+                password: "secret123".into(),
+                full_name: None,
+                email: None,
+                role_id: manager_role.id,
+                status: None,
+            },
+            None,
+        )
+        .unwrap();
+
+        let err = create_role(
+            &conn,
+            CreateRoleInput {
+                name: "Escalated".into(),
+                description: None,
+                permissions: vec!["users:manage".into(), "sales:create".into()],
+            },
+            Some(manager.id),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::PermissionDenied(_)));
+
+        let err = reset_password(&conn, 1, "replacement123", Some(manager.id)).unwrap_err();
+        assert!(matches!(err, AppError::PermissionDenied(_)));
     }
 
     #[test]

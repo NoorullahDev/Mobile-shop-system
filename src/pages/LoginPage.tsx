@@ -72,7 +72,7 @@ function DefaultShopLogo() {
 export function LoginPage() {
   const navigate = useNavigate();
   const { login, error } = useSessionStore();
-  const { businessName, logo, loaded, load } = useSettingsStore();
+  const { businessName, logo, loaded, loadPublic } = useSettingsStore();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -81,9 +81,9 @@ export function LoginPage() {
 
   useEffect(() => {
     if (!loaded) {
-      load();
+      loadPublic();
     }
-  }, [loaded, load]);
+  }, [loaded, loadPublic]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

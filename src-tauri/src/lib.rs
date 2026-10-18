@@ -257,6 +257,7 @@ pub fn run() {
             commands::get_online_payment_records,
             commands::get_profit_loss,
             commands::get_all_settings,
+            commands::get_public_settings,
             commands::update_setting,
             commands::get_license_status,
             commands::activate_license,

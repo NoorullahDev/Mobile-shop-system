@@ -37,15 +37,23 @@ const landingRoutes = Object.entries({
   "/": "dashboard:view",
   "/sales/new": "sales:create",
   "/sales": "sales:view",
+  "/returns": "returns:view",
   "/members": "members:view",
   "/inventory": "phones:view",
   "/accessories": "accessories:view",
   "/purchases": "purchases:view",
   "/suppliers": "suppliers:view",
+  "/payments": "payments:view",
+  "/online-payments": "online_payments:view",
+  "/supplier-dues": "supplier_dues:view",
+  "/expenses": "expenses:view",
   "/reports": "reports:view",
   "/staff": "staff:view",
   "/settings": "settings:view",
   "/users": "users:manage",
+  "/activity": "activity:view",
+  "/backups": "backup:view",
+  "/license": "license:view",
 });
 
 function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {

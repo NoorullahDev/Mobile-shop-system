@@ -1536,11 +1536,23 @@ pub fn get_profit_loss(
 #[tauri::command]
 pub fn get_all_settings(
     db: State<Database>,
+    session: State<SessionState>,
 ) -> Result<Vec<crate::models::setting::Setting>, AppError> {
-    // Branding (business name, logo) is shown on the pre-sign-in Login page, so
-    // settings must be readable without a session. Writes stay permission-gated.
-    let guard = public_conn(&db)?;
+    let guard = authenticated_conn(&db, &session)?;
     settings_service::get_all(&guard)
+}
+
+#[tauri::command]
+pub fn get_public_settings(
+    db: State<Database>,
+) -> Result<Vec<crate::models::setting::Setting>, AppError> {
+    // Only values rendered on the sign-in screen are public. Receipt, contact,
+    // reminder and system configuration remains session-protected.
+    let guard = public_conn(&db)?;
+    Ok(settings_service::get_all(&guard)?
+        .into_iter()
+        .filter(|setting| matches!(setting.key.as_str(), "business_name" | "shop_logo"))
+        .collect())
 }
 
 #[tauri::command]

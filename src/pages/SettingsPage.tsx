@@ -13,7 +13,6 @@ import {
   Cpu,
   MessageCircle,
   KeyRound,
-  BriefcaseBusiness,
 } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 import { Card } from "../components/Card";
@@ -42,7 +41,6 @@ type SettingsTab =
   | "receipt"
   | "whatsapp"
   | "backup"
-  | "staff"
   | "users"
   | "activity"
   | "notifications"
@@ -54,6 +52,7 @@ interface NavSection {
   label: string;
   icon: LucideIcon;
   permission: string;
+  anyPermissions?: string[];
 }
 
 const NAV: NavSection[] = [
@@ -61,8 +60,7 @@ const NAV: NavSection[] = [
   { id: "receipt", label: "Receipt", icon: Printer, permission: "settings:view" },
   { id: "whatsapp", label: "WhatsApp Reminder", icon: MessageCircle, permission: "settings:view" },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup, permission: "backup:view" },
-  { id: "staff", label: "Staff / Salary", icon: BriefcaseBusiness, permission: "staff:view" },
-  { id: "users", label: "Users & Roles", icon: UserCog, permission: "users:manage" },
+  { id: "users", label: "Users & Roles", icon: UserCog, permission: "users:manage", anyPermissions: ["staff:view"] },
   { id: "activity", label: "Activity Logs", icon: ClipboardList, permission: "activity:view" },
   { id: "notifications", label: "Notifications", icon: Bell, permission: "settings:view" },
   { id: "license", label: "License", icon: Shield, permission: "license:view" },
@@ -110,7 +108,9 @@ export function SettingsPage() {
   const permissions = user?.permissions ?? [];
   const canUpdateSettings = can(permissions, "settings:update");
   const canViewBusinessSettings = can(permissions, "settings:view");
-  const visibleNav = NAV.filter((item) => can(permissions, item.permission));
+  const visibleNav = NAV.filter(
+    (item) => can(permissions, item.permission) || item.anyPermissions?.some((permission) => can(permissions, permission)),
+  );
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("business");
 
@@ -376,8 +376,9 @@ export function SettingsPage() {
           {activeTab === "receipt" && <ReceiptSettingsPage />}
           {activeTab === "whatsapp" && <WhatsAppReminderSettings />}
           {activeTab === "backup" && <BackupManagerPage />}
-          {activeTab === "staff" && <UsersPage initialTab="staff" />}
-          {activeTab === "users" && <UsersPage />}
+          {activeTab === "users" && (
+            <UsersPage initialTab={can(permissions, "users:manage") ? "users" : "staff"} />
+          )}
           {activeTab === "activity" && <ActivityLogsPage />}
           {activeTab === "notifications" && <NotificationsPage />}
           {activeTab === "license" && <LicensePage />}

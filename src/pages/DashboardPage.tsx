@@ -40,6 +40,7 @@ import {
   formatDateTime,
   toLocalDate,
 } from "../lib/format";
+import { can } from "../lib/permissions";
 
 // Additional imports for real data
 import { getTopSellers, getPeriodSummary, getSalesSeries, getPaymentBreakdown } from "../services/reportService";
@@ -67,6 +68,36 @@ function monthLabel(m: string) {
   return MONTHS[parseInt(mo, 10) - 1] ?? mo;
 }
 
+interface DashboardDetails {
+  topSellers: TopSeller[];
+  recentSales: Sale[];
+  outOfStock: Product[];
+  supplierDues: SupplierBalance[];
+  recentReturns: ReturnSummary[];
+  membersWithDues: MemberBalance[];
+  totalMembers: Member[];
+  periodSummary: PeriodSummary | null;
+  dailySales: SalePoint[];
+  paymentBreakdown: PaymentBreakdown[];
+}
+
+const dashboardDetailsCache = new Map<string, DashboardDetails>();
+
+function emptyDashboardDetails(): DashboardDetails {
+  return {
+    topSellers: [],
+    recentSales: [],
+    outOfStock: [],
+    supplierDues: [],
+    recentReturns: [],
+    membersWithDues: [],
+    totalMembers: [],
+    periodSummary: null,
+    dailySales: [],
+    paymentBreakdown: [],
+  };
+}
+
 export function DashboardPage() {
   const {
     summary,
@@ -77,23 +108,37 @@ export function DashboardPage() {
     load,
   } = useReportStore();
   const user = useSessionStore((s) => s.user);
+  const permissions = user?.permissions ?? [];
+  const canViewReports = can(permissions, "reports:view");
+  const canViewSales = can(permissions, "sales:view");
+  const canViewPhones = can(permissions, "phones:view");
+  const canViewAccessories = can(permissions, "accessories:view");
+  const canViewSupplierDues = can(permissions, "supplier_dues:view");
+  const canViewReturns = can(permissions, "returns:view");
+  const canViewMembers = can(permissions, "members:view");
+  const canViewPayments = can(permissions, "payments:view");
   const ownerName = useSettingsStore((s) => s.ownerName);
   const navigate = useNavigate();
 
-  const [topSellers, setTopSellers] = useState<TopSeller[]>([]);
-  const [recentSales, setRecentSales] = useState<Sale[]>([]);
-  const [outOfStock, setOutOfStock] = useState<Product[]>([]);
-  const [supplierDues, setSupplierDues] = useState<SupplierBalance[]>([]);
-  const [recentReturns, setRecentReturns] = useState<ReturnSummary[]>([]);
-  const [membersWithDues, setMembersWithDues] = useState<MemberBalance[]>([]);
-  const [totalMembers, setTotalMembers] = useState<Member[]>([]);
-
   const [period, setPeriod] = useState("today");
-  const [periodSummary, setPeriodSummary] = useState<PeriodSummary | null>(null);
-  const [dailySales, setDailySales] = useState<SalePoint[]>([]);
+  const dashboardCacheKey = `${user?.id ?? "guest"}:${permissions.join("|")}:${period}`;
+  const [details, setDetails] = useState<DashboardDetails>(
+    () => dashboardDetailsCache.get(dashboardCacheKey) ?? emptyDashboardDetails(),
+  );
   const [extraError, setExtraError] = useState<string | null>(null);
-  const [paymentBreakdown, setPaymentBreakdown] = useState<PaymentBreakdown[]>([]);
   const dashReq = useRef(0);
+  const {
+    topSellers,
+    recentSales,
+    outOfStock,
+    supplierDues,
+    recentReturns,
+    membersWithDues,
+    totalMembers,
+    periodSummary,
+    dailySales,
+    paymentBreakdown,
+  } = details;
 
   const fetchDashboardData = async () => {
     const req = ++dashReq.current;
@@ -117,35 +162,49 @@ export function DashboardPage() {
         from = toLocalDate(start);
       }
 
-      const [periodData, top, seriesData, payBreakdown] = await Promise.all([
-        getPeriodSummary(from, to),
-        getTopSellers(from, to, 5),
-        (period === "week" || period === "month") ? getSalesSeries(from, to) : Promise.resolve([]),
-        getPaymentBreakdown(from, to),
+      const reportData: Promise<[
+        PeriodSummary | null,
+        TopSeller[],
+        SalePoint[],
+        PaymentBreakdown[],
+      ]> = canViewReports
+        ? Promise.all([
+          getPeriodSummary(from, to),
+          getTopSellers(from, to, 5),
+          (period === "week" || period === "month") ? getSalesSeries(from, to) : Promise.resolve([]),
+          getPaymentBreakdown(from, to),
+        ])
+        : Promise.resolve([null, [], [], []]);
+
+      const detailData = Promise.all([
+        canViewSales ? listSales() : Promise.resolve([]),
+        canViewPhones && canViewAccessories ? listProducts() : Promise.resolve([]),
+        canViewSupplierDues ? listSupplierDues() : Promise.resolve([]),
+        canViewReturns ? listReturns() : Promise.resolve([]),
+        canViewMembers ? listMembers() : Promise.resolve([]),
+        canViewPayments ? listCustomerDues() : Promise.resolve([]),
       ]);
 
-      if (req !== dashReq.current) return;
-      setPeriodSummary(periodData);
-      setTopSellers(top);
-      setDailySales(seriesData);
-      setPaymentBreakdown(payBreakdown);
-
-      const [salesData, productsData, supplierDueData, returnsList, membersData, customerDueData] = await Promise.all([
-        listSales(),
-        listProducts(),
-        listSupplierDues(),
-        listReturns(),
-        listMembers(),
-        listCustomerDues(),
-      ]);
+      const [
+        [periodData, top, seriesData, payBreakdown],
+        [salesData, productsData, supplierDueData, returnsList, membersData, customerDueData],
+      ] = await Promise.all([reportData, detailData]);
 
       if (req !== dashReq.current) return;
-      setRecentSales(salesData.slice(0, 5));
-      setOutOfStock(productsData.filter((p) => p.quantity <= 0));
-      setSupplierDues(supplierDueData);
-      setRecentReturns(returnsList.slice(0, 5));
-      setMembersWithDues(customerDueData);
-      setTotalMembers(membersData);
+      const nextDetails: DashboardDetails = {
+        periodSummary: periodData,
+        topSellers: top,
+        dailySales: seriesData,
+        paymentBreakdown: payBreakdown,
+        recentSales: salesData.slice(0, 5),
+        outOfStock: productsData.filter((p) => p.quantity <= 0),
+        supplierDues: supplierDueData,
+        recentReturns: returnsList.slice(0, 5),
+        membersWithDues: customerDueData,
+        totalMembers: membersData,
+      };
+      dashboardDetailsCache.set(dashboardCacheKey, nextDetails);
+      setDetails(nextDetails);
     } catch (err) {
       if (req !== dashReq.current) return;
       console.error("Failed to load extra dashboard data", err);
@@ -155,11 +214,31 @@ export function DashboardPage() {
 
   useEffect(() => {
     fetchDashboardData();
-  }, [period, load]);
+  }, [
+    period,
+    load,
+    canViewReports,
+    canViewSales,
+    canViewPhones,
+    canViewAccessories,
+    canViewSupplierDues,
+    canViewReturns,
+    canViewMembers,
+    canViewPayments,
+    dashboardCacheKey,
+  ]);
 
   const fallbackName = user?.username ? user.username.charAt(0).toUpperCase() + user.username.slice(1) : "Noor";
   const displayWelcomeName = ownerName || fallbackName;
   const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : period === "month" ? "This Month" : "This Year";
+  const quickActions = [
+    { label: "New Sale", to: "/sales/new", primary: true, icon: ShoppingBag, required: ["sales:create"] },
+    { label: "Receive Payment", to: "/payments", icon: Banknote, required: ["payments:view", "payments:create"] },
+    { label: "Add Customer", to: "/members", icon: Users, required: ["members:view", "members:create"] },
+    { label: "Add Product", to: "/inventory", icon: Package, required: ["phones:view", "phones:create"] },
+    { label: "Record Purchase", to: "/purchases", icon: PackagePlus, required: ["purchases:view", "purchases:create"] },
+    { label: "Add Expense", to: "/expenses", icon: ReceiptText, required: ["expenses:view", "expenses:create"] },
+  ].filter((action) => action.required.every((permission) => can(permissions, permission)));
 
   let displayChartData: any[] = [];
   if (period === "year" || period === "today") {
@@ -249,7 +328,7 @@ export function DashboardPage() {
               icon={ShoppingBag}
               tone="primary"
               compact
-              onClick={() => navigate("/sales")}
+              onClick={canViewSales ? () => navigate("/sales") : undefined}
             />
             <KpiCard
               title={`Received ${periodLabel}`}
@@ -267,7 +346,7 @@ export function DashboardPage() {
               icon={Calendar}
               tone="purple"
               compact
-              onClick={() => navigate("/sales")}
+              onClick={canViewSales ? () => navigate("/sales") : undefined}
             />
             <KpiCard
               title={`Online Payments ${periodLabel}`}
@@ -277,7 +356,7 @@ export function DashboardPage() {
               icon={CreditCard}
               tone="cyan"
               compact
-              onClick={() => navigate("/online-payments")}
+              onClick={can(permissions, "online_payments:view") ? () => navigate("/online-payments") : undefined}
             />
             <KpiCard
               title="Customer Dues"
@@ -287,7 +366,7 @@ export function DashboardPage() {
               icon={Users}
               tone="amber"
               compact
-              onClick={() => navigate("/payments")}
+              onClick={canViewPayments ? () => navigate("/payments") : undefined}
             />
             <KpiCard
               title="Low / Out of Stock"
@@ -296,7 +375,7 @@ export function DashboardPage() {
               icon={AlertTriangle}
               tone="red"
               compact
-              onClick={() => navigate("/inventory")}
+              onClick={canViewPhones ? () => navigate("/inventory") : undefined}
             />
           </div>
 
@@ -350,21 +429,9 @@ export function DashboardPage() {
 
             {/* Right column */}
             <div className="flex flex-col gap-3 lg:row-span-2">
-              <Card className="dashboard-panel" title="Quick Actions">
+              {quickActions.length > 0 && <Card className="dashboard-panel" title="Quick Actions">
                 <div className="grid grid-cols-2 gap-2">
-                  {[
-                    {
-                      label: "New Sale",
-                      to: "/sales/new",
-                      primary: true,
-                      icon: ShoppingBag,
-                    },
-                    { label: "Receive Payment", to: "/payments", icon: Banknote },
-                    { label: "Add Customer", to: "/members", icon: Users },
-                    { label: "Add Product", to: "/inventory", icon: Package },
-                    { label: "Record Purchase", to: "/purchases", icon: PackagePlus },
-                    { label: "Add Expense", to: "/expenses", icon: ReceiptText },
-                  ].map(({ label, to, primary, icon: ActionIcon }) => (
+                  {quickActions.map(({ label, to, primary, icon: ActionIcon }) => (
                     <button
                       key={label}
                       type="button"
@@ -385,7 +452,7 @@ export function DashboardPage() {
                     </button>
                   ))}
                 </div>
-              </Card>
+              </Card>}
 
               <Card
                 className="dashboard-panel"
@@ -409,9 +476,9 @@ export function DashboardPage() {
                           <div className="text-[12px] text-[#64748B]">{summary.low_stock_count} products are low in stock</div>
                         </div>
                       </div>
-                      <Button variant="secondary" size="sm" onClick={() => navigate("/inventory")}>
+                      {canViewPhones && <Button variant="secondary" size="sm" onClick={() => navigate("/inventory")}>
                         <span className="text-[#DC2626]">View</span>
-                      </Button>
+                      </Button>}
                     </div>
                   )}
 
@@ -426,9 +493,9 @@ export function DashboardPage() {
                           <div className="text-[12px] text-[#64748B]">{outOfStock.length} products are out of stock</div>
                         </div>
                       </div>
-                      <Button variant="secondary" size="sm" onClick={() => navigate("/inventory")}>
+                      {canViewPhones && <Button variant="secondary" size="sm" onClick={() => navigate("/inventory")}>
                         <span className="text-[#DC2626]">View</span>
-                      </Button>
+                      </Button>}
                     </div>
                   )}
 
@@ -445,9 +512,9 @@ export function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                      <Button variant="secondary" size="sm" onClick={() => navigate("/payments")}>
+                      {canViewPayments && <Button variant="secondary" size="sm" onClick={() => navigate("/payments")}>
                         <span className="text-[#DC2626]">View</span>
-                      </Button>
+                      </Button>}
                     </div>
                   )}
 
@@ -464,9 +531,9 @@ export function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                      <Button variant="secondary" size="sm" onClick={() => navigate("/supplier-dues")}>
+                      {canViewSupplierDues && <Button variant="secondary" size="sm" onClick={() => navigate("/supplier-dues")}>
                         <span className="text-[#DC2626]">View</span>
-                      </Button>
+                      </Button>}
                     </div>
                   )}
 
@@ -481,9 +548,9 @@ export function DashboardPage() {
                           <div className="text-[12px] text-[#64748B]">{recentReturns.length} return/exchange requests</div>
                         </div>
                       </div>
-                      <Button variant="secondary" size="sm" onClick={() => navigate("/returns")}>
+                      {canViewReturns && <Button variant="secondary" size="sm" onClick={() => navigate("/returns")}>
                         <span className="text-[#DC2626]">View</span>
-                      </Button>
+                      </Button>}
                     </div>
                   )}
                   
@@ -539,7 +606,7 @@ export function DashboardPage() {
 
           {/* Bottom Tables */}
           <div className="grid grid-cols-1 gap-3 lg:col-span-2 lg:grid-cols-2">
-            <Card
+            {canViewReports && <Card
               className="dashboard-panel"
               title="Top Selling Products"
               actions={
@@ -581,15 +648,15 @@ export function DashboardPage() {
                   </tbody>
                 </table>
               </div>
-            </Card>
+            </Card>}
 
-            <Card
+            {canViewSales && <Card
               className="dashboard-panel"
               title="Recent Sales"
               actions={
-                <Button variant="ghost" size="sm" onClick={() => navigate("/sales")}>
+                canViewSales ? <Button variant="ghost" size="sm" onClick={() => navigate("/sales")}>
                   View All
-                </Button>
+                </Button> : undefined
               }
               noPadding
             >
@@ -627,7 +694,7 @@ export function DashboardPage() {
                   </tbody>
                 </table>
               </div>
-            </Card>
+            </Card>}
 
           </div>
           </div>
