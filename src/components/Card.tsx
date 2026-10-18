@@ -18,24 +18,24 @@ export function Card({
 }: CardProps) {
   return (
     <div
-      className={`rounded-lg bg-white ${className ?? ""}`}
+      className={`ui-card rounded-xl bg-white ${className ?? ""}`}
       style={{
-        border: "1px solid #E2E8F0",
-        boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+        border: "1px solid #E3E9F2",
+        boxShadow: "0 2px 8px rgba(15, 23, 42, 0.045)",
       }}
       {...rest}
     >
       {(title || actions) && (
         <div
-          className="flex items-center justify-between px-4 py-3.5"
-          style={{ borderBottom: "1px solid #E2E8F0" }}
+          className="ui-card-header flex items-center justify-between px-4 py-3"
+          style={{ borderBottom: "1px solid #E8EDF4" }}
         >
           <div>
             {title && (
               <h3
                 style={{
-                  fontSize: "14px",
-                  fontWeight: 600,
+                  fontSize: "13px",
+                  fontWeight: 700,
                   color: "#0F172A",
                   margin: 0,
                 }}

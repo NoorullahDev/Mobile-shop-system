@@ -2,6 +2,15 @@ use rusqlite::{params, Connection};
 
 use crate::errors::AppError;
 
+/// SQL expression mapping a stored date or datetime column to a calendar date.
+///
+/// Date-only values (e.g. `payment_date`, `purchase_date`) already carry the
+/// intended day and must not be shifted. Longer values are UTC timestamps, so
+/// they are converted to local time before the date is taken.
+fn calendar_date(expr: &str) -> String {
+    format!("CASE WHEN length({expr}) <= 10 THEN date({expr}) ELSE date({expr}, 'localtime') END")
+}
+
 /// Dashboard KPIs for the current period (all-time ledger).
 pub fn dashboard_summary(
     conn: &Connection,
@@ -164,12 +173,7 @@ pub fn period_summary(
         params![from, to],
         |r| r.get::<_, i64>(0),
     )?;
-    let received = conn.query_row(
-        "SELECT COALESCE(SUM(paid_amount - COALESCE((SELECT SUM(amount) FROM sale_payments WHERE sale_id = sales.id AND payment_method = 'exchange_credit' AND is_voided = 0), 0)), 0) FROM sales
-         WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')",
-        params![from, to],
-        |r| r.get::<_, f64>(0),
-    )?;
+    let (received, _) = receipt_totals(conn, from, to)?;
     let discount = conn.query_row(
         "SELECT COALESCE(SUM(discount), 0) FROM sales
          WHERE date(created_at, 'localtime') >= date(?1) AND date(created_at, 'localtime') < date(?2, '+1 day')",
@@ -192,6 +196,89 @@ pub fn period_summary(
         discount,
         outstanding,
     ))
+}
+
+/// Valid money received in the period, grouped by the actual receipt date.
+/// POS receipts and later customer payments are separate ledgers, so UNION ALL
+/// includes each real event once without attributing later collections back to
+/// the original sale date.
+pub fn receipt_totals(conn: &Connection, from: &str, to: &str) -> Result<(f64, f64), AppError> {
+    let received_at = calendar_date("received.received_at");
+    conn.query_row(
+        &format!(
+            "SELECT COALESCE(SUM(received.amount), 0),
+                COALESCE(SUM(CASE WHEN LOWER(received.payment_method) != 'cash' THEN received.amount ELSE 0 END), 0)
+         FROM (
+             SELECT sp.payment_method, sp.amount, sp.created_at AS received_at
+             FROM sale_payments sp
+             WHERE sp.is_voided = 0 AND LOWER(sp.payment_method) != 'exchange_credit'
+             UNION ALL
+             SELECT p.payment_method, p.amount, COALESCE(p.payment_date, p.created_at) AS received_at
+             FROM payments p
+             WHERE p.is_deleted = 0 AND p.is_voided = 0 AND p.status = 'completed'
+               AND LOWER(p.payment_method) != 'exchange_credit'
+         ) received
+         WHERE {received_at} >= date(?1)
+           AND {received_at} < date(?2, '+1 day')",
+        ),
+        params![from, to],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(AppError::from)
+}
+
+pub fn period_purchase_costs(conn: &Connection, from: &str, to: &str) -> Result<f64, AppError> {
+    let purchase_day = calendar_date("COALESCE(purchase_date, created_at)");
+    conn.query_row(
+        &format!(
+            "SELECT COALESCE(SUM(total_amount), 0) FROM purchases
+         WHERE {purchase_day} >= date(?1)
+           AND {purchase_day} < date(?2, '+1 day')",
+        ),
+        params![from, to],
+        |row| row.get(0),
+    )
+    .map_err(AppError::from)
+}
+
+/// Total units sold (sum of sale item quantities) within the inclusive range.
+pub fn period_items_sold(conn: &Connection, from: &str, to: &str) -> Result<i64, AppError> {
+    conn.query_row(
+        "SELECT COALESCE(SUM(si.quantity), 0)
+         FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+         WHERE date(s.created_at, 'localtime') >= date(?1)
+           AND date(s.created_at, 'localtime') < date(?2, '+1 day')",
+        params![from, to],
+        |row| row.get(0),
+    )
+    .map_err(AppError::from)
+}
+
+pub fn current_stock_value(conn: &Connection) -> Result<f64, AppError> {
+    conn.query_row(
+        "SELECT
+            COALESCE((SELECT SUM(quantity * cost_price) FROM phones WHERE is_deleted = 0), 0) +
+            COALESCE((SELECT SUM(quantity * cost_price) FROM accessories WHERE is_deleted = 0), 0)",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(AppError::from)
+}
+
+pub fn current_supplier_payables(conn: &Connection) -> Result<f64, AppError> {
+    conn.query_row(
+        "SELECT COALESCE(SUM(MAX(
+             COALESCE((SELECT SUM(p.total_amount) FROM purchases p WHERE p.supplier_id = s.id), 0)
+             - COALESCE((SELECT SUM(p.paid_amount) FROM purchases p WHERE p.supplier_id = s.id), 0)
+             - COALESCE((SELECT SUM(sp.amount) FROM supplier_payments sp
+                         WHERE sp.supplier_id = s.id AND sp.is_deleted = 0 AND sp.status = 'completed'), 0),
+             0)), 0)
+         FROM suppliers s WHERE s.is_deleted = 0",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(AppError::from)
 }
 
 /// Daily sales revenue grouped by date within an inclusive range (earliest..latest).
@@ -282,24 +369,23 @@ pub fn payment_breakdown(
     from: &str,
     to: &str,
 ) -> Result<Vec<crate::models::report::PaymentBreakdown>, AppError> {
-    let mut stmt = conn.prepare(
+    let received_at = calendar_date("received.received_at");
+    let mut stmt = conn.prepare(&format!(
         "SELECT received.payment_method, SUM(received.amount) AS total, COUNT(*) AS count
          FROM (
              SELECT sp.payment_method, sp.amount, sp.created_at AS received_at
              FROM sale_payments sp
-             JOIN sales s ON s.id = sp.sale_id
              WHERE sp.is_voided = 0
              UNION ALL
              SELECT p.payment_method, p.amount, COALESCE(p.payment_date, p.created_at) AS received_at
              FROM payments p
-             JOIN sales s ON s.id = p.sale_id
              WHERE p.is_deleted = 0 AND p.is_voided = 0 AND p.status = 'completed'
          ) received
-         WHERE date(received.received_at, 'localtime') >= date(?1)
-           AND date(received.received_at, 'localtime') < date(?2, '+1 day')
+         WHERE {received_at} >= date(?1)
+           AND {received_at} < date(?2, '+1 day')
            AND received.payment_method != 'exchange_credit'
          GROUP BY received.payment_method ORDER BY total DESC",
-    )?;
+    ))?;
     let rows = stmt.query_map(params![from, to], |r| {
         Ok(crate::models::report::PaymentBreakdown {
             payment_method: r.get("payment_method")?,
@@ -319,7 +405,8 @@ pub fn online_payment_records(
     from: &str,
     to: &str,
 ) -> Result<Vec<crate::models::report::OnlinePaymentRecord>, AppError> {
-    let mut stmt = conn.prepare(
+    let created_day = calendar_date("online.created_at");
+    let mut stmt = conn.prepare(&format!(
         "SELECT online.id, online.sale_id, online.receipt_no, online.customer_name,
                 online.payment_method, online.amount, online.reference,
                 online.account_details, online.notes, online.created_at,
@@ -342,10 +429,9 @@ pub fn online_payment_records(
                     COALESCE(p.payment_date, p.created_at) AS created_at,
                     p.is_voided, p.void_reason, p.voided_at
              FROM payments p
-             JOIN sales s ON s.id = p.sale_id
-             LEFT JOIN members m ON m.id = s.member_id
-             WHERE p.sale_id IS NOT NULL AND p.sale_id != 0
-               AND p.is_deleted = 0 AND p.status = 'completed'
+             LEFT JOIN sales s ON s.id = p.sale_id
+             LEFT JOIN members m ON m.id = p.member_id
+             WHERE p.is_deleted = 0 AND p.status = 'completed'
                AND LOWER(p.payment_method) != 'cash'
                AND LOWER(p.payment_method) != 'exchange_credit'
              UNION ALL
@@ -359,10 +445,10 @@ pub fn online_payment_records(
              WHERE LOWER(r.refund_method) != 'cash'
                AND LOWER(r.refund_method) != 'exchange_credit'
          ) online
-         WHERE date(online.created_at, 'localtime') >= date(?1)
-           AND date(online.created_at, 'localtime') < date(?2, '+1 day')
+         WHERE {created_day} >= date(?1)
+           AND {created_day} < date(?2, '+1 day')
          ORDER BY online.created_at DESC, online.id DESC",
-    )?;
+    ))?;
     let rows = stmt.query_map(params![from, to], |r| {
         Ok(crate::models::report::OnlinePaymentRecord {
             id: r.get("id")?,

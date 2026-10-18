@@ -775,7 +775,7 @@ mod tests {
         let online =
             crate::services::report_service::online_payment_records(&conn, &today, &today).unwrap();
         assert_eq!(online.len(), 1);
-        assert_eq!(online[0].sale_id, sale_id);
+        assert_eq!(online[0].sale_id, Some(sale_id));
         assert!((online[0].amount - 8000.0).abs() < 0.01);
         assert_eq!(online[0].reference.as_deref(), Some("TX-8000"));
         assert_eq!(
@@ -783,7 +783,8 @@ mod tests {
             Some("Meezan Bank / 1234")
         );
 
-        // Dashboard/report payment totals include both receipt sources once.
+        // Dashboard/report payment totals include both receipt sources once,
+        // including the unrelated general customer receipt created above.
         let breakdown =
             crate::services::report_service::payment_breakdown(&conn, &today, &today).unwrap();
         let cash = breakdown
@@ -794,8 +795,8 @@ mod tests {
             .iter()
             .find(|row| row.payment_method == "bank_transfer")
             .unwrap();
-        assert!((cash.total - 30000.0).abs() < 0.01);
-        assert_eq!(cash.count, 2);
+        assert!((cash.total - 80000.0).abs() < 0.01);
+        assert_eq!(cash.count, 3);
         assert!((bank.total - 8000.0).abs() < 0.01);
         assert_eq!(bank.count, 1);
 

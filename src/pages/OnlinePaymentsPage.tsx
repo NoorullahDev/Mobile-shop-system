@@ -18,7 +18,7 @@ import { KpiCard } from "../components/KpiCard";
 import { EmptyState } from "../components/EmptyState";
 import { Spinner } from "../components/Button";
 import { Modal } from "../components/Modal";
-import { formatDateTime, formatMoney, methodLabels } from "../lib/format";
+import { formatDateTime, formatMoney, formatMoneyKpi, methodLabels } from "../lib/format";
 import { getOnlinePaymentRecords } from "../services/reportService";
 import {
   voidPayment,
@@ -146,7 +146,7 @@ export function OnlinePaymentsPage() {
     if (search) {
       const q = search.toLowerCase();
       const match =
-        r.receipt_no.toLowerCase().includes(q) ||
+        (r.receipt_no ?? "").toLowerCase().includes(q) ||
         (r.customer_name ?? "").toLowerCase().includes(q) ||
         (r.reference ?? "").toLowerCase().includes(q) ||
         (r.account_details ?? "").toLowerCase().includes(q) ||
@@ -204,7 +204,8 @@ export function OnlinePaymentsPage() {
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title={`${periodLabel} Received`}
-          value={formatMoney(totalReceived)}
+          value={formatMoneyKpi(totalReceived)}
+          valueTitle={formatMoney(totalReceived)}
           icon={Calendar}
           tone="green"
           sub={`${totalTransactions} transactions`}
@@ -218,7 +219,8 @@ export function OnlinePaymentsPage() {
         />
         <KpiCard
           title="Total Online Received"
-          value={formatMoney(totalReceived)}
+          value={formatMoneyKpi(totalReceived)}
+          valueTitle={formatMoney(totalReceived)}
           icon={Wallet}
           tone="amber"
           sub={`${totalTransactions} transactions`}
@@ -361,7 +363,7 @@ export function OnlinePaymentsPage() {
                       style={r.is_voided ? { opacity: 0.5 } : undefined}
                     >
                       <td>{formatDateTime(r.created_at)}</td>
-                      <td className="font-semibold">{r.receipt_no}</td>
+                      <td className="font-semibold">{r.receipt_no ?? "General Payment"}</td>
                       <td>{r.customer_name ?? "Walk-in"}</td>
                       <td>
                         {r.is_voided ? (
@@ -495,7 +497,7 @@ export function OnlinePaymentsPage() {
       >
         {viewRecord && (
           <div className="space-y-3 text-[13px]">
-            <Row label="Invoice" value={viewRecord.receipt_no} />
+            <Row label="Invoice" value={viewRecord.receipt_no ?? "General Payment"} />
             <Row label="Customer" value={viewRecord.customer_name ?? "Walk-in"} />
             <Row
               label="Amount"
@@ -794,7 +796,7 @@ function VoidPaymentModal({
           >
             <strong>Warning:</strong> This will void the payment of{" "}
             <strong>{formatMoney(record.amount)}</strong> on invoice{" "}
-            <strong>{record.receipt_no}</strong>. The payment will stop counting
+            <strong>{record.receipt_no ?? "General Payment"}</strong>. The payment will stop counting
             as received. This action cannot be undone.
           </div>
 

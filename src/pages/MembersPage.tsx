@@ -12,7 +12,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { MemberForm } from "./MemberForm";
 import { useMemberStore } from "../store/members";
 import * as paymentService from "../services/paymentService";
-import { formatMoneyCompact } from "../lib/format";
+import { formatMoney, formatMoneyCompact, formatMoneyKpi } from "../lib/format";
 import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
 import type { CreateMemberInput, Member } from "../types/member";
@@ -113,7 +113,8 @@ export function MembersPage() {
         />
         <KpiCard
           title="Total Outstanding"
-          value={formatMoneyCompact(totalDues)}
+          value={formatMoneyKpi(totalDues)}
+          valueTitle={formatMoney(totalDues)}
           icon={Wallet}
           tone={totalDues > 0 ? "amber" : "green"}
           sub="credit dues based on sales minus payments"

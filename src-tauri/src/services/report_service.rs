@@ -90,6 +90,11 @@ pub fn recent_activity(conn: &Connection, limit: i64) -> Result<Vec<ActivityLog>
 pub fn period_summary(conn: &Connection, from: &str, to: &str) -> Result<PeriodSummary, AppError> {
     let (revenue, expenses, sales_count, received, discount, outstanding) =
         report_repository::period_summary(conn, from, to)?;
+    let (_, online_received) = report_repository::receipt_totals(conn, from, to)?;
+    let purchase_costs = report_repository::period_purchase_costs(conn, from, to)?;
+    let items_sold = report_repository::period_items_sold(conn, from, to)?;
+    let stock_value = report_repository::current_stock_value(conn)?;
+    let supplier_payables = report_repository::current_supplier_payables(conn)?;
     let (_, cogs, _, _) = report_repository::profit_loss_summary(conn, from, to)?;
     Ok(PeriodSummary {
         from: from.to_string(),
@@ -99,8 +104,13 @@ pub fn period_summary(conn: &Connection, from: &str, to: &str) -> Result<PeriodS
         profit: revenue - cogs - expenses,
         sales_count,
         received,
+        online_received,
+        purchase_costs,
+        stock_value,
+        supplier_payables,
         discount,
         outstanding,
+        items_sold,
     })
 }
 
@@ -401,6 +411,91 @@ mod tests {
         assert_eq!(p.expenses, 250.0);
         assert_eq!(p.profit, 750.0);
         assert_eq!(p.sales_count, 1);
+    }
+
+    #[test]
+    fn period_summary_uses_payment_dates_and_includes_general_payments() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO sales (receipt_no, total_amount, paid_amount, payment_method, created_at)
+             VALUES ('OLD-SALE', 500, 500, 'cash', '2026-09-30 10:00:00')",
+            [],
+        )
+        .unwrap();
+        let sale_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO sale_payments (sale_id, amount, payment_method, created_at)
+             VALUES (?1, 500, 'cash', '2026-09-30 10:00:00')",
+            [sale_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO payments (amount, payment_method, status, payment_date)
+             VALUES (75, 'cash', 'completed', '2026-10-18 09:00:00')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO payments (amount, payment_method, status, payment_date)
+             VALUES (25, 'bank_transfer', 'completed', '2026-10-18 10:00:00')",
+            [],
+        )
+        .unwrap();
+
+        let current = period_summary(&conn, "2026-10-18", "2026-10-18").unwrap();
+        assert_eq!(current.revenue, 0.0);
+        assert_eq!(current.received, 100.0);
+        assert_eq!(current.online_received, 25.0);
+
+        let old = period_summary(&conn, "2026-09-30", "2026-09-30").unwrap();
+        assert_eq!(old.received, 500.0);
+
+        let breakdown = payment_breakdown(&conn, "2026-10-18", "2026-10-18").unwrap();
+        assert_eq!(breakdown.iter().map(|item| item.total).sum::<f64>(), 100.0);
+        let online = online_payment_records(&conn, "2026-10-18", "2026-10-18").unwrap();
+        assert_eq!(online.len(), 1);
+        assert_eq!(online[0].sale_id, None);
+        assert_eq!(online[0].receipt_no, None);
+    }
+
+    #[test]
+    fn period_summary_reads_purchase_stock_and_supplier_ledgers_directly() {
+        let conn = in_memory_conn();
+        conn.execute(
+            "INSERT INTO suppliers (name) VALUES ('Ledger Supplier')",
+            [],
+        )
+        .unwrap();
+        let supplier_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO phones (brand, model, quantity, cost_price, sale_price)
+             VALUES ('A', 'Phone', 2, 100, 150)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accessories (brand, product_name, quantity, cost_price, sale_price)
+             VALUES ('A', 'Cable', 3, 50, 75)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO purchases (purchase_no, supplier_id, total_amount, paid_amount, payment_method, purchase_date)
+             VALUES ('PUR-1', ?1, 1000, 300, 'cash', '2026-10-18')",
+            [supplier_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO supplier_payments (supplier_id, amount, payment_method, status, payment_date)
+             VALUES (?1, 200, 'cash', 'completed', '2026-10-18')",
+            [supplier_id],
+        )
+        .unwrap();
+
+        let summary = period_summary(&conn, "2026-10-18", "2026-10-18").unwrap();
+        assert_eq!(summary.purchase_costs, 1000.0);
+        assert_eq!(summary.stock_value, 350.0);
+        assert_eq!(summary.supplier_payables, 500.0);
     }
 
     #[test]

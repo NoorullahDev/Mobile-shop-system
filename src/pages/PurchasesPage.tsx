@@ -24,7 +24,7 @@ import { useInventoryStore } from "../store/inventory";
 import { useSupplierStore } from "../store/suppliers";
 import { useSessionStore } from "../store/session";
 import * as purchaseService from "../services/purchaseService";
-import { formatMoney, formatDate, methodLabels } from "../lib/format";
+import { formatMoney, formatMoneyKpi, formatDate, methodLabels } from "../lib/format";
 import type { Purchase } from "../types/purchase";
 import { can } from "../lib/permissions";
 
@@ -98,19 +98,22 @@ export function PurchasesPage() {
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Total Purchases"
-          value={formatMoney(totalCost)}
+          value={formatMoneyKpi(totalCost)}
+          valueTitle={formatMoney(totalCost)}
           icon={ShoppingCart}
           tone="primary"
         />
         <KpiCard
           title="Costs Paid"
-          value={formatMoney(totalPaid)}
+          value={formatMoneyKpi(totalPaid)}
+          valueTitle={formatMoney(totalPaid)}
           icon={CreditCard}
           tone="green"
         />
         <KpiCard
           title="Outstanding to Suppliers"
-          value={formatMoney(outstanding)}
+          value={formatMoneyKpi(outstanding)}
+          valueTitle={formatMoney(outstanding)}
           icon={CircleDollarSign}
           tone="amber"
         />

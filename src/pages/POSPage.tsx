@@ -497,19 +497,19 @@ export function POSPage() {
     <PageContainer className="flex h-full flex-col">
       {/* POS Header */}
       <div
-        className="flex shrink-0 items-center justify-between rounded-t-lg px-4 py-3"
-        style={{ background: "#0F1B32", borderBottom: "1px solid #1E2E4F" }}
+        className="flex shrink-0 items-center justify-between rounded-t-xl px-4 py-3"
+        style={{ background: "#FFFFFF", border: "1px solid #E3E9F2", borderBottom: "1px solid #E8EDF4" }}
       >
         <div className="flex items-center gap-3">
           <span
             className="flex h-9 w-9 items-center justify-center rounded-lg"
-            style={{ background: "rgba(255,255,255,0.1)" }}
+            style={{ background: "#EAF2FF" }}
           >
-            <ShoppingCart className="h-4.5 w-4.5 text-white" style={{ width: 18, height: 18 }} />
+            <ShoppingCart className="h-4.5 w-4.5" style={{ width: 18, height: 18, color: "#1769FF" }} />
           </span>
           <div className="leading-tight">
-            <div className="text-[14px] font-bold text-white">New Sale · Point of Sale</div>
-            <div className="text-[11px]" style={{ color: "#7E8FAD" }}>
+            <div className="text-[14px] font-bold text-[#0F172A]">New Sale · Point of Sale</div>
+            <div className="text-[11px]" style={{ color: "#64748B" }}>
               {itemCount} item{itemCount !== 1 ? "s" : ""} in cart
             </div>
           </div>
@@ -517,14 +517,14 @@ export function POSPage() {
         <button
           type="button"
           onClick={() => navigate("/sales")}
-          className="rounded px-3 py-2 text-[12px] font-semibold transition-colors hover:bg-white/10"
-          style={{ color: "#AEBBD1" }}
+          className="rounded-lg px-3 py-2 text-[12px] font-semibold transition-colors hover:bg-[#EAF2FF]"
+          style={{ color: "#1769FF" }}
         >
           View Sales History →
         </button>
       </div>
 
-      <div className="grid flex-1 grid-cols-5 gap-4 overflow-hidden rounded-b-lg bg-white p-4" style={{ border: "1px solid #E2E8F0" }}>
+      <div className="grid flex-1 grid-cols-5 gap-4 overflow-hidden rounded-b-xl bg-white p-4" style={{ border: "1px solid #E3E9F2", borderTop: 0, boxShadow: "0 2px 8px rgba(15,23,42,0.04)" }}>
         {/* LEFT: product grid */}
         <div className="col-span-3 flex min-h-0 flex-col">
           {/* Product type toggle */}

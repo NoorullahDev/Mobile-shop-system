@@ -225,8 +225,8 @@ export function SettingsPage() {
       <div className="flex items-start gap-5">
         {/* ─── Left settings navigation ─── */}
         <aside
-          className="w-60 shrink-0 rounded-lg bg-white p-2"
-          style={{ border: "1px solid #E2E8F0", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}
+          className="w-60 shrink-0 rounded-xl bg-white p-2.5"
+          style={{ border: "1px solid #E3E9F2", boxShadow: "0 2px 8px rgba(15,23,42,0.045)" }}
         >
           <nav className="flex flex-col gap-0.5">
             {visibleNav.map(({ id, label, icon: Icon }) => {
@@ -236,14 +236,14 @@ export function SettingsPage() {
                   key={id}
                   type="button"
                   onClick={() => setActiveTab(id)}
-                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-[13px] font-medium transition-colors"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[12px] font-medium transition-colors"
                   style={
                     active
-                      ? { background: "#EFF4FF", color: "#1D4ED8" }
+                      ? { background: "#EAF2FF", color: "#1769FF" }
                       : { background: "transparent", color: "#334155" }
                   }
                   onMouseEnter={(e) => {
-                    if (!active) e.currentTarget.style.background = "#F1F5F9";
+                    if (!active) e.currentTarget.style.background = "#F4F7FB";
                   }}
                   onMouseLeave={(e) => {
                     if (!active) e.currentTarget.style.background = "transparent";
@@ -251,7 +251,7 @@ export function SettingsPage() {
                 >
                   <Icon
                     className="h-4 w-4 shrink-0"
-                    style={{ color: active ? "#2563EB" : "#64748B" }}
+                    style={{ color: active ? "#1769FF" : "#64748B" }}
                   />
                   <span className="flex-1 truncate">{label}</span>
                 </button>

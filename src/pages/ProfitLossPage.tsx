@@ -30,7 +30,7 @@ import { Input } from "../components/Input";
 import { Alert } from "../components/Alert";
 import { EmptyState } from "../components/EmptyState";
 import * as reportService from "../services/reportService";
-import { formatMoney, formatMoneyCompact, formatDate, toLocalDate } from "../lib/format";
+import { formatMoney, formatMoneyCompact, formatMoneyKpi, formatDate, toLocalDate } from "../lib/format";
 import type { ProfitLoss } from "../types/report";
 
 type Preset = { label: string; from: () => string; to: () => string };
@@ -285,35 +285,40 @@ export function ProfitLossPage() {
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
             <KpiCard
               title="Total Revenue"
-              value={formatMoney(pl?.total_revenue ?? 0)}
+              value={formatMoneyKpi(pl?.total_revenue ?? 0)}
+              valueTitle={formatMoney(pl?.total_revenue ?? 0)}
               icon={TrendingUp}
               tone="green"
               sub="gross sales"
             />
             <KpiCard
               title="Cost of Goods Sold"
-              value={formatMoney(pl?.total_cogs ?? 0)}
+              value={formatMoneyKpi(pl?.total_cogs ?? 0)}
+              valueTitle={formatMoney(pl?.total_cogs ?? 0)}
               icon={Receipt}
               tone="navy"
               sub="purchased stock at cost"
             />
             <KpiCard
               title="Total Expenses"
-              value={formatMoney(pl?.total_expenses ?? 0)}
+              value={formatMoneyKpi(pl?.total_expenses ?? 0)}
+              valueTitle={formatMoney(pl?.total_expenses ?? 0)}
               icon={TrendingDown}
               tone="red"
               sub="operating expenses"
             />
             <KpiCard
               title="Gross Profit"
-              value={formatMoney(pl?.gross_profit ?? 0)}
+              value={formatMoneyKpi(pl?.gross_profit ?? 0)}
+              valueTitle={formatMoney(pl?.gross_profit ?? 0)}
               icon={UserCircle2}
               tone="primary"
               sub={`${m.gross.toFixed(1)}% margin`}
             />
             <KpiCard
               title="Net Profit"
-              value={formatMoney(pl?.net_profit ?? 0)}
+              value={formatMoneyKpi(pl?.net_profit ?? 0)}
+              valueTitle={formatMoney(pl?.net_profit ?? 0)}
               icon={PiggyBank}
               tone={(pl?.net_profit ?? 0) >= 0 ? "green" : "red"}
               sub={`${m.net.toFixed(1)}% margin`}

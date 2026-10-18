@@ -11,7 +11,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const base =
-  "inline-flex items-center justify-center gap-1.5 rounded font-medium transition-all " +
+  "ui-button inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold transition-all " +
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-55 select-none";
 
 const variants: Record<ButtonVariant, string> = {
@@ -28,18 +28,18 @@ const variants: Record<ButtonVariant, string> = {
 };
 
 const variantStyles: Record<ButtonVariant, React.CSSProperties> = {
-  primary: { background: "#3B6FD4" },
-  secondary: { borderColor: "#CBD5E1" },
-  danger: { background: "#DC2626" },
-  ghost: { color: "#3B6FD4" },
-  success: { background: "#16A34A" },
+  primary: { background: "#1769FF" },
+  secondary: { borderColor: "#D8E0EB" },
+  danger: { background: "#E5484D" },
+  ghost: { color: "#1769FF" },
+  success: { background: "#12A66A" },
 };
 
 const sizes: Record<ButtonSize, string> = {
-  xs: "h-7 px-2.5 text-[12px]",
-  sm: "h-8 px-3 text-[13px]",
-  md: "h-9 px-4 text-[13px]",
-  lg: "h-10 px-5 text-sm",
+  xs: "h-7 px-2.5 text-[11px]",
+  sm: "h-8 px-3 text-[12px]",
+  md: "h-9 px-4 text-[12px]",
+  lg: "h-10 px-5 text-[13px]",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(

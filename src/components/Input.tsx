@@ -16,13 +16,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   const inputId = id ?? rest.name;
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="ui-field flex flex-col gap-1.5">
       {label && (
         <label
           htmlFor={inputId}
           style={{
-            fontSize: "13px",
-            fontWeight: 500,
+            fontSize: "12px",
+            fontWeight: 600,
             color: "#334155",
           }}
         >
@@ -45,27 +45,27 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         <input
           ref={ref}
           id={inputId}
-          className={`h-9 w-full rounded border bg-white text-[14px] outline-none transition-all placeholder:text-[#94A3B8] ${
+          className={`h-10 w-full rounded-lg border bg-white text-[13px] outline-none transition-all placeholder:text-[#94A3B8] ${
             prefix ? "pl-9" : "pl-3"
           } ${suffix ? "pr-9" : "pr-3"} ${
             mono ? "font-mono tracking-wide" : ""
           } ${className ?? ""}`}
           style={{
-            borderColor: error ? "#DC2626" : "#CBD5E1",
+            borderColor: error ? "#DC2626" : "#D8E0EB",
             color: "#0F172A",
             boxShadow: error
               ? "0 0 0 0px rgba(220,38,38,0)"
               : "none",
           }}
           onFocus={(e) => {
-            e.currentTarget.style.borderColor = error ? "#DC2626" : "#3B6FD4";
+            e.currentTarget.style.borderColor = error ? "#DC2626" : "#1769FF";
             e.currentTarget.style.boxShadow = error
               ? "0 0 0 3px rgba(220,38,38,0.12)"
-              : "0 0 0 3px rgba(59,111,212,0.12)";
+              : "0 0 0 3px rgba(23,105,255,0.12)";
             rest.onFocus?.(e);
           }}
           onBlur={(e) => {
-            e.currentTarget.style.borderColor = error ? "#DC2626" : "#CBD5E1";
+            e.currentTarget.style.borderColor = error ? "#DC2626" : "#D8E0EB";
             e.currentTarget.style.boxShadow = "none";
             rest.onBlur?.(e);
           }}

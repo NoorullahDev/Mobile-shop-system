@@ -33,8 +33,8 @@ const config = {
   },
   info: {
     bg: "#EFF6FF",
-    border: "#3B6FD4",
-    iconColor: "#3B6FD4",
+    border: "#1769FF",
+    iconColor: "#1769FF",
     textColor: "#1E3A8A",
     Icon: Info,
     defaultTitle: "Info",
@@ -47,7 +47,7 @@ export function Alert({ message, variant = "error", title }: AlertProps) {
 
   return (
     <div
-      className="flex items-start gap-3 rounded px-3.5 py-3"
+      className="flex items-start gap-3 rounded-lg px-3.5 py-3"
       style={{
         background: c.bg,
         borderLeft: `3px solid ${c.border}`,

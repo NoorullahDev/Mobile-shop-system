@@ -17,7 +17,7 @@ export function PageHeader({
 }: PageHeaderProps) {
   return (
     <div
-      className="mb-5 flex items-start justify-between"
+      className="page-header mb-4 flex items-start justify-between gap-4"
     >
       <div>
         {/* Breadcrumb */}
@@ -44,7 +44,7 @@ export function PageHeader({
 
         {/* Title row */}
         <div className="flex items-center gap-3">
-          <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", letterSpacing: "-0.3px" }}>
+          <h1 style={{ fontSize: "20px", fontWeight: 750, color: "#0F172A", letterSpacing: "-0.35px" }}>
             {title}
           </h1>
           {meta && (
@@ -61,7 +61,7 @@ export function PageHeader({
         {description && (
           <div
             className="mt-0.5"
-            style={{ fontSize: "13px", color: "#64748B" }}
+            style={{ fontSize: "12px", color: "#64748B" }}
           >
             {description}
           </div>

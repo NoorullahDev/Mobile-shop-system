@@ -38,10 +38,20 @@ pub struct PeriodSummary {
     pub expenses: f64,
     pub profit: f64,
     pub sales_count: i64,
-    /// Sum of amounts received at point of sale (cash/partial paid).
+    /// Sum of valid receipt events in the period, using each payment's date.
     pub received: f64,
+    /// Non-cash portion of valid receipt events in the period.
+    pub online_received: f64,
+    /// Purchase costs recorded inside the selected period.
+    pub purchase_costs: f64,
+    /// Current inventory valuation at cost.
+    pub stock_value: f64,
+    /// Current outstanding amount owed to suppliers.
+    pub supplier_payables: f64,
     /// Sum of all discounts applied to sales in the period.
     pub discount: f64,
+    /// Total units sold (sum of sale item quantities) in the period.
+    pub items_sold: i64,
     /// Revenue left outstanding on credit/partial sales after upfront payment.
     pub outstanding: f64,
 }
@@ -72,8 +82,8 @@ pub struct PaymentBreakdown {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OnlinePaymentRecord {
     pub id: i64,
-    pub sale_id: i64,
-    pub receipt_no: String,
+    pub sale_id: Option<i64>,
+    pub receipt_no: Option<String>,
     pub customer_name: Option<String>,
     pub payment_method: String,
     pub amount: f64,

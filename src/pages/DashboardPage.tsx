@@ -6,11 +6,12 @@ import {
   Banknote,
   AlertTriangle,
   Activity,
-  Plus,
   ShoppingBag,
   Calendar,
   RefreshCw,
   CreditCard,
+  PackagePlus,
+  ReceiptText,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -35,6 +36,7 @@ import { useNavigate } from "react-router-dom";
 import {
   formatMoney,
   formatMoneyCompact,
+  formatDashboardReportKpiMoney,
   formatDateTime,
   toLocalDate,
 } from "../lib/format";
@@ -104,7 +106,8 @@ export function DashboardPage() {
 
       if (period === "week") {
         const start = new Date(now);
-        start.setDate(now.getDate() - now.getDay());
+        const dayFromMonday = (now.getDay() + 6) % 7;
+        start.setDate(now.getDate() - dayFromMonday);
         from = toLocalDate(start);
       } else if (period === "month") {
         const start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -114,7 +117,7 @@ export function DashboardPage() {
         from = toLocalDate(start);
       }
 
-      const [pSummary, top, seriesData, payBreakdown] = await Promise.all([
+      const [periodData, top, seriesData, payBreakdown] = await Promise.all([
         getPeriodSummary(from, to),
         getTopSellers(from, to, 5),
         (period === "week" || period === "month") ? getSalesSeries(from, to) : Promise.resolve([]),
@@ -122,7 +125,7 @@ export function DashboardPage() {
       ]);
 
       if (req !== dashReq.current) return;
-      setPeriodSummary(pSummary);
+      setPeriodSummary(periodData);
       setTopSellers(top);
       setDailySales(seriesData);
       setPaymentBreakdown(payBreakdown);
@@ -156,6 +159,7 @@ export function DashboardPage() {
 
   const fallbackName = user?.username ? user.username.charAt(0).toUpperCase() + user.username.slice(1) : "Noor";
   const displayWelcomeName = ownerName || fallbackName;
+  const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : period === "month" ? "This Month" : "This Year";
 
   let displayChartData: any[] = [];
   if (period === "year" || period === "today") {
@@ -180,7 +184,7 @@ export function DashboardPage() {
   }
 
   return (
-    <div>
+    <div className="dashboard-page">
       <PageHeader
         title="Dashboard"
         description={
@@ -223,9 +227,9 @@ export function DashboardPage() {
 
       {loading && !summary ? (
         <div>
-          <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="skeleton rounded-xl" style={{ height: "110px" }} />
+              <div key={i} className="skeleton rounded-xl" style={{ height: "80px" }} />
             ))}
           </div>
           <div className="grid grid-cols-3 gap-4">
@@ -236,65 +240,71 @@ export function DashboardPage() {
       ) : (
         <>
           {/* KPI Cards */}
-          <div className="dashboard-kpis mb-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="dashboard-kpis mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <KpiCard
-              title={period === "today" ? "TODAY'S SALES" : period === "week" ? "THIS WEEK'S SALES" : period === "month" ? "THIS MONTH'S SALES" : "THIS YEAR'S SALES"}
-              value={formatMoneyCompact(periodSummary?.revenue ?? summary?.today_revenue ?? 0)}
-              sub={`${periodSummary?.sales_count ?? summary?.today_sales_count ?? 0} transactions`}
+              title={`Sales ${periodLabel}`}
+              value={formatDashboardReportKpiMoney(periodSummary?.revenue ?? 0)}
+              valueTitle={formatMoney(periodSummary?.revenue ?? 0)}
+              sub={`${periodSummary?.sales_count ?? 0} transactions`}
               icon={ShoppingBag}
               tone="primary"
+              compact
               onClick={() => navigate("/sales")}
             />
             <KpiCard
-              title="TOTAL REVENUE"
-              value={formatMoneyCompact(summary?.revenue ?? 0)}
-              sub="All time sales"
+              title={`Received ${periodLabel}`}
+              value={formatDashboardReportKpiMoney(periodSummary?.received ?? 0)}
+              valueTitle={formatMoney(periodSummary?.received ?? 0)}
+              sub="Payments received in period"
               icon={Banknote}
-              tone="primary"
+              tone="green"
+              compact
+            />
+            <KpiCard
+              title={`Transactions ${periodLabel}`}
+              value={String(periodSummary?.sales_count ?? 0)}
+              sub="Sales transactions"
+              icon={Calendar}
+              tone="purple"
+              compact
               onClick={() => navigate("/sales")}
             />
             <KpiCard
-              title={period === "today" ? "TODAY'S PROFIT" : period === "week" ? "THIS WEEK'S PROFIT" : period === "month" ? "THIS MONTH'S PROFIT" : "THIS YEAR'S PROFIT"}
-              value={formatMoneyCompact(periodSummary?.profit ?? summary?.profit ?? 0)}
-              sub="After COGS & expenses"
-              icon={TrendingUp}
-              tone="green"
-            />
-            <KpiCard
-              title="PRODUCTS"
-              value={String(summary?.products_total ?? 0)}
-              sub={`${summary?.low_stock_count ?? 0} low in stock`}
-              icon={Package}
-              tone="amber"
-              trend={outOfStock.length > 0 ? { label: String(outOfStock.length), direction: "down", positive: false } : undefined}
-              onClick={() => navigate("/inventory")}
-            />
-            <KpiCard
-              title="CUSTOMERS"
-              value={String(summary?.members_total ?? 0)}
-              sub={`${membersWithDues.length} with dues`}
-              icon={Users}
-              tone="purple"
-              onClick={() => navigate("/members")}
-            />
-            <KpiCard
-              title="ONLINE PAYMENTS"
-              value={formatMoneyCompact(
-                paymentBreakdown
-                  .filter((b) => b.payment_method !== "cash")
-                  .reduce((sum, b) => sum + b.total, 0)
-              )}
-              sub="Bank Transfer / Easypaisa / JazzCash / Card"
+              title={`Online Payments ${periodLabel}`}
+              value={formatDashboardReportKpiMoney(periodSummary?.online_received ?? 0)}
+              valueTitle={formatMoney(periodSummary?.online_received ?? 0)}
+              sub={`${paymentBreakdown.filter((b) => b.payment_method !== "cash").reduce((sum, b) => sum + b.count, 0)} online transactions`}
               icon={CreditCard}
-              tone="green"
+              tone="cyan"
+              compact
+              onClick={() => navigate("/online-payments")}
+            />
+            <KpiCard
+              title="Customer Dues"
+              value={formatDashboardReportKpiMoney(membersWithDues.reduce((sum, member) => sum + member.balance, 0))}
+              valueTitle={formatMoney(membersWithDues.reduce((sum, member) => sum + member.balance, 0))}
+              sub={`${membersWithDues.length} customers pending`}
+              icon={Users}
+              tone="amber"
+              compact
+              onClick={() => navigate("/payments")}
+            />
+            <KpiCard
+              title="Low / Out of Stock"
+              value={String(Math.max(summary?.low_stock_count ?? 0, outOfStock.length))}
+              sub={`${outOfStock.length} products out of stock`}
+              icon={AlertTriangle}
+              tone="red"
+              compact
+              onClick={() => navigate("/inventory")}
             />
           </div>
 
           {/* Main grid */}
-          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-3">
             {/* Recharts trend */}
             <div className="lg:col-span-2">
-              <Card title="Sales vs Expenses" subtitle={period === "year" || period === "today" ? "Last 12 months - monthly trend" : "Daily sales trend"}>
+              <Card className="dashboard-panel" title="Sales vs Expenses" subtitle={period === "year" || period === "today" ? "Last 12 months · monthly trend" : "Daily sales trend"}>
                 {displayChartData.length === 0 || displayChartData.every((d) => d.Sales === 0 && d.Expenses === 0) ? (
                   <EmptyState
                     icon={TrendingUp}
@@ -302,7 +312,7 @@ export function DashboardPage() {
                     description="Sales and expense data will appear here once recorded."
                   />
                 ) : (
-                  <ResponsiveContainer width="100%" height={280}>
+                  <ResponsiveContainer width="100%" height={205}>
                     <ComposedChart data={displayChartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
                       <XAxis
@@ -339,24 +349,27 @@ export function DashboardPage() {
             </div>
 
             {/* Right column */}
-            <div className="flex flex-col gap-4 lg:row-span-2">
-              <Card title="Quick Actions">
+            <div className="flex flex-col gap-3 lg:row-span-2">
+              <Card className="dashboard-panel" title="Quick Actions">
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     {
                       label: "New Sale",
                       to: "/sales/new",
                       primary: true,
+                      icon: ShoppingBag,
                     },
-                    { label: "Add Product", to: "/inventory" },
-                    { label: "Add Customer", to: "/members" },
-                    { label: "Add Expense", to: "/expenses" },
-                  ].map(({ label, to, primary }) => (
+                    { label: "Receive Payment", to: "/payments", icon: Banknote },
+                    { label: "Add Customer", to: "/members", icon: Users },
+                    { label: "Add Product", to: "/inventory", icon: Package },
+                    { label: "Record Purchase", to: "/purchases", icon: PackagePlus },
+                    { label: "Add Expense", to: "/expenses", icon: ReceiptText },
+                  ].map(({ label, to, primary, icon: ActionIcon }) => (
                     <button
                       key={label}
                       type="button"
                       onClick={() => navigate(to)}
-                      className="flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-[13px] font-semibold transition-all hover:opacity-90 active:scale-[0.97]"
+                      className="flex items-center justify-start gap-2 rounded-lg px-3 py-2 text-[11px] font-semibold transition-all hover:opacity-90 active:scale-[0.97]"
                       style={
                          primary
                            ? { background: "#3B6FD4", color: "#FFFFFF" }
@@ -367,7 +380,7 @@ export function DashboardPage() {
                              }
                       }
                     >
-                      <Plus className="h-3.5 w-3.5" />
+                      <ActionIcon className="h-4 w-4" />
                       {label}
                     </button>
                   ))}
@@ -375,6 +388,7 @@ export function DashboardPage() {
               </Card>
 
               <Card
+                className="dashboard-panel"
                 title="Business Alerts"
                 actions={
                   <Button variant="ghost" size="sm">
@@ -479,22 +493,22 @@ export function DashboardPage() {
                 </div>
               </Card>
 
-              <Card title="Today's Summary" noPadding>
-                <div className="flex h-full flex-col justify-center px-6 py-4">
-                  <div className="mb-4 grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-[12px] text-[#64748B]">Sales</div>
-                      <div className="mt-1 text-lg font-bold text-[#0F172A]">{formatMoney(summary?.today_revenue ?? 0)}</div>
+              <Card className="dashboard-panel" title={`${periodLabel} Summary`} noPadding>
+                <div className="grid grid-cols-2 gap-2 p-3">
+                    <div className="dashboard-summary-tile">
+                      <span className="dashboard-summary-icon bg-[#EAF2FF] text-[#1769FF]"><ShoppingBag className="h-4 w-4" /></span>
+                      <div><div className="text-[10px] text-[#64748B]">Sales</div>
+                      <div className="text-[13px] font-bold text-[#0F172A]">{formatMoney(periodSummary?.revenue ?? 0)}</div></div>
                     </div>
-                    <div>
-                      <div className="text-[12px] text-[#64748B]">Transactions</div>
-                      <div className="mt-1 text-lg font-bold text-[#0F172A]">{summary?.today_sales_count ?? 0}</div>
+                    <div className="dashboard-summary-tile">
+                      <span className="dashboard-summary-icon bg-[#F1EAFE] text-[#7C3AED]"><RefreshCw className="h-4 w-4" /></span>
+                      <div><div className="text-[10px] text-[#64748B]">Transactions</div>
+                      <div className="text-[13px] font-bold text-[#0F172A]">{periodSummary?.sales_count ?? 0}</div></div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-[12px] text-[#64748B]">New Customers</div>
-                      <div className="mt-1 text-lg font-bold text-[#0F172A]">
+                    <div className="dashboard-summary-tile">
+                      <span className="dashboard-summary-icon bg-[#E8F9F7] text-[#0891B2]"><Users className="h-4 w-4" /></span>
+                      <div><div className="text-[10px] text-[#64748B]">New Customers</div>
+                      <div className="text-[13px] font-bold text-[#0F172A]">
                         {totalMembers.filter((m) => {
                           const d = new Date(m.created_at);
                           const now = new Date();
@@ -503,7 +517,7 @@ export function DashboardPage() {
                           }
                           if (period === "week") {
                             const weekStart = new Date(now);
-                            weekStart.setDate(now.getDate() - now.getDay());
+                            weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
                             weekStart.setHours(0, 0, 0, 0);
                             return d >= weekStart;
                           }
@@ -512,20 +526,21 @@ export function DashboardPage() {
                           }
                           return d.getFullYear() === now.getFullYear();
                         }).length}
-                      </div>
+                      </div></div>
                     </div>
-                    <div>
-                      <div className="text-[12px] text-[#64748B]">Items Sold</div>
-                      <div className="mt-1 text-lg font-bold text-[#0F172A]">{topSellers.reduce((sum, item) => sum + item.quantity, 0)}</div>
+                    <div className="dashboard-summary-tile">
+                      <span className="dashboard-summary-icon bg-[#FFF4E5] text-[#F79009]"><Package className="h-4 w-4" /></span>
+                      <div><div className="text-[10px] text-[#64748B]">Items Sold</div>
+                      <div className="text-[13px] font-bold text-[#0F172A]">{periodSummary?.items_sold ?? 0}</div></div>
                     </div>
-                  </div>
                 </div>
               </Card>
             </div>
 
           {/* Bottom Tables */}
-          <div className="grid grid-cols-1 gap-4 lg:col-span-2 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 lg:col-span-2 lg:grid-cols-2">
             <Card
+              className="dashboard-panel"
               title="Top Selling Products"
               actions={
                 <Button variant="ghost" size="sm">
@@ -569,6 +584,7 @@ export function DashboardPage() {
             </Card>
 
             <Card
+              className="dashboard-panel"
               title="Recent Sales"
               actions={
                 <Button variant="ghost" size="sm" onClick={() => navigate("/sales")}>

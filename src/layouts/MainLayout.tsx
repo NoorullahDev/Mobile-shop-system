@@ -25,8 +25,11 @@ export function MainLayout() {
     if (!content) return;
 
     const animation = content.animate(
-      [{ transform: "translateX(8px)" }, { transform: "translateX(0)" }],
-      { duration: 180, easing: "ease-out" },
+      [
+        { opacity: 0.76, transform: "translate3d(6px, 2px, 0)" },
+        { opacity: 1, transform: "translate3d(0, 0, 0)" },
+      ],
+      { duration: 190, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
     );
     pageAnimationRef.current = animation;
     animation.onfinish = () => {
@@ -65,16 +68,18 @@ export function MainLayout() {
 
   const showLicenseWarning = unlicensed && !licenseDismissed;
 
+  const isDashboard = location.pathname === "/";
+
   const handleDismissLicense = () => {
     setLicenseDismissed(true);
     localStorage.setItem("licenseDismissed", "true");
   };
 
   return (
-    <div className="app-shell">
-      <Sidebar username="" role="" />
+    <div className={`app-shell${isDashboard ? " dashboard-shell" : ""}`}>
+      <Sidebar username="" role="" dashboardStyle={isDashboard} />
       <div className="app-main">
-        <Header />
+        <Header dashboardStyle={isDashboard} />
         {showLicenseWarning && (
           <div
             className="flex items-center justify-between gap-3 border-b px-6 py-2.5 text-[13px]"

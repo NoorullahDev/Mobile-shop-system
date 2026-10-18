@@ -51,6 +51,47 @@ export function formatMoneyCompact(n: number, currency: Currency = currentCurren
   })}`;
 }
 
+/** Compact KPI money, e.g. "Rs. 250K" or "Rs. 1.5M". */
+export function formatMoneyKpi(n: number, currency: Currency = currentCurrency): string {
+  if (!Number.isFinite(n)) return formatMoneyKpi(0, currency);
+  const symbol = CURRENCY_SYMBOLS[currency];
+  const locale = CURRENCY_LOCALES[currency];
+  const absolute = Math.abs(n);
+  const [divisor, suffix] = absolute >= 1_000_000_000
+    ? [1_000_000_000, "B"]
+    : absolute >= 1_000_000
+      ? [1_000_000, "M"]
+      : absolute >= 1_000
+        ? [1_000, "K"]
+        : [1, ""];
+  const formatted = (n / divisor).toLocaleString(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: suffix ? 1 : 0,
+  });
+  return `${symbol} ${formatted}${suffix}`;
+}
+
+/** Dashboard/Reports KPI money: full below 100K, then K/M notation. */
+export function formatDashboardReportKpiMoney(
+  n: number,
+  currency: Currency = currentCurrency,
+): string {
+  if (!Number.isFinite(n)) return formatDashboardReportKpiMoney(0, currency);
+  const absolute = Math.abs(n);
+  if (absolute < 100_000) return formatMoneyCompact(n, currency);
+
+  const symbol = CURRENCY_SYMBOLS[currency];
+  const locale = CURRENCY_LOCALES[currency];
+  const [divisor, suffix] = absolute >= 1_000_000
+    ? [1_000_000, "M"]
+    : [1_000, "K"];
+  const formatted = (n / divisor).toLocaleString(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  });
+  return `${symbol} ${formatted}${suffix}`;
+}
+
 /** Short date, e.g. "26 Aug 2026". */
 export function formatDate(input: string | Date): string {
   const d = typeof input === "string" ? new Date(input) : input;

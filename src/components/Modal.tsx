@@ -50,8 +50,8 @@ export function Modal({
 
       {/* Panel */}
       <div
-        className={`modal-panel relative z-10 flex w-full flex-col overflow-hidden rounded-lg bg-white ${sizeMap[size]}`}
-        style={{ boxShadow: "0 16px 40px rgba(0,0,0,0.14)" }}
+        className={`modal-panel relative z-10 flex w-full flex-col overflow-hidden rounded-xl border border-[#E3E9F2] bg-white ${sizeMap[size]}`}
+        style={{ boxShadow: "0 22px 55px rgba(15,23,42,0.18)" }}
       >
         {/* Header */}
         <div

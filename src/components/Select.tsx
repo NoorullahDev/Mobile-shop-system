@@ -20,11 +20,11 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   const selectId = id ?? rest.name;
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="ui-field flex flex-col gap-1.5">
       {label && (
         <label
           htmlFor={selectId}
-          style={{ fontSize: "13px", fontWeight: 500, color: "#334155" }}
+          style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}
         >
           {label}
           {"required" in rest && rest.required ? (
@@ -35,20 +35,20 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       <select
         ref={ref}
         id={selectId}
-        className={`h-9 w-full rounded border bg-white px-3 text-[14px] outline-none transition-all ${className ?? ""}`}
+        className={`h-10 w-full rounded-lg border bg-white px-3 text-[13px] outline-none transition-all ${className ?? ""}`}
         style={{
-          borderColor: error ? "#DC2626" : "#CBD5E1",
+          borderColor: error ? "#DC2626" : "#D8E0EB",
           color: "#0F172A",
           appearance: "auto",
         }}
         onFocus={(e) => {
-          e.currentTarget.style.borderColor = error ? "#DC2626" : "#3B6FD4";
+          e.currentTarget.style.borderColor = error ? "#DC2626" : "#1769FF";
           e.currentTarget.style.boxShadow = error
             ? "0 0 0 3px rgba(220,38,38,0.12)"
-            : "0 0 0 3px rgba(59,111,212,0.12)";
+            : "0 0 0 3px rgba(23,105,255,0.12)";
         }}
         onBlur={(e) => {
-          e.currentTarget.style.borderColor = error ? "#DC2626" : "#CBD5E1";
+          e.currentTarget.style.borderColor = error ? "#DC2626" : "#D8E0EB";
           e.currentTarget.style.boxShadow = "none";
         }}
         {...rest}

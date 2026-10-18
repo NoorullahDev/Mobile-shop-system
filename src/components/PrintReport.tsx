@@ -248,7 +248,7 @@ export const PrintReport = memo(function PrintReport({
                 {activeOnline.length === 0 ? <EmptyRow columns={7}>No active online payment records in this period.</EmptyRow> : activeOnline.map((r) => (
                   <tr key={r.id}>
                     <td>{formatDateTime(r.created_at)}</td>
-                    <td>{r.receipt_no}</td>
+                    <td>{r.receipt_no ?? "General Payment"}</td>
                     <td>{r.customer_name ?? "Walk-in"}</td>
                     <td>{methodLabels[r.payment_method] ?? r.payment_method}</td>
                     <td className="num">{formatMoney(r.amount)}</td>

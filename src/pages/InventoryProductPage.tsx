@@ -29,7 +29,7 @@ import { RestockForm } from "./RestockForm";
 import { ManageProductCategoriesModal } from "./ManageProductCategoriesModal";
 import { useProductCategoryStore } from "../store/productCategories";
 import { useSessionStore } from "../store/session";
-import { formatMoneyCompact } from "../lib/format";
+import { formatMoney, formatMoneyCompact, formatMoneyKpi } from "../lib/format";
 import * as inventoryService from "../services/inventoryService";
 import { can } from "../lib/permissions";
 import type { PhoneImei, ProductCategory, Supplier } from "../types/inventory";
@@ -300,7 +300,8 @@ export function InventoryProductPage<T extends InventoryRow, I>({
         />
         <KpiCard
           title="Inventory Value"
-          value={formatMoneyCompact(inventoryValue)}
+          value={formatMoneyKpi(inventoryValue)}
+          valueTitle={formatMoney(inventoryValue)}
           icon={Coins}
           tone="green"
           sub="at cost price"

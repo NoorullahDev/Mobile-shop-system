@@ -11,7 +11,7 @@ import { Spinner } from "../components/Button";
 import { SupplierForm } from "./SupplierForm";
 import { useSupplierStore } from "../store/suppliers";
 import * as purchaseService from "../services/purchaseService";
-import { formatMoney } from "../lib/format";
+import { formatMoney, formatMoneyKpi } from "../lib/format";
 import type { CreateSupplierInput, Supplier } from "../types/inventory";
 import type { SupplierBalance } from "../types/purchase";
 import { useSessionStore } from "../store/session";
@@ -95,19 +95,22 @@ export function SuppliersPage() {
         />
         <KpiCard
           title="Total Purchases"
-          value={formatMoney(totalPurchases)}
+          value={formatMoneyKpi(totalPurchases)}
+          valueTitle={formatMoney(totalPurchases)}
           icon={ShoppingCart}
           tone="navy"
         />
         <KpiCard
           title="Amount Paid"
-          value={formatMoney(totalPaid)}
+          value={formatMoneyKpi(totalPaid)}
+          valueTitle={formatMoney(totalPaid)}
           icon={Wallet}
           tone="green"
         />
         <KpiCard
           title="Outstanding Dues"
-          value={formatMoney(totalDues)}
+          value={formatMoneyKpi(totalDues)}
+          valueTitle={formatMoney(totalDues)}
           icon={CircleDollarSign}
           tone="amber"
         />

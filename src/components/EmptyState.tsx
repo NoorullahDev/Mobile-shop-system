@@ -18,15 +18,15 @@ export function EmptyState({
     <div
       className="flex flex-col items-center justify-center px-6 py-14 text-center"
       style={{
-        border: "1.5px dashed #CBD5E1",
-        borderRadius: "8px",
-        background: "#F8FAFC",
+        border: "1.5px dashed #D8E0EB",
+        borderRadius: "10px",
+        background: "#F8FAFD",
       }}
     >
       {Icon && (
         <div
           className="mb-4 flex h-12 w-12 items-center justify-center rounded-full"
-          style={{ background: "#F1F5F9", color: "#94A3B8" }}
+          style={{ background: "#EAF2FF", color: "#1769FF" }}
         >
           <Icon className="h-5 w-5" />
         </div>

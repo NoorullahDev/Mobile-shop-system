@@ -38,6 +38,7 @@ interface SidebarProps {
   username: string;
   role: string;
   onNavigate?: () => void;
+  dashboardStyle?: boolean;
 }
 
 const mainNav: NavItem[] = [
@@ -77,7 +78,7 @@ function getInitials(name: string) {
     .slice(0, 2);
 }
 
-export function Sidebar({ username, role, onNavigate }: SidebarProps) {
+export function Sidebar({ username, role, onNavigate, dashboardStyle = false }: SidebarProps) {
   const user = useSessionStore((s) => s.user);
   const logout = useSessionStore((s) => s.logout);
   const navigate = useNavigate();
@@ -117,12 +118,14 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
           <NavLink
             to={item.to}
             onClick={onNavigate}
-            className="sidebar-nav-item nav-pos-item relative flex items-center rounded font-semibold text-white"
+            className={({ isActive }) =>
+              `sidebar-nav-item nav-pos-item relative flex items-center rounded ${isActive ? "font-semibold is-active" : "font-medium"}`
+            }
           >
             <item.icon className="h-5 w-5 shrink-0" />
             <span className="flex-1 truncate">{item.label}</span>
             {item.shortcut && (
-              <span className="rounded px-1.5 text-[10px] font-bold" style={{ background: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.9)" }}>
+              <span className="rounded px-1.5 text-[10px] font-bold" style={{ background: dashboardStyle ? "#E2E8F0" : "rgba(255,255,255,0.2)", color: dashboardStyle ? "#64748B" : "rgba(255,255,255,0.9)" }}>
                 {item.shortcut}
               </span>
             )}
@@ -137,11 +140,11 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
           end={item.end}
           onClick={onNavigate}
           className={({ isActive }) =>
-            `side-link sidebar-nav-item ${isActive ? "font-medium" : ""}`
+            `side-link sidebar-nav-item ${isActive ? "font-medium is-active" : ""}`
           }
           style={({ isActive }) => ({
-            background: isActive ? "#1E3356" : "transparent",
-            color: isActive ? "#FFFFFF" : "#AEBBD1",
+            background: isActive ? (dashboardStyle ? "#EAF2FF" : "#1E3356") : "transparent",
+            color: isActive ? (dashboardStyle ? "#1769FF" : "#FFFFFF") : (dashboardStyle ? "#334155" : "#AEBBD1"),
           })}
         >
           {({ isActive }) => (
@@ -162,9 +165,15 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
   };
 
   return (
-    <aside className="app-sidebar flex min-h-0 shrink-0 flex-col" style={{ background: "#0F1B32", borderRight: "1px solid #1E2E4F" }}>
+    <aside
+      className={`app-sidebar flex min-h-0 shrink-0 flex-col ${dashboardStyle ? "dashboard-sidebar" : ""}`}
+      style={{
+        background: dashboardStyle ? "#FFFFFF" : "#0F1B32",
+        borderRight: `1px solid ${dashboardStyle ? "#E3E9F2" : "#1E2E4F"}`,
+      }}
+    >
       {/* Brand */}
-      <div className="flex h-16 shrink-0 items-center gap-3 px-5" style={{ borderBottom: "1px solid #1E2E4F" }}>
+      <div className="flex h-16 shrink-0 items-center gap-2.5 px-3.5" style={{ borderBottom: `1px solid ${dashboardStyle ? "#E3E9F2" : "#1E2E4F"}` }}>
         {shopLogo ? (
           <img
             src={shopLogo}
@@ -179,7 +188,7 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
           />
         )}
         <div className="min-w-0 leading-tight">
-          <div className="truncate text-[15px] font-bold tracking-tight text-white">
+          <div className={`truncate text-[13px] font-bold tracking-tight ${dashboardStyle ? "text-[#0F172A]" : "text-white"}`}>
             {shopName || "Mobile Shop Pro"}
           </div>
         </div>
@@ -191,11 +200,11 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
       </nav>
 
       {/* Settings (fixed at the bottom) + user profile */}
-      <div className="shrink-0" style={{ borderTop: "1px solid #1E2E4F" }}>
+      <div className="shrink-0" style={{ borderTop: `1px solid ${dashboardStyle ? "#E3E9F2" : "#1E2E4F"}` }}>
         <div className="px-3 pb-2 pt-3">
           <ul className="space-y-0.5">{visibleSettingsNav.map(renderItem)}</ul>
         </div>
-        <div className="px-5 py-3" style={{ borderTop: "1px solid #1E2E4F" }}>
+        <div className="px-5 py-3" style={{ borderTop: `1px solid ${dashboardStyle ? "#E3E9F2" : "#1E2E4F"}` }}>
           <div className="flex items-center gap-3">
             <div
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
@@ -204,16 +213,16 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
               {getInitials(displayName)}
             </div>
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[13px] font-semibold text-white">{displayName}</div>
-              <div className="mt-0.5 truncate text-[10px] capitalize" style={{ color: "#7E8FAD" }}>
+              <div className={`truncate text-[13px] font-semibold ${dashboardStyle ? "text-[#0F172A]" : "text-white"}`}>{displayName}</div>
+              <div className="mt-0.5 truncate text-[10px] capitalize" style={{ color: dashboardStyle ? "#64748B" : "#7E8FAD" }}>
                 {displayRole}
               </div>
             </div>
-            <div className="ml-auto flex shrink-0 items-center gap-3" style={{ color: "#7E8FAD" }}>
+            <div className="ml-auto flex shrink-0 items-center gap-3" style={{ color: dashboardStyle ? "#64748B" : "#7E8FAD" }}>
               <button
                 type="button"
                 onClick={() => { navigate("/account"); onNavigate?.(); }}
-                className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-white/10 hover:text-white"
+                className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${dashboardStyle ? "hover:bg-[#EAF2FF] hover:text-[#1769FF]" : "hover:bg-white/10 hover:text-white"}`}
                 title="My account / Change password"
                 aria-label="My account"
               >
@@ -223,7 +232,7 @@ export function Sidebar({ username, role, onNavigate }: SidebarProps) {
                 type="button"
                 onClick={handleLogout}
                 disabled={loggingOut}
-                className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-white/10 hover:text-white disabled:cursor-wait disabled:opacity-50"
+                className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-wait disabled:opacity-50 ${dashboardStyle ? "hover:bg-[#FFF1F1] hover:text-[#E5484D]" : "hover:bg-white/10 hover:text-white"}`}
                 title={loggingOut ? "Signing out..." : "Logout"}
                 aria-label={loggingOut ? "Signing out" : "Logout"}
               >

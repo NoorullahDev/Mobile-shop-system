@@ -24,7 +24,7 @@ import { Select } from "../components/Select";
 import { useSupplierStore } from "../store/suppliers";
 import { useSessionStore } from "../store/session";
 import * as purchaseService from "../services/purchaseService";
-import { formatMoney, formatDate, methodLabels } from "../lib/format";
+import { formatMoney, formatMoneyKpi, formatDate, methodLabels } from "../lib/format";
 import type { SupplierBalance, SupplierPayment } from "../types/purchase";
 import { SUPPLIER_PAYMENT_STATUSES, PURCHASE_PAYMENT_METHODS } from "../types/purchase";
 import type { Supplier } from "../types/inventory";
@@ -194,7 +194,8 @@ export function SupplierDuesPage() {
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Total Payable"
-          value={formatMoney(totalOutstanding)}
+          value={formatMoneyKpi(totalOutstanding)}
+          valueTitle={formatMoney(totalOutstanding)}
           icon={CircleDollarSign}
           tone="amber"
           sub="outstanding to suppliers"

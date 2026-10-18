@@ -24,7 +24,7 @@ import { useMemberStore } from "../store/members";
 import { useSaleStore } from "../store/sales";
 import * as paymentService from "../services/paymentService";
 import { useSessionStore } from "../store/session";
-import { formatMoney, formatMoneyCompact, methodLabels } from "../lib/format";
+import { formatMoney, formatMoneyCompact, formatMoneyKpi, methodLabels } from "../lib/format";
 import { openDuesReminder, isPhoneValid } from "../lib/whatsapp";
 import { useSettingsStore } from "../store/settings";
 import { PAYMENT_METHODS } from "../types/payment";
@@ -180,7 +180,8 @@ export function PaymentsPage() {
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard
           title="Total Outstanding"
-          value={formatMoney(totalOutstanding)}
+          value={formatMoneyKpi(totalOutstanding)}
+          valueTitle={formatMoney(totalOutstanding)}
           icon={CircleDollarSign}
           tone="amber"
           sub="across all customers"

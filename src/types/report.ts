@@ -33,8 +33,13 @@ export interface PeriodSummary {
   profit: number;
   sales_count: number;
   received: number;
+  online_received: number;
+  purchase_costs: number;
+  stock_value: number;
+  supplier_payables: number;
   discount: number;
   outstanding: number;
+  items_sold: number;
 }
 
 export interface SalePoint {
@@ -58,8 +63,8 @@ export interface PaymentBreakdown {
 
 export interface OnlinePaymentRecord {
   id: number;
-  sale_id: number;
-  receipt_no: string;
+  sale_id: number | null;
+  receipt_no: string | null;
   customer_name: string | null;
   payment_method: string;
   amount: number;
